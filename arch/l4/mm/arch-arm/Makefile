@@ -1,0 +1,18 @@
+#
+# arch/l4/mm/arch-arm/Makefile
+#
+
+obj-y		:= init.o flush.o ioremap.o proc-l4.o dma-mapping.o \
+                   fault.o fault-armv.o extable.o mmap.o \
+		   pgd.o mmu.o iomap.o vmregion.o
+
+obj-$(CONFIG_L4_ARM_BUILD_FOR_V6) += context.o
+
+KBUILD_CPPFLAGS += -I$(srctree)/arch/arm/mm
+
+dma-mapping-y	:= ../../../arm/mm/dma-mapping.o
+extable-y	:= ../../../arm/mm/extable.o
+fault-armv-y	:= ../../../arm/mm/fault-armv.o
+mmap-y		:= ../../../arm/mm/mmap.o
+iomap-y		:= ../../../arm/mm/iomap.o
+vmregion-y	:= ../../../arm/mm/vmregion.o
