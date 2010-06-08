@@ -1,0 +1,12 @@
+
+obj-y				+= kernel/			\
+				   kernel/arch-$(BASEARCH)/	\
+				   mm/arch-$(BASEARCH)/
+obj-$(CONFIG_L4_ARCH_X86)	+= ../x86/crypto/
+obj-$(CONFIG_L4_ARCH_X86)	+= ../x86/vdso/
+
+ifeq ($(BASEARCH),arm)
+obj-$(CONFIG_FPE_NWFPE)		+= ../arm/nwfpe/
+obj-$(CONFIG_VFP)		+= vfp/
+endif
+
