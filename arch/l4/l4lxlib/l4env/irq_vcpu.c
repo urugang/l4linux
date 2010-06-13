@@ -5,6 +5,7 @@
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
 #include <linux/irq.h>
+#include <linux/sysdev.h>
 
 #include <l4/sys/irq.h>
 #include <l4/sys/icu.h>
@@ -68,25 +69,25 @@ int l4lx_irq_set_type(unsigned int irq, unsigned int type)
 		case IRQF_TRIGGER_RISING:
 			p->trigger = L4_IRQ_F_POS_EDGE;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "irq");
+			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
 #endif
 			break;
 		case IRQF_TRIGGER_FALLING:
 			p->trigger = L4_IRQ_F_NEG_EDGE;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "irq");
+			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
 #endif
 			break;
 		case IRQF_TRIGGER_HIGH:
 			p->trigger = L4_IRQ_F_LEVEL_HIGH;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "irq");
+			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
 #endif
 			break;
 		case IRQF_TRIGGER_LOW:
 			p->trigger = L4_IRQ_F_LEVEL_LOW;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "irq");
+			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
 #endif
 			break;
 		default:
@@ -156,19 +157,16 @@ void L4_CV timer_irq_thread(void *data)
 	}
 } /* timer_irq_thread */
 
-static unsigned int l4lx_irq_dev_startup_timer(unsigned int irq)
+static unsigned int l4lx_irq_dev_startup_timer(struct l4x_irq_desc_private *p)
 {
 	char name[15];
 	int cpu = smp_processor_id();
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
 	l4_msgtag_t res;
 	l4_cap_idx_t timer_thread;
 
-	BUG_ON(TIMER_IRQ != irq);
+	printk("%s(%d)\n", __func__, TIMER_IRQ);
 
-	printk("%s(%d)\n", __func__, irq);
-
-	sprintf(name, "timer.i%d", irq);
+	sprintf(name, "timer.i%d", TIMER_IRQ);
 
 	p->irq_cap = l4x_cap_alloc();
 	if (l4_is_invalid_cap(p->irq_cap))
@@ -186,24 +184,24 @@ static unsigned int l4lx_irq_dev_startup_timer(unsigned int irq)
 #endif
 
 	timer_thread = l4lx_thread_create
-			(timer_irq_thread,	/* thread function */
-	                 cpu,                   /* cpu */
-			 NULL,			/* stack */
-			 &cpu, sizeof(cpu),	/* data */
-			 l4lx_irq_prio_get(irq),/* prio */
-			 0,                     /* flags */
-			 name);			/* name */
+			(timer_irq_thread,	      /* thread function */
+	                 cpu,                         /* cpu */
+			 NULL,			      /* stack */
+			 &cpu, sizeof(cpu),	      /* data */
+			 l4lx_irq_prio_get(TIMER_IRQ),/* prio */
+			 0,                           /* flags */
+			 name);			      /* name */
 
 	if (l4_is_invalid_cap(timer_thread))
 		enter_kdebug("Error creating timer thread!");
 
-	l4lx_irq_dev_enable(irq);
+	l4lx_irq_dev_enable(TIMER_IRQ);
 	return 1;
 }
 
 static void l4lx_irq_dev_shutdown_timer(unsigned int irq)
 {
-	// will we ever shut down the timer?
+	// No one is calling this, right? Why?
 }
 
 unsigned int l4lx_irq_dev_startup(unsigned int irq)
@@ -211,7 +209,7 @@ unsigned int l4lx_irq_dev_startup(unsigned int irq)
 	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
 
 	if (irq == TIMER_IRQ)
-		return l4lx_irq_dev_startup_timer(TIMER_IRQ);
+		return l4lx_irq_dev_startup_timer(p);
 
 	/* First test whether a capability has been registered with
 	 * this IRQ number */

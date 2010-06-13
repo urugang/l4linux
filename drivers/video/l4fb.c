@@ -22,6 +22,7 @@
 #include <linux/platform_device.h>
 #include <linux/screen_info.h>
 #include <linux/interrupt.h>
+#include <linux/sysdev.h>
 
 #include <asm/generic/l4lib.h>
 #include <l4/sys/err.h>
@@ -36,7 +37,6 @@
 #include <l4/re/c/event_buffer.h>
 #include <l4/log/log.h>
 
-#include <asm/l4lxapi/thread.h>
 #include <asm/l4lxapi/misc.h>
 
 #include <asm/generic/setup.h>
@@ -798,9 +798,33 @@ static void l4fb_shutdown(void)
 	L4XV_U(f);
 }
 
-static void l4fb_shutdown_atexit(void)
+static int l4fb_shutdown_sysdev(struct sys_device *dev)
 {
-	l4fb_shutdown();
+	//l4fb_shutdown();
+	// We cannot call shutdown here since it seems we cannot remove the
+	// timer as this subsystem already seems to be done (at least it's
+	// spinning in kernel/timer.c), and we also cannot remove the other
+	// parts since the timer function is still being called...
+	// Maybe we should try again with some later Linux version
+	return 0;
+}
+
+static struct sysdev_class l4fb_sysdev_class = {
+	.name = "l4fb",
+	.shutdown = l4fb_shutdown_sysdev,
+};
+
+static struct sys_device device_l4fb = {
+	.id     = 0,
+	.cls    = &l4fb_sysdev_class,
+};
+
+static int __init l4fb_sysfs_init(void)
+{
+	int e = sysdev_class_register(&l4fb_sysdev_class);
+	if (!e)
+		e = sysdev_register(&device_l4fb);
+	return e;
 }
 
 static int __init l4fb_probe(struct platform_device *dev)
@@ -888,7 +912,7 @@ static int __init l4fb_probe(struct platform_device *dev)
 	}
 	dev_set_drvdata(&dev->dev, info);
 
-	atexit(l4fb_shutdown_atexit);
+	l4fb_sysfs_init();
 
 	printk(KERN_INFO "l4fb%d: %s L4 frame buffer device (refresh: %ujiffies)\n",
 	       info->node, info->fix.id, l4fb_refresh_sleep);
@@ -912,6 +936,9 @@ static int l4fb_remove(struct platform_device *device)
 		unregister_framebuffer(info);
 		fb_dealloc_cmap(&info->cmap);
 		framebuffer_release(info);
+
+		sysdev_register(&device_l4fb);
+		sysdev_class_unregister(&l4fb_sysdev_class);
 
 		l4fb_shutdown();
 	}
