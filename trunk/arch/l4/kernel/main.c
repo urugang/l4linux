@@ -77,7 +77,9 @@
 #ifdef ARCH_x86
 #include <asm/io.h>
 #include <asm/i8259.h>
+#ifdef CONFIG_L4_EXTERNAL_RTC
 #include <l4/rtc/rtc.h>
+#endif
 #endif
 
 #ifdef CONFIG_L4_USE_L4VMM
