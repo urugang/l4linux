@@ -29,6 +29,7 @@ choice
 		bool "i386/x86 architecture"
 
 	config L4_ARCH_ARM
+		select GENERIC_ALLOCATOR
 		bool "ARM architecture"
 endchoice
 

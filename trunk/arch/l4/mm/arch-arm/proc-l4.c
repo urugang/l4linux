@@ -256,6 +256,7 @@ static void __data_abort(unsigned long pc)
 void arm926_dma_flush_range(const void *start, const void *stop)
 {
 	printk("%s(%p, %p) called.\n", __func__, start, stop);
+	l4_cache_flush_data((unsigned long)start, (unsigned long)stop);
 }
 
 void arm926_dma_unmap_area(const void *start, size_t sz, int direction)
@@ -314,6 +315,7 @@ static struct cpu_cache_fns l4_cpu_cache_fns = {
 	.flush_kern_dcache_area = arm926_flush_kern_dcache_area,
 	.dma_map_area           = arm926_dma_map_area,
 	.dma_unmap_area         = arm926_dma_unmap_area,
+	.dma_flush_range	= arm926_dma_flush_range,
 };
 
 static struct proc_info_list l4_proc_info __attribute__((__section__(".proc.info.init"))) = {

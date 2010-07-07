@@ -175,8 +175,10 @@ int main(int argc, char **argv)
 		register unsigned long _argv  asm("r1") = (unsigned long)argv;
 		register unsigned long _exchg asm("r2") = (unsigned long)&exchg;
 		register unsigned long _entry asm("r3") = (unsigned long)entry;
-		asm volatile("mov pc, r3   \n"
-			     :
+		asm volatile("mov lr, pc   \n"
+		             "mov pc, r3   \n"
+			     "mov %0, r0   \n"
+			     : "=r" (i)
 			     : "r" (_argv),
 			       "r" (_argc),
 			       "r" (_exchg),

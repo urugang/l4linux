@@ -3,6 +3,7 @@
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/tick.h>
+#include <linux/slab.h>
 
 #include <asm/processor.h>
 #include <asm/mmu_context.h>
@@ -333,12 +334,12 @@ static void l4x_dispatch_suspend(struct task_struct *p,
 static inline void l4x_print_regs(struct thread_struct *t, struct pt_regs *r)
 {
 #define R(nr) r->uregs[nr]
-	printk("0: %08lx %08lx %08lx %08lx  4: %08lx %08lx %08lx %08lx\n",
-	       R(0), R(1), R(2), R(3), R(4), R(5), R(6), R(7));
-	printk("8: %08lx %08lx %08lx %08lx 12: %08lx [01;34m%08lx[0m "
-	       "%08lx [01;34m%08lx[0m\n",
-	       R(8), R(9), R(10), R(11), R(12), R(13), R(14), R(15));
-	printk("CPSR: %08lx Err: %08lx\n", r->ARM_cpsr, t->error_code);
+	LOG_printf("0: %08lx %08lx %08lx %08lx  4: %08lx %08lx %08lx %08lx\n",
+	           R(0), R(1), R(2), R(3), R(4), R(5), R(6), R(7));
+	LOG_printf("8: %08lx %08lx %08lx %08lx 12: %08lx [01;34m%08lx[0m "
+	           "%08lx [01;34m%08lx[0m\n",
+	           R(8), R(9), R(10), R(11), R(12), R(13), R(14), R(15));
+	LOG_printf("CPSR: %08lx Err: %08lx\n", r->ARM_cpsr, t->error_code);
 #undef R
 }
 
@@ -357,125 +358,98 @@ static inline void call_system_call_args(syscall_t *sctbl,
 	syscall_t syscall_fn;
 
 #ifdef DEBUG_SYSCALL_PRINTFS
-#if 1
-	printk("Syscall call: %ld for %d(%s, pc=%p, lr=%p, sp=%08lx, "
-	       PRINTF_L4TASK_FORM ", cpu=%d) (%08lx %08lx %08lx %08lx %08lx %08lx)\n",
-	       syscall, current->pid, current->comm, (void *)regsp->ARM_pc,
-	       (void *)regsp->ARM_lr, regsp->ARM_sp,
-	       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
-               smp_processor_id(),
-	       arg1, arg2, arg3, arg4, arg5, arg6);
-#endif
+	if (0)
+		printk("Syscall call: %ld for %d(%s, pc=%p, lr=%p, sp=%08lx, "
+		       "cpu=%d) (%08lx %08lx %08lx %08lx %08lx %08lx)\n",
+		       syscall, current->pid, current->comm,
+		       (void *)regsp->ARM_pc,
+		       (void *)regsp->ARM_lr, regsp->ARM_sp,
+		       smp_processor_id(),
+		       arg1, arg2, arg3, arg4, arg5, arg6);
+
 	if (0 && syscall == 11) {
 		char *filename = getname((char *)arg1);
-		printk("execve: pid: %d(%s) %d, " PRINTF_L4TASK_FORM ": %s (%08lx)\n",
+		printk("execve: pid: %d(%s) %d: %s (%08lx)\n",
 		       current->pid, current->comm, current_uid(),
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       IS_ERR(filename) ? "INVALID" : filename, arg1);
 		putname(filename);
 	}
 	if (0 && syscall == 1) {
-		printk("exit: pid: %d(%s), " PRINTF_L4TASK_FORM "\n",
-		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id));
+		printk("exit: pid: %d(%s)\n", current->pid, current->comm);
 	}
 	if (0 && syscall == 2) {
-		printk("fork: pid: %d(%s), " PRINTF_L4TASK_FORM "\n",
-		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id));
+		printk("fork: pid: %d(%s)\n",
+		       current->pid, current->comm);
 	}
 	if (0 && syscall == 3) {
-		printk("read: pid: %d(%s), " PRINTF_L4TASK_FORM ": fd = %ld len = %ld\n",
-		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
-		       arg1, arg3);
+		printk("read: pid: %d(%s): fd = %ld len = %ld\n",
+		       current->pid, current->comm, arg1, arg3);
 	}
 	if (0 && syscall == 4) {
-		printk("write: pid: %d(%s), " PRINTF_L4TASK_FORM ": fd = %ld len = %ld\n",
-		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
-		       arg1, arg3);
+		printk("write: pid: %d(%s): fd = %ld len = %ld\n",
+		       current->pid, current->comm, arg1, arg3);
 	}
 	if (0 && syscall == 5) {
 		char *filename = getname((char *)arg1);
-		printk("open: pid: %d(%s), " PRINTF_L4TASK_FORM ": %s (%lx)\n",
+		printk("open: pid: %d(%s): %s (%lx)\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       IS_ERR(filename) ? "INVALID" : filename, arg1);
 		putname(filename);
 	}
 	if (0 && syscall == 14) {
 		char *f1 = getname((char *)arg1);
-		printk("mknod: pid: %d(%s), " PRINTF_L4TASK_FORM ": %s dev=%lx\n",
+		printk("mknod: pid: %d(%s): %s dev=%lx\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       IS_ERR(f1) ? "INVALID" : f1, arg3);
 		putname(f1);
 	}
 	if (0 && syscall == 39) {
 		char *filename = getname((char *)arg1);
-		printk("mkdir: pid: %d(%s), " PRINTF_L4TASK_FORM ": %s (%lx)\n",
+		printk("mkdir: pid: %d(%s): %s (%lx)\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       IS_ERR(filename) ? "INVALID" : filename, arg1);
 		putname(filename);
 	}
 	if (0 && syscall == 21) {
 		char *f1 = getname((char *)arg1);
 		char *f2 = getname((char *)arg2);
-		printk("mount: pid: %d(%s), " PRINTF_L4TASK_FORM ": %s -> %s\n",
+		printk("mount: pid: %d(%s): %s -> %s\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       IS_ERR(f1) ? "INVALID" : f1,
 		       IS_ERR(f2) ? "INVALID" : f2);
 		putname(f1);
 		putname(f2);
 	}
-	if (0 && syscall == 45) {
-		printk("brk: pid: %d(%s), " PRINTF_L4TASK_FORM ": %lx\n",
-		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
-		       arg1);
-	}
-	if (0 && syscall == 119) {
-		printk("sigreturn: pid: %d(%s), " PRINTF_L4TASK_FORM "\n",
-		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id));
-	}
-	if (0 && syscall == 120) {
-		printk("clone: pid: %d(%s), " PRINTF_L4TASK_FORM "\n",
-		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id));
-	}
-	if (0 && syscall == 190) {
-		printk("vfork: pid: %d(%s), " PRINTF_L4TASK_FORM "\n",
-		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id));
-	}
-	if (0 && syscall == 192) {
-		printk("mmap2 size: pid: %d(%s), " PRINTF_L4TASK_FORM ": %lx\n",
-		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
-		       arg2);
-	}
+	if (0 && syscall == 45)
+		printk("brk: pid: %d(%s): %lx\n", current->pid, current->comm, arg1);
+	if (0 && syscall == 54)
+		printk("ioctl: pid: %d(%s): %lx\n",
+		       current->pid, current->comm, arg1);
+
+	if (0 && syscall == 119)
+		printk("sigreturn: pid: %d(%s)\n", current->pid, current->comm);
+	if (0 && syscall == 120)
+		printk("clone: pid: %d(%s)\n", current->pid, current->comm);
+	if (0 && syscall == 190)
+		printk("vfork: pid: %d(%s)\n", current->pid, current->comm);
+	if (0 && syscall == 192)
+		printk("mmap2 size: pid: %d(%s): %lx\n",
+		       current->pid, current->comm, arg2);
 	if (0 && syscall == 195) {
 		char *path = getname((char *)arg1);
-		printk("stat64: pid: %d(%s), " PRINTF_L4TASK_FORM ": %s (%lx)\n",
+		printk("stat64: pid: %d(%s): %s (%lx)\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       IS_ERR(path) ? "INVALID" : path, arg1);
 		putname(path);
 	}
 	if (0 && syscall == 221) {
-		printk("fcntl64: pid: %d(%s), " PRINTF_L4TASK_FORM ": (%lx, %lx, %lx)\n",
+		printk("fcntl64: pid: %d(%s): (%lx, %lx, %lx)\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       arg1, arg2, arg3);
 	}
 	if (0 && syscall == 266)
-		printk("statfs: pid: %d(%s), " PRINTF_L4TASK_FORM ": (%lx, %lx, %lx) sp=%lx\n",
+		printk("statfs: pid: %d(%s): (%lx, %lx, %lx) sp=%lx\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       arg1, arg2, arg3, regsp->ARM_sp);
 #endif
 
@@ -500,21 +474,18 @@ static inline void call_system_call_args(syscall_t *sctbl,
 	/* ============================================================ */
 #ifdef DEBUG_SYSCALL_PRINTFS
 	if (0 && syscall == 192) {
-		printk("mmap2 result: pid: %d(%s), " PRINTF_L4TASK_FORM ": %lx\n",
+		printk("mmap2 result: pid: %d(%s): %lx\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       regsp->ARM_r0);
 	}
 	if (0 && syscall == 195) {
-		printk("stat64 result: pid: %d(%s), " PRINTF_L4TASK_FORM ": %lx\n",
+		printk("stat64 result: pid: %d(%s): %lx\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       regsp->ARM_r0);
 	}
 	if (0 && syscall == 65) {
-		printk("getpgrp result: pid: %d(%s), " PRINTF_L4TASK_FORM ": %lx\n",
+		printk("getpgrp result: pid: %d(%s): %lx\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       regsp->ARM_r0);
 	}
 	if (1)
@@ -916,7 +887,7 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
 	struct pt_regs *regs = L4X_THREAD_REGSP(t);
 
 	if (0 && (regs->ARM_pc >= TASK_SIZE || l4x_l4pfa(t) >= TASK_SIZE))
-		printk("PC/PF>3G: PC=%08lx PF=%08lx LR=%08lx\n",
+		printk("PC/PF>TS: PC=%08lx PF=%08lx LR=%08lx\n",
 		       regs->ARM_pc, l4x_l4pfa(t), regs->ARM_lr);
 
 	l4x_kuser_cmpxchg_check_and_fixup(regs);
@@ -969,22 +940,32 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
 			goto trap_and_emulate;
 
 		if ((val & 0xff000000) == 0xeb000000) {
-			unsigned long tlspc, offset;
+			/* Code:
+			   000080f0 <__aeabi_read_tp>:
+			   __aeabi_read_tp():
+			    80f0:       e3e00a0f        mvn     r0, #61440      ; 0xf000
+			    80f4:       e240f01f        sub     pc, r0, #31
+			    80f8:       e1a00000        nop                     ; (mov r0, r0)
+			    80fc:       e1a00000        nop                     ; (mov r0, r0)
+
+			   ....
+
+			   xxxxx:       ebyyyyyy        bl      80f0 <__aeabi_read_tp>
+			 */
+			unsigned long tlsfunc, offset;
 
 			val &= 0x00ffffff;
-			if (val & (1 << 24))
-				val |= 0x3f000000;
+			if (val & (1 << 23))
+				val = regs->ARM_lr + 4 - (0x1000000 - val) * 4;
+			else
+				val = regs->ARM_lr + 4 + val * 4;
 
-			val <<= 2;
-			val += regs->ARM_lr + 4;
-
-			tlspc = val;
+			tlsfunc = val;
 
 			val = parse_ptabs_read(val, &offset);
 			if (val == -EFAULT)
 				goto trap_and_emulate;
 			val += offset;
-
 
 			if (*(unsigned long *)val != 0xe3e00a0f)
 				goto trap_and_emulate;
@@ -996,11 +977,11 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
 				goto trap_and_emulate;
 
 			*(unsigned long *)(val +  0) = 0xe3a00103; // mov r0, #0xc0000000
-			*(unsigned long *)(val +  4) = 0xe240f020; // pc, r0, #32
+			*(unsigned long *)(val +  4) = 0xe240f020; // sub pc, r0, #32
 
 			l4_cache_coherent(val, val + 12);
 
-			regs->ARM_pc = tlspc;
+			regs->ARM_pc = tlsfunc;
 			return 1; // handled
 		}
 
@@ -1028,7 +1009,7 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
 			val += offset;
 
 			*(unsigned long *)(val + 0) = 0xe3a00103; // mov r0, #0xc0000000
-			*(unsigned long *)(val + 8) = 0xe240f020; // pc, r0, #32;
+			*(unsigned long *)(val + 8) = 0xe240f020; // sub pc, r0, #32;
 
 			l4_cache_coherent(val, val + 12);
 

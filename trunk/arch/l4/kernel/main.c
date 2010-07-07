@@ -332,6 +332,23 @@ static void l4x_configuration_sanity_check(const char *cmdline)
 }
 #endif
 
+static int l4x_check_setup(const char *cmdline)
+{
+#if defined(ARCH_arm) && defined(CONFIG_HAS_TLS_REG)
+	if (!l4util_kip_kernel_has_feature(l4lx_kinfo, "armv6plus")) {
+		LOG_printf("Running Fiasco is not compiled for v6 "
+		           "or better architecture.\nRequired when "
+		           "L4Linux is compiled for v6 (e.g.  for TLS).\n");
+		/* Note, running on a armv5 fiasco is possible when using
+		 * TLS trap-emulation (see dispatch.c).
+		 */
+		return 1;
+	}
+#endif
+	l4x_configuration_sanity_check(cmdline);
+	return 0;
+}
+
 static void l4x_server_loop(void);
 
 void l4x_v2p_init(void)
@@ -400,11 +417,13 @@ void *l4x_phys_to_virt(unsigned long address)
 
 	l4x_virt_to_phys_show();
 	/* Whitelist: */
+#ifdef ARCH_x86
 	if (address < 0x1000 ||
 	    address == 0xb8000 ||
 	    address == 0xa0000 ||
 	    address == 0xc0000)
 		return __va(address);
+#endif
 
 	/* Debugging check: don't miss a translation, can give nasty
 	 *                  DMA problems */
@@ -774,13 +793,13 @@ l4x_linux_main_exit(void)
 
 void l4x_printf(const char *fmt, ...)
 {
-  va_list list;
-  L4XV_V(f);
-  va_start(list, fmt);
-  L4XV_L(f);
-  LOG_vprintf(fmt, list);
-  L4XV_U(f);
-  va_end(list);
+	va_list list;
+	L4XV_V(f);
+	va_start(list, fmt);
+	L4XV_L(f);
+	LOG_vprintf(fmt, list);
+	L4XV_U(f);
+	va_end(list);
 }
 
 /* ---------------------------------------------------------------- */
@@ -2238,7 +2257,8 @@ int __init_refok L4_CV main(int argc, char **argv)
 	if ((p = strstr(boot_command_line, "showghost=")))
 		l4x_debug_show_ghost_regions = simple_strtoul(p+10, NULL, 0);
 
-	l4x_configuration_sanity_check(boot_command_line);
+	if (l4x_check_setup(boot_command_line))
+		return 1;
 
 	if (l4x_cpu_virt_phys_map_init(boot_command_line))
 		return 1;
