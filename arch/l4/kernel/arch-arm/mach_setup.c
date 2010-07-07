@@ -9,6 +9,7 @@
 
 #include <asm/generic/io.h>
 #include <asm/generic/devs.h>
+#include <asm/l4x/dma.h>
 
 #include <linux/list.h>
 
@@ -76,38 +77,38 @@ static void register_platform_data_default(void)
 
 
 
-unsigned long l4x_arm_dma_mem_phys_start, l4x_arm_dma_mem_size;
-l4_addr_t l4x_arm_dma_mem_virt_start;
-
-
-static void __init dmamem_voodoo(l4io_device_handle_t devhandle,
-                                 l4io_resource_handle_t reshandle)
+static void __init map_dma_mem(l4io_device_handle_t devhandle,
+                               l4io_resource_handle_t reshandle)
 {
 	l4io_resource_t res;
+	unsigned long v, s;
+	L4XV_V(f);
+
+	L4XV_L(f);
 	if (l4io_lookup_resource(devhandle, L4IO_RESOURCE_MEM,
 	                         &reshandle, &res)) {
+		L4XV_U(f);
 		printk(KERN_ERR "No DMA memory?\n");
 		return;
 	}
 
-	l4x_arm_dma_mem_phys_start = res.start;
-	l4x_arm_dma_mem_size       = res.end - res.start + 1;
-	printk("DMA mem phys at %08lx - %08lx\n", res.start, res.end);
-
-
 	if (l4io_request_iomem(res.start, res.end - res.start,
-	                       L4IO_MEM_NONCACHED ,
-	                       &l4x_arm_dma_mem_virt_start)) {
+	                       L4IO_MEM_NONCACHED,
+	                       &v)) {
 		printk(KERN_ERR "Could not get DMA MEM\n");
-		l4x_arm_dma_mem_phys_start = 0;
-		l4x_arm_dma_mem_virt_start = 0;
+		L4XV_U(f);
 		return;
 	}
-	printk("DMA mem virt at %08lx - %08lx\n",
-	       l4x_arm_dma_mem_virt_start,
-	       l4x_arm_dma_mem_virt_start + l4x_arm_dma_mem_size - 1);
-}
+	L4XV_U(f);
 
+	s = res.end - res.start + 1;
+
+	printk("DMA mem phys at %08lx - %08lx\n", res.start, res.end);
+	printk("DMA mem virt at %08lx - %08lx\n", v, v + s - 1);
+
+	if (l4x_dma_mem_add(v, res.start, s))
+		printk("Adding DMA memory to DMA allocator failed!\n");
+}
 
 static void __init add_platform_device(l4io_device_handle_t devhandle,
                                        l4io_resource_handle_t reshandle,
@@ -220,17 +221,16 @@ void __init l4x_arm_devices_init(void)
 		if (dev.num_resources == 0)
 			continue;
 
+		printk("Device: %s\n", dev.name);
+
 		if (!strcmp(dev.name, "aaci")) {
-			printk("AACI test\n");
-
+			printk("Adding AACI as AMBA device\n");
 			amba_device_register(&aacidev, &iomem_resource);
-
 			continue;
 		}
 
-		if (!strcmp(dev.name, "DMAMEM")) {
-			printk("FOUND DMAMEM\n");
-			dmamem_voodoo(dh, reshandle);
+		if (!strcmp(dev.name, "dmamem")) {
+			map_dma_mem(dh, reshandle);
 			continue;
 		}
 

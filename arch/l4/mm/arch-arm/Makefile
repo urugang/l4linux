@@ -10,7 +10,6 @@ obj-$(CONFIG_L4_ARM_BUILD_FOR_V6) += context.o
 
 KBUILD_CPPFLAGS += -I$(srctree)/arch/arm/mm
 
-dma-mapping-y	:= ../../../arm/mm/dma-mapping.o
 extable-y	:= ../../../arm/mm/extable.o
 fault-armv-y	:= ../../../arm/mm/fault-armv.o
 mmap-y		:= ../../../arm/mm/mmap.o

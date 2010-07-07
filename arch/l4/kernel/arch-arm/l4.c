@@ -194,7 +194,7 @@ struct sys_timer l4x_timer = {
 MACHINE_START(L4, "L4")
 	.phys_io	= 0,
 	.io_pg_offst	= 0,
-	.boot_params	= 0x100,
+	.boot_params	= 0,
 	.fixup		= fixup_l4,
 	.map_io		= map_io_l4,
 	.init_irq	= init_irq_l4,
