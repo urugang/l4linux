@@ -103,7 +103,7 @@ SECTIONS
 		HEAD_TEXT
 #ifdef CONFIG_X86_32
 		. = ALIGN(PAGE_SIZE);
-		*(.text.page_aligned)
+		*(.text..page_aligned)
 #endif
 		. = ALIGN(8);
 		_stext = .;
@@ -316,7 +316,7 @@ SECTIONS
 	. = ALIGN(PAGE_SIZE);
 	.bss : AT(ADDR(.bss) - LOAD_OFFSET) {
 		__bss_start = .;
-		*(.bss.page_aligned)
+		*(.bss..page_aligned)
 		*(.bss)
 		. = ALIGN(4);
 		__bss_stop = .;

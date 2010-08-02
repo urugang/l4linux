@@ -412,4 +412,3 @@ static int __init i8259A_init_sysfs(void)
 }
 
 device_initcall(i8259A_init_sysfs);
-

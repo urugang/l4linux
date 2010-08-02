@@ -6,6 +6,7 @@
 obj-y	:= fault.o extable.o init.o init_32.o ioremap.o pageattr.o pgtable_32.o pgtable.o mmap.o \
            pat.o setup_nx.o
 
+obj-$(CONFIG_X86_PAT)		+= pat_rbtree.o
 obj-$(CONFIG_SMP)		+= tlb.o
 obj-$(CONFIG_HUGETLB_PAGE)	+= hugetlbpage.o
 

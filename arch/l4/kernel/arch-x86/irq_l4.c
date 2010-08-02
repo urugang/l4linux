@@ -73,6 +73,13 @@ static void l4x_init_softirq_stack(void)
 	softirq_ctx->tinfo.addr_limit		= MAKE_MM_SEG(0);
 }
 
+#ifdef CONFIG_HOTPLUG_CPU
+void irq_force_complete_move(int irq)
+{
+	// tbd?
+}
+#endif
+
 void __init l4x_init_IRQ(void)
 {
 	int i;

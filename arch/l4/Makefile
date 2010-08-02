@@ -152,8 +152,9 @@ sp-$(CONFIG_X86_64) := rsp
 cfi := $(call as-instr,.cfi_startproc\n.cfi_rel_offset $(sp-y)$(comma)0\n.cfi_endproc,-DCONFIG_AS_CFI=1)
 # is .cfi_signal_frame supported too?
 cfi-sigframe := $(call as-instr,.cfi_startproc\n.cfi_signal_frame\n.cfi_endproc,-DCONFIG_AS_CFI_SIGNAL_FRAME=1)
-KBUILD_AFLAGS += $(cfi) $(cfi-sigframe)
-KBUILD_CFLAGS += $(cfi) $(cfi-sigframe)
+cfi-sections := $(call as-instr,.cfi_sections .debug_frame,-DCONFIG_AS_CFI_SECTIONS=1)
+KBUILD_AFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections)
+KBUILD_CFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections)
 
 LDFLAGS := -m elf_$(UTS_MACHINE)
 
@@ -265,6 +266,7 @@ libs-y				+= arch/l4/lib/arch-$(BASEARCH)/	\
 ifeq ($(BASEARCH),x86)
 drivers-$(CONFIG_PCI)		+= arch/l4/pci/
 drivers-$(CONFIG_PM)		+= arch/l4/power/arch-x86/
+drivers-$(CONFIG_FB)		+= arch/x86/video/
 core-$(CONFIG_KVM)		+= arch/l4/kvm/arch-x86/
 endif
 
