@@ -55,7 +55,6 @@
 #include <asm/cpu.h>
 #include <asm/idle.h>
 #include <asm/syscalls.h>
-#include <asm/ds.h>
 #include <asm/debugreg.h>
 
 #include <asm/api/macros.h>
@@ -379,12 +378,6 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 		p->thread.io_bitmap_max = 0;
 	}
 #endif
-
-	clear_tsk_thread_flag(p, TIF_DS_AREA_MSR);
-	p->thread.ds_ctx = NULL;
-
-	clear_tsk_thread_flag(p, TIF_DEBUGCTLMSR);
-	p->thread.debugctlmsr = 0;
 
 #ifdef CONFIG_L4_VCPU
 	if (!err)

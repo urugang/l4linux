@@ -729,7 +729,7 @@ static int __init e820_mark_nvs_memory(void)
 		struct e820entry *ei = &e820.map[i];
 
 		if (ei->type == E820_NVS)
-			hibernate_nvs_register(ei->addr, ei->size);
+			suspend_nvs_register(ei->addr, ei->size);
 	}
 
 	return 0;
@@ -940,10 +940,7 @@ void __init e820_register_active_regions(int nid, unsigned long start_pfn,
 		if (e820_find_active_region(&e820.map[i],
 					    start_pfn, last_pfn,
 					    &ei_startpfn, &ei_endpfn))
-		{
-		  printk("adding %lx - %lx\n", ei_startpfn, ei_endpfn);
 			add_active_range(nid, ei_startpfn, ei_endpfn);
-		}
 }
 
 /*

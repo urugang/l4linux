@@ -20,7 +20,7 @@
 
 	jmp main
 .previous
-.section ".bss.page_aligned","w"
+__PAGE_ALIGNED_BSS
 ENTRY(swapper_pg_dir)
 	.fill 1024,4,0
 ENTRY(empty_zero_page)

@@ -22,7 +22,6 @@ obj-$(CONFIG_MODULES)		+= module.o
 obj-$(CONFIG_KPROBES)		+= kprobes.o
 obj-$(CONFIG_K8_NB)		+= k8.o
 obj-$(CONFIG_PCI)               += early-quirks.o
-obj-$(CONFIG_X86_DS)		+= ds.o
 obj-$(CONFIG_SMP)		+= apic/
 obj-$(CONFIG_SMP)		+= mpparse.o smp.o \
                                    smpboot.o trampoline.o setup_percpu.o

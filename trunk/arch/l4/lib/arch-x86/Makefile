@@ -2,6 +2,8 @@
 # Makefile for x86 specific library files.
 #
 
+b := ../../../x86/lib
+
 inat_tables_script = $(srctree)/arch/x86/tools/gen-insn-attr-x86.awk
 inat_tables_maps = $(srctree)/arch/x86/lib/x86-opcode-map.txt
 quiet_cmd_inat_tables = GEN     $@
@@ -10,29 +12,30 @@ quiet_cmd_inat_tables = GEN     $@
 $(obj)/inat-tables.c: $(inat_tables_script) $(inat_tables_maps)
 	$(call cmd,inat_tables)
 
-$(obj)/inat.o: $(obj)/inat-tables.c
+$(obj)/$(b)/inat.o: $(obj)/inat-tables.c
 
 clean-files := inat-tables.c
 
 obj-$(CONFIG_SMP) += msr-smp.o cache-smp.o
 
-b := ../../../x86/lib
+KBUILD_CFLAGS += -Iarch/x86/lib
 
 lib-y := $(b)/delay.o
 
 lib-y += ../memcpy_user.o ../uaccess.o ../pte.o
 lib-y += memcpy.o
-lib-$(CONFIG_KPROBES) += $(b)/insn.o $(b)/inat.o
+lib-$(CONFIG_INSTRUCTION_DECODER) += $(b)/insn.o $(b)/inat.o
 
 obj-y += msr.o msr-reg.o msr-reg-export.o
 
 ifeq ($(CONFIG_X86_32),y)
         obj-y += atomic64_32.o
+        lib-y += $(b)/atomic64_cx8_32.o
 	lib-y += checksum.o
         lib-y += $(b)/strstr_32.o
         lib-y += $(b)/semaphore_32.o $(b)/string_32.o
 ifneq ($(CONFIG_X86_CMPXCHG64),y)
-        lib-y += $(b)/cmpxchg8b_emu.o
+        lib-y += $(b)/cmpxchg8b_emu.o $(b)/atomic64_386_32.o
 endif
         lib-$(CONFIG_X86_USE_3DNOW) += $(b)/mmx_32.o
 else

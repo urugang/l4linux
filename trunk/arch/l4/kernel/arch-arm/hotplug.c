@@ -13,7 +13,10 @@
 #include <linux/smp.h>
 #include <linux/completion.h>
 
+#include <asm/cacheflush.h>
+
 #include <asm/generic/smp.h>
+#include <asm/generic/tamed.h>
 #include <l4/util/util.h>
 
 extern volatile int pen_release;
@@ -25,7 +28,8 @@ static inline void cpu_enter_lowpower(void)
 #ifdef NOT_FOR_L4
 	unsigned int v;
 
-	asm volatile(	"mcr	p15, 0, %1, c7, c14, 0\n"
+	flush_cache_all();
+	asm volatile(
 	"	mcr	p15, 0, %1, c7, c5, 0\n"
 	"	mcr	p15, 0, %1, c7, c10, 4\n"
 	/*
@@ -145,7 +149,7 @@ void platform_cpu_die(unsigned int cpu)
 	cpu_leave_lowpower();
 }
 
-int mach_cpu_disable(unsigned int cpu)
+int platform_cpu_disable(unsigned int cpu)
 {
 	/*
 	 * we don't allow CPU 0 to be shutdown (it is still too special
