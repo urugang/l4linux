@@ -46,14 +46,13 @@ int l4x_kvm_create_task(struct kvm *kvm)
 }
 EXPORT_SYMBOL(l4x_kvm_create_task);
 
-int l4x_kvm_svm_run(l4_cap_idx_t task, l4_fpage_t vmcb_fp,
-                    struct l4_vm_svm_gpregs *gpregs)
+int l4x_kvm_svm_run(l4_cap_idx_t task, l4_fpage_t vmcb_fp)
 {
 	int r;
 	L4XV_V(f);
 
 	L4XV_L(f);
-	if ((r = l4_error(l4_vm_run_svm(task, vmcb_fp, gpregs)))) {
+	if ((r = l4_error(l4_vm_run(task, vmcb_fp)))) {
 		printk("%s: vm run failed with %d\n", __func__, r);
 		L4XV_U(f);
 		return 1;
