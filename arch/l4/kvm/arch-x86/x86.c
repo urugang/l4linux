@@ -4393,7 +4393,7 @@ void kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
 	
 #ifdef CONFIG_L4
 	/* WickedFiasco */
-	if (!function) {
+	if (0 && !function) {
 		kvm_register_write(vcpu, VCPU_REGS_RBX, 0x6b636957); // "kciW"
 		kvm_register_write(vcpu, VCPU_REGS_RCX, 0x6f637361); // "ocsa"
 		kvm_register_write(vcpu, VCPU_REGS_RDX, 0x69466465); // "iFed"

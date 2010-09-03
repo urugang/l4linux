@@ -15,10 +15,9 @@
 
 #include "kvm-l4.h"
 
-#define L4_VMCB_LOG2_SIZE 12
+#define L4X_VMCB_LOG2_SIZE 12
 
-int l4x_kvm_svm_run(l4_cap_idx_t task, l4_fpage_t vmcb_fp,
-                    struct l4_vm_svm_gpregs *gpregs);
+int l4x_kvm_svm_run(l4_cap_idx_t task, l4_fpage_t vmcb_fp);
 
 static inline void l4x_svm_vmcb_seg_dump(struct kvm_vcpu *vcpu, struct vmcb_seg *seg, char *name)
 {
@@ -77,7 +76,7 @@ static inline void l4x_svm_vmcb_dump(struct kvm_vcpu *vcpu)
 	vcpu_printf(vcpu, "*********************** end_of_dump ***********************\n");
 }
 
-static inline void l4x_l4gpregs_to_kvm_vcpu(struct l4_vm_svm_gpregs *gpregs,
+static inline void l4x_l4gpregs_to_kvm_vcpu(l4_vm_gpregs_t *gpregs,
                                             struct kvm_vcpu *vcpu)
 {
 	vcpu->arch.regs[VCPU_REGS_RDX] = gpregs->edx;
@@ -95,7 +94,7 @@ static inline void l4x_l4gpregs_to_kvm_vcpu(struct l4_vm_svm_gpregs *gpregs,
 }
 
 static inline void l4x_kvm_vcpu_to_l4gpregs(struct kvm_vcpu *vcpu,
-                                            struct l4_vm_svm_gpregs *gpregs)
+                                            l4_vm_gpregs_t *gpregs)
 {
 	gpregs->edx = vcpu->arch.regs[VCPU_REGS_RDX];
 	gpregs->ecx = vcpu->arch.regs[VCPU_REGS_RCX];

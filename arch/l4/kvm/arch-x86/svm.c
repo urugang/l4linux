@@ -3092,7 +3092,6 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 	//l4/u16 gs_selector;
 	//l4/u16 ldt_selector;
 #ifdef CONFIG_L4
-	struct l4_vm_svm_gpregs l4gpregs;
 	int r;
 #endif
 
@@ -3199,7 +3198,6 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 #endif
 
 #ifdef CONFIG_L4
-	l4x_kvm_vcpu_to_l4gpregs(vcpu, &l4gpregs);
 
 	if (l4x_kvm_dbg()) {
 		printk("%s(%d): rip=%llx\n", __func__, __LINE__,
@@ -3212,12 +3210,13 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 		       svm->vmcb->save.rip);
 		l4x_svm_vmcb_dump(vcpu);
 	}
+
+	l4x_kvm_vcpu_to_l4gpregs(vcpu, l4_vm_gpregs());
 
 	// VMRUN
 	r = l4x_kvm_svm_run(svm->vcpu.kvm->arch.l4vmcap,
 	                    l4_fpage((unsigned long)svm->vmcb,
-	                             L4_VMCB_LOG2_SIZE, 0),
-	                   &l4gpregs);
+	                             L4X_VMCB_LOG2_SIZE, 0));
 	// #VMEXIT
 
 	if (r) {
@@ -3225,7 +3224,7 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 		return;
 	}
 
-	l4x_l4gpregs_to_kvm_vcpu(&l4gpregs, vcpu);
+	l4x_l4gpregs_to_kvm_vcpu(l4_vm_gpregs(), vcpu);
 #endif
 
 	vcpu->arch.cr2 = svm->vmcb->save.cr2;
