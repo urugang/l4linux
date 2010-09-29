@@ -74,6 +74,7 @@ static int l4x_l4shmc_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 	struct chunk_head *chhead;
 	struct ring_chunk_head *rph;
 	unsigned long l, offs, nextoffs, r;
+	L4XV_V(f);
 
 	if (length == 0)
 		return 0;
@@ -120,7 +121,9 @@ static int l4x_l4shmc_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 	chhead->next_offs_to_write = nextoffs;
 	wmb();
 
+	L4XV_L(f);
 	l4shmc_trigger(&priv->tx_sig);
+	L4XV_U(f);
 
 	netdev->trans_start = jiffies;
 	priv->net_stats.tx_packets++;
@@ -185,6 +188,7 @@ static irqreturn_t l4x_l4shmc_interrupt(int irq, void *dev_id)
 		else
 			l = rph->size;
 
+		skb_reserve(skb, NET_IP_ALIGN);
 		p = skb_put(skb, rph->size);
 		memcpy(p, priv->rx_ring_start + offs, l);
 		if (l != rph->size)
@@ -204,8 +208,12 @@ static irqreturn_t l4x_l4shmc_interrupt(int irq, void *dev_id)
 		priv->net_stats.rx_packets++;
 	}
 
-	if (chhead->writer_blocked)
+	if (chhead->writer_blocked) {
+		L4XV_V(f);
+		L4XV_L(f);
 		l4shmc_trigger(&priv->tx_sig);
+		L4XV_U(f);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -267,6 +275,7 @@ static int __init l4x_l4shmnet_init_dev(int num, const char *name)
 	struct l4x_l4shmc_netdev *nd = NULL;
 	struct chunk_head *ch;
 	int err;
+	L4XV_V(f);
 
 	if (shmsize < PAGE_SIZE)
 		shmsize = PAGE_SIZE;
@@ -281,40 +290,43 @@ static int __init l4x_l4shmnet_init_dev(int num, const char *name)
 	       name,
                devs_create[num] ? "Creator" : "User", shmsize >> 10);
 
+	L4XV_L(f);
 	err = -ENOMEM;
 	if (devs_create[num]) {
 		if (l4shmc_create(name, shmsize))
-			goto err_out_free_dev;
+			goto err_out_free_dev_unlock;
 	}
 
+	// we block very long here, don't do that
 	if (l4shmc_attach_to(name, WAIT_TIMEOUT, &priv->shmcarea))
-		goto err_out_free_dev;
+		goto err_out_free_dev_unlock;
 
 	if (l4shmc_add_chunk(&priv->shmcarea, devs_create[num] ? "joe" : "bob",
 	                     chunk_size(&priv->shmcarea), &priv->tx_chunk))
-		goto err_out_free_dev;
+		goto err_out_free_dev_unlock;
 
 	if (l4shmc_add_signal(&priv->shmcarea, devs_create[num] ? "joe" : "bob",
 	                      &priv->tx_sig))
-		goto err_out_free_dev;
+		goto err_out_free_dev_unlock;
 
 	if (l4shmc_connect_chunk_signal(&priv->tx_chunk, &priv->tx_sig))
-		goto err_out_free_dev;
+		goto err_out_free_dev_unlock;
 
 	/* Now get the receiving side */
 	if (l4shmc_get_chunk_to(&priv->shmcarea, devs_create[num] ? "bob" : "joe",
 	                        WAIT_TIMEOUT, &priv->rx_chunk)) {
 		printk("%s: Did not find other side\n", name);
-		goto err_out_free_dev;
+		goto err_out_free_dev_unlock;
 	}
 
 	if (l4shmc_get_signal_to(&priv->shmcarea, devs_create[num] ? "bob" : "joe",
 	                         WAIT_TIMEOUT, &priv->rx_sig)) {
 		printk("%s: Could not get signal\n", name);
-		goto err_out_free_dev;
+		goto err_out_free_dev_unlock;
 	}
 	if (l4shmc_connect_chunk_signal(&priv->rx_chunk, &priv->rx_sig))
-		goto err_out_free_dev;
+		goto err_out_free_dev_unlock;
+	L4XV_U(f);
 
 	ch = (struct chunk_head *)l4shmc_chunk_ptr(&priv->tx_chunk);
 	ch->next_offs_to_write = 0;
@@ -364,6 +376,8 @@ static int __init l4x_l4shmnet_init_dev(int num, const char *name)
 
 	return 0;
 
+err_out_free_dev_unlock:
+	L4XV_U(f);
 err_out_free_dev:
 	printk(KERN_INFO "%s: Failed to establish communication\n", name);
 	free_netdev(dev);

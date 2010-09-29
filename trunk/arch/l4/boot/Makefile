@@ -22,7 +22,7 @@ vmlinuz$(SUFFIX): ldrImage FORCE
 l4linux$(SUFFIX): ldrImage FORCE
 	$(Q)ln -sf $< $@
 
-objects-y := ldr.o startup.o res.o image.o
+objects-y := ldr.o res.o image.o
 
 targets	:= $(objects-y)
 

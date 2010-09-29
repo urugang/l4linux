@@ -22,7 +22,9 @@
 #include <asm/generic/vcpu.h>
 #include <asm/api/macros.h>
 
-#ifndef CONFIG_L4_VCPU
+#ifdef CONFIG_L4_VCPU
+#include <l4/vcpu/vcpu.h>
+#else
 
 #ifdef CONFIG_L4_FERRET_TAMER_ATOMIC
 #include <l4/ferret/sensors/list_producer_wrap.h>
@@ -279,11 +281,11 @@ no_reply:
 void l4x_global_cli(void)
 {
 #ifdef CONFIG_L4_VCPU
-	l4x_vcpu_state(smp_processor_id())->state &= ~L4_VCPU_F_IRQ;
+	l4vcpu_irq_disable(l4x_stack_vcpu_state_get());
 	mb();
 #else
 	l4_cap_idx_t me = l4x_stack_id_get();
-	int nr = get_tamer_nr(smp_processor_id());
+	int nr = get_tamer_nr(current_thread_info()->cpu);
 
 	if (unlikely((me >> L4_CAP_SHIFT) > 9000))
 		enter_kdebug("Unset id on stack (c)?");
@@ -328,23 +330,11 @@ static void do_vcpu_irq(l4_vcpu_state_t *v)
 void l4x_global_sti(void)
 {
 #ifdef CONFIG_L4_VCPU
-	l4_vcpu_state_t *v = l4x_vcpu_state(smp_processor_id());
-	while (1) {
-		v->state |= L4_VCPU_F_IRQ;
-		mb();
-
-		if (!(v->sticky_flags & L4_VCPU_SF_IRQ_PENDING))
-			break;
-
-		v->state &= ~L4_VCPU_F_IRQ;
-		mb();
-		v->i.tag = l4_ipc_wait(l4_utcb(), &v->i.label, L4_IPC_NEVER);
-		if (!l4_msgtag_has_error(v->i.tag))
-			do_vcpu_irq(v);
-	}
+	l4vcpu_irq_enable(l4x_stack_vcpu_state_get(),
+	                  do_vcpu_irq);
 #else
 	l4_cap_idx_t me = l4x_stack_id_get();
-	int nr = get_tamer_nr(smp_processor_id());
+	int nr = get_tamer_nr(current_thread_info()->cpu);
 
 	if (unlikely((me >> L4_CAP_SHIFT) > 9000))
 		enter_kdebug("Unset id on stack (s)?");
@@ -366,13 +356,7 @@ EXPORT_SYMBOL(l4x_global_sti);
 #ifdef CONFIG_L4_VCPU
 void l4x_global_halt(void)
 {
-	l4_vcpu_state_t *v;
-	l4x_global_cli();
-	v = l4x_vcpu_state(smp_processor_id());
-	v->i.tag = l4_ipc_wait(l4_utcb(), &v->i.label, L4_IPC_NEVER);
-	if (!l4_msgtag_has_error(v->i.tag))
-		do_vcpu_irq(v);
-	l4x_global_sti();
+	l4vcpu_halt(l4x_stack_vcpu_state_get(), do_vcpu_irq);
 }
 EXPORT_SYMBOL(l4x_global_halt);
 #endif
@@ -380,12 +364,9 @@ EXPORT_SYMBOL(l4x_global_halt);
 unsigned long l4x_global_save_flags(void)
 {
 #ifdef CONFIG_L4_VCPU
-	unsigned x = l4x_vcpu_state(smp_processor_id())->state & L4_VCPU_F_IRQ;
-	*((&l4x_vcpu_state(smp_processor_id())->reserved_sp) + 1)
-		= l4x_vcpu_state(smp_processor_id())->state;
-	return x;
+	return l4vcpu_state(l4x_stack_vcpu_state_get());
 #else
-	return l4_capability_equal(tamed_per_nr(cli_lock, get_tamer_nr(smp_processor_id())).owner,
+	return l4_capability_equal(tamed_per_nr(cli_lock, get_tamer_nr(current_thread_info()->cpu)).owner,
 	                           l4x_stack_id_get()) ? L4_IRQ_DISABLED : L4_IRQ_ENABLED;
 #endif
 }
@@ -394,8 +375,8 @@ EXPORT_SYMBOL(l4x_global_save_flags);
 void l4x_global_restore_flags(unsigned long flags)
 {
 #ifdef CONFIG_L4_VCPU
-	if (flags & L4_VCPU_F_IRQ)
-		l4x_global_sti();
+	l4vcpu_irq_restore(l4x_stack_vcpu_state_get(), flags,
+	                   do_vcpu_irq);
 #else
 	switch (flags) {
 		case L4_IRQ_ENABLED:

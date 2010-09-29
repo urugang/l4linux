@@ -242,6 +242,7 @@ export L4DIR
 
 
 # Extra Libs
+L4LX_E_L-$(CONFIG_L4_VCPU)         += libvcpu
 L4LX_E_L-$(CONFIG_L4_USE_L4SHMC)   += shmc
 L4LX_E_L-$(CONFIG_L4_BLK_DRV)      += generic_blk
 L4LX_E_L-$(CONFIG_L4_EXTERNAL_RTC) += rtc
@@ -407,7 +408,7 @@ chkl4conf:
 # regparm: gcc may call memset from our libs, so obey calling convention
 #          this should probably be fixed
 
-DIS_OPTS := HIGHMEM4G HIGHMEM64G PREEMPT PCI_GOANY PCI_GOBIOS HPET_TIMER \
+DIS_OPTS := HIGHMEM4G HIGHMEM64G PCI_GOANY PCI_GOBIOS HPET_TIMER \
             X86_MCE X86_MCE MTRR PARAVIRT KEXEC MCA SOFTWARE_SUSPEND APM \
 	    CPU_FREQ VM86 X86_DS X86_PTRACE_BTS HT_IRQ DMI
 ENA_OPTS-x86 := X86_CMPXCHG64
