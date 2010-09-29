@@ -533,7 +533,7 @@ static inline int l4x_port_emulation(struct pt_regs *regs)
 static int l4x_kdebug_emulation(struct pt_regs *regs)
 {
 	u8 op = 0, val;
-	char *addr = (char *)regs->ip;
+	char *addr = (char *)regs->ip - 1;
 	int i, len;
 
 	if (get_user(op, addr))
@@ -549,7 +549,7 @@ static int l4x_kdebug_emulation(struct pt_regs *regs)
 	if (op == 0xeb) { /* enter_kdebug */
 		if (get_user(len, addr + 2))
 			return 0; /* Access failure */
-		regs->ip += len + 3;
+		regs->ip += len + 2;
 		outstring("User enter_kdebug text: ");
 		for (i = 3; len; len--) {
 			if (get_user(val, addr + i++))
@@ -603,7 +603,7 @@ static int l4x_kdebug_emulation(struct pt_regs *regs)
 			default:
 				return 0; /* Did not understand */
 		};
-		regs->ip += 3;
+		regs->ip += 2;
 		return 1; /* handled */
 	}
 
@@ -800,16 +800,6 @@ static inline void l4x_vcpu_entry_user_arch(void)
 	     "r"(l4x_x86_utcb_get_orig_segment())
 #endif
 	     : "memory");
-}
-
-static inline int l4x_vcpu_is_irq(l4_vcpu_state_t *vcpu)
-{
-	return vcpu->r.trapno == 0xfe;
-}
-
-static inline int l4x_vcpu_is_page_fault(l4_vcpu_state_t *vcpu)
-{
-	return vcpu->r.trapno == 0xe;
 }
 
 static inline bool l4x_vcpu_is_wr_pf(l4_vcpu_state_t *v)

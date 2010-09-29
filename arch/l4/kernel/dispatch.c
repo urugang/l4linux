@@ -14,6 +14,9 @@
 #include <l4/sys/factory.h>
 #include <l4/re/consts.h>
 #include <l4/re/env.h>
+#ifdef CONFIG_L4_VCPU
+#include <l4/vcpu/vcpu.h>
+#endif
 
 #include <asm/generic/cap_alloc.h>
 #include <asm/generic/fpu.h>
@@ -1158,7 +1161,7 @@ static inline void l4x_vcpu_entry_sanity(l4_vcpu_state_t *vcpu)
 #ifdef CONFIG_L4_DEBUG
 	// sanity check
 	if (unlikely(!(vcpu->saved_state & L4_VCPU_F_IRQ)
-	             && l4x_vcpu_is_irq(vcpu))) {
+	             && l4vcpu_is_irq_entry(vcpu))) {
 		LOG_printf("  retip=%08lx\n", _RET_IP_);
 		enter_kdebug("sanity: irq");
 	}
@@ -1174,13 +1177,13 @@ l4x_vcpu_entry_kern(l4_vcpu_state_t *vcpu)
 	struct thread_struct *t = &p->thread;
 	int copy_ptregs = 0;
 
-	if (l4x_vcpu_is_irq(vcpu)) {
+	if (l4vcpu_is_irq_entry(vcpu)) {
 		vcpu_to_ptregs(vcpu, regsp);
 		l4x_vcpu_handle_irq(vcpu, regsp);
 		copy_ptregs = 1;
 
 	} else if (0 // this should not happen anymore
-	           && l4x_vcpu_is_page_fault(vcpu)) {
+	           && l4vcpu_is_page_fault_entry(vcpu)) {
 		l4x_vcpu_handle_kernel_pf(vcpu->r.pfa, vcpu->r.ip,
 				          l4x_vcpu_is_wr_pf(vcpu));
 	} else {
@@ -1239,7 +1242,7 @@ asmlinkage void l4x_vcpu_entry(void)
 	vcpu_to_ptregs(vcpu, regsp);
 	vcpu_to_thread_struct(vcpu, t);
 
-	if (l4x_vcpu_is_irq(vcpu)) {
+	if (l4vcpu_is_irq_entry(vcpu)) {
 		l4x_vcpu_handle_irq(vcpu, regsp);
 
 		if (need_resched())
@@ -1247,7 +1250,7 @@ asmlinkage void l4x_vcpu_entry(void)
 		if (signal_pending(p))
 			l4x_do_signal(regsp, 0);
 
-	} else if (l4x_vcpu_is_page_fault(vcpu)) {
+	} else if (l4vcpu_is_page_fault_entry(vcpu)) {
 		l4_umword_t data0 = 0, data1 = 0;
 		int reply_with_fpage;
 

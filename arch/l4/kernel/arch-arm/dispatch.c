@@ -1177,16 +1177,6 @@ static inline bool l4x_vcpu_is_wr_pf(l4_vcpu_state_t *v)
 {
 	return v->r.err & (1 << 11);
 }
-
-static inline int l4x_vcpu_is_irq(l4_vcpu_state_t *vcpu)
-{
-	return vcpu->r.err == 0x00600000;
-}
-
-static inline int l4x_vcpu_is_page_fault(l4_vcpu_state_t *vcpu)
-{
-	return vcpu->r.err & 0x00010000;
-}
 #endif
 
 #define __INCLUDED_FROM_L4LINUX_DISPATCH
