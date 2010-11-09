@@ -1,8 +1,5 @@
 /*
- * Misc. file.
- *
- * This file also contains code not suited anywhere else, it will get bigger
- * and needs to be split up then.
+ * Main & misc. file.
  */
 
 #include <linux/init.h>
@@ -68,7 +65,6 @@
 #include <asm/generic/util.h>
 #include <asm/generic/vcpu.h>
 
-#include <asm/l4x/iodb.h>
 #include <asm/l4x/exception.h>
 #include <asm/l4x/lx_syscalls.h>
 #include <asm/l4x/utcb.h>
@@ -80,10 +76,6 @@
 #ifdef CONFIG_L4_EXTERNAL_RTC
 #include <l4/rtc/rtc.h>
 #endif
-#endif
-
-#ifdef CONFIG_L4_USE_L4VMM
-#include <l4/vmm/vmm.h>
 #endif
 
 L4_CV void l4x_external_exit(int);
@@ -105,10 +97,6 @@ L4_CV void l4x_external_exit(int);
   #endif
  #endif
 
-
- #if defined(CONFIG_VGA_CONSOLE) && defined(CONFIG_L4_USE_L4VMM)
-  #error L4VMM and VGA_CONSOLE together are not supported
- #endif
 
  // this may be a bit harsh but well...
  #if defined(ARCH_x86) && !defined(CONFIG_L4_FB_DRIVER) && \
@@ -301,12 +289,6 @@ static void l4x_configuration_sanity_check(const char *cmdline)
 			enter_kdebug("Stop!");
 	}
 
-#ifndef CONFIG_L4_USE_L4VMM
-	if (strstr(cmdline, "console=ttyS")) {
-		LOG_printf("Console output set to ttySx. Not recommended.\n");
-		enter_kdebug("console=ttyS in command line");
-	}
-#endif
 #ifndef ARCH_arm
 	{
 		char *p;
@@ -334,11 +316,11 @@ static void l4x_configuration_sanity_check(const char *cmdline)
 
 static int l4x_check_setup(const char *cmdline)
 {
-#if defined(ARCH_arm) && defined(CONFIG_HAS_TLS_REG)
+#if defined(ARCH_arm) && defined(CONFIG_SMP)
 	if (!l4util_kip_kernel_has_feature(l4lx_kinfo, "armv6plus")) {
 		LOG_printf("Running Fiasco is not compiled for v6 "
 		           "or better architecture.\nRequired when "
-		           "L4Linux is compiled for v6 (e.g.  for TLS).\n");
+		           "L4Linux is compiled for v6 (e.g. for TLS).\n");
 		/* Note, running on a armv5 fiasco is possible when using
 		 * TLS trap-emulation (see dispatch.c).
 		 */
@@ -1261,6 +1243,12 @@ void __init setup_l4x_memory(char *cmdl,
 		l4x_exit_l4linux();
 	}
 	l4x_vmalloc_areaid = l4x_vmalloc_memory_start;
+#ifdef ARCH_arm
+	{
+		extern void * /*__initdata*/ vmalloc_min;
+		vmalloc_min = (void *)l4x_vmalloc_memory_start;
+	}
+#endif
 
 #ifdef ARCH_x86
 	// fixmap area
@@ -1320,7 +1308,7 @@ static int l4x_sanity_check_kuser_cmpxchg(void)
 	extern char l4x_kuser_cmpxchg_critical_start[];
 	extern char l4x_kuser_cmpxchg_critical_end[];
 
-	if (   (unsigned long)l4x_kuser_cmpxchg_critical_start != L4X_UPAGE_KUSER_CMPXCHG_CRITICAL_START 
+	if (   (unsigned long)l4x_kuser_cmpxchg_critical_start != L4X_UPAGE_KUSER_CMPXCHG_CRITICAL_START
 	    || (unsigned long)l4x_kuser_cmpxchg_critical_end   != L4X_UPAGE_KUSER_CMPXCHG_CRITICAL_END) {
 		LOG_printf("__kuser_cmpxchg value incorrect; Aborting.\n");
 		return 1;
@@ -1969,7 +1957,7 @@ void __init check_acpi_pci(void)
 /*
  * This is the panic blinking function, we misuse it to sleep forever.
  */
-static long l4x_blink(long time)
+static long l4x_blink(int state)
 {
 	L4XV_V(f);
 	printk("panic: going to sleep forever, bye\n");
@@ -2154,65 +2142,102 @@ static void get_initial_cpu_capabilities(void)
 #endif
 }
 
-#ifdef CONFIG_L4_USE_L4VMM
-L4_EXTERNAL_FUNC(l4vmm_init);
-L4_EXTERNAL_FUNC(l4vmm_handle_exception);
-L4_EXTERNAL_FUNC(l4vmm_mmio_search_region);
-L4_EXTERNAL_FUNC(l4vmm_mmio_request_region);
-L4_EXTERNAL_FUNC(l4vmm_mmio_release_region);
+#ifdef ARCH_x86
 
-static L4_CV l4_addr_t l4x_phys_to_virt_r0(unsigned long address)
+#include <asm/l4x/ioport.h>
+
+static u32 l4x_x86_kernel_ioports[65536 / sizeof(u32)];
+
+int l4x_x86_handle_user_port_request(struct task_struct *task,
+                                     unsigned nr, unsigned len)
 {
-	return (l4_addr_t)l4x_phys_to_virt(address);
+	l4_msgtag_t tag;
+	unsigned char o;
+	unsigned i;
+
+	if (nr + len > 65536)
+		return 0;
+
+	for (i = 0; i < len; ++i)
+		if (!test_bit(nr + i,
+		              (volatile unsigned long *)l4x_x86_kernel_ioports))
+			return 0;
+
+	i = nr;
+	do {
+		L4XV_V(f);
+		o = l4_fpage_max_order(0, i, nr, nr + len, 0);
+		L4XV_L(f);
+		tag = l4_task_map(task->mm->context.task,
+		                  L4RE_THIS_TASK_CAP,
+		                  l4_iofpage(nr, o),
+		                  l4_map_control(nr, 0, L4_MAP_ITEM_MAP));
+		L4XV_U(f);
+		if (l4_error(tag))
+			return 0;
+
+		i += 1 << o;
+	} while (i < nr + len);
+
+	return 1;
 }
 
-static l4vmm_config_t l4vmm_config = {
-	.flags             = L4VMM_DEFAULT_FLAGS,
-	.phys_to_virt_func = l4x_phys_to_virt_r0,
-};
-
-static int l4vmm_handle_exception_r0(l4_utcb_t *u)
+static void l4x_x86_register_ports(l4io_resource_t *res)
 {
-	int r;
-	l4_utcb_t cu;
+	unsigned i;
 
-	memcpy(&cu.exc, &u->exc, sizeof(unsigned long) * L4_UTCB_EXCEPTION_REGS_SIZE);
-	r = l4vmm_handle_exception(&cu);
-	memcpy(&u->exc, &cu.exc, sizeof(unsigned long) * L4_UTCB_EXCEPTION_REGS_SIZE);
-	return r;
+	if (res->type != L4IO_RESOURCE_PORT)
+		return;
+
+	if (res->start > res->end)
+		return;
+
+	for (i = res->start; i <= res->end; ++i)
+		if (i < 65536)
+			set_bit(i,
+			        (volatile unsigned long *)l4x_x86_kernel_ioports);
+
 }
 #endif
 
-static void __init l4x_l4vmm_init(void)
+static void l4x_scan_hw_resources(void)
 {
-#ifdef CONFIG_L4_USE_L4VMM
-	char s[128];
-	char *p;
+	l4io_device_handle_t dh = l4io_get_root_device();
+	l4io_device_t dev;
+	l4io_resource_handle_t reshandle;
 
-	if ((p = strstr(boot_command_line, "l4vmm_config="))) {
-		char *e;
-		int l;
+	LOG_printf("Device scan:\n");
+	while (1) {
+		l4io_resource_t res;
 
-		p += 13;
+		if (l4io_iterate_devices(&dh, &dev, &reshandle))
+			break;
 
-		if ((e = strchr(p, ' ')))
-			l = e - p;
-		else
-			l = strlen(p);
+		if (dev.num_resources == 0)
+			continue;
 
-		if (l > sizeof(s) - 1) {
-			LOG_printf("l4vmm: configuration path too long, "
-			           "doing without config.\n");
-		} else {
-			memcpy(s, p, l);
-			s[l] = 0;
-			l4vmm_config.string = s;
-			l4vmm_config.flags |= L4VMM_INIT_STRING_FILE;
+		LOG_printf("  Device: %s\n", dev.name);
+
+		while (!l4io_lookup_resource(dh, L4IO_RESOURCE_ANY,
+					     &reshandle, &res)) {
+			char *t = "undef";
+
+			switch (res.type) {
+				case L4IO_RESOURCE_IRQ:  t = "IRQ";  break;
+				case L4IO_RESOURCE_MEM:  t = "MEM";  break;
+				case L4IO_RESOURCE_PORT: t = "PORT"; break;
+			};
+
+			LOG_printf("    %s: %08lx - %08lx\n",
+			           t, res.start, res.end);
+
+#ifdef ARCH_x86
+			l4x_x86_register_ports(&res);
+			l4io_request_ioport(res.start,
+			                    res.end - res.start + 1);
+#endif
 		}
 	}
-
-	l4vmm_init(&l4vmm_config);
-#endif
 }
 
 int __init_refok L4_CV main(int argc, char **argv)
@@ -2264,8 +2289,6 @@ int __init_refok L4_CV main(int argc, char **argv)
 		return 1;
 
 	l4x_x86_utcb_save_orig_segment();
-
-	l4x_l4vmm_init();
 
 	LOG_printf("Image: %08lx - %08lx [%lu KiB].\n",
 	           (unsigned long)_stext, (unsigned long)_end,
@@ -2351,7 +2374,7 @@ int __init_refok L4_CV main(int argc, char **argv)
 		enter_kdebug("ioprot-microkernel -> enable TAMED mode!");
 #endif
 	}
-	l4x_iodb_init();
+	l4x_scan_hw_resources();
 
 	/* Initialize GDT entry offset */
 	l4x_fiasco_gdt_entry_offset = fiasco_gdt_get_entry_offset(l4re_env()->main_thread, l4_utcb());
@@ -2487,7 +2510,7 @@ long ptregs_##name(void)                                        \
 PTREGSCALL1(iopl, unsigned int)
 PTREGSCALL0(fork)
 PTREGSCALL0(vfork)
-PTREGSCALL3(execve, char __user *, char __user * __user *, char __user * __user *)
+PTREGSCALL3(execve, const char __user *, const char __user *const __user *, const char __user *const __user *)
 PTREGSCALL2(sigaltstack, const stack_t __user *, stack_t __user *)
 PTREGSCALL0(sigreturn)
 PTREGSCALL0(rt_sigreturn)
@@ -2778,9 +2801,11 @@ static int l4x_handle_msr(l4_exc_regs_t *exc)
 
 static inline void l4x_print_exception(l4_cap_idx_t t, l4_exc_regs_t *exc)
 {
-	LOG_printf("EX: "l4util_idfmt": pc = "l4_addr_fmt
-	           " trapno = 0x%lx err/pfa = 0x%lx%s\n",
-	           l4util_idstr(t), exc->ip,
+	LOG_printf("EX: "l4util_idfmt": "
+	           "pc = "l4_addr_fmt" "
+	           "sp = "l4_addr_fmt" "
+	           "trapno = 0x%lx err/pfa = 0x%lx%s\n",
+	           l4util_idstr(t), exc->ip, exc->sp,
 		   exc->trapno,
 		   exc->trapno == 14 ? exc->pfa : exc->err,
 	           exc->trapno == 14 ? (exc->err & 2) ? " w" : " r" : "");
@@ -2835,6 +2860,7 @@ static void l4x_setup_die_utcb(l4_exc_regs_t *exc)
 	extern void die(const char *msg, struct pt_regs *regs, int err);
 	static char message[40];
 
+	LOG_printf("%s %d\n", __func__, __LINE__); 
 	snprintf(message, sizeof(message), "Boom!");
 	message[sizeof(message) - 1] = 0;
 
@@ -2960,8 +2986,11 @@ static int l4x_arm_instruction_emu(l4_exc_regs_t *exc)
 
 static inline void l4x_print_exception(l4_cap_idx_t t, l4_exc_regs_t *exc)
 {
-	LOG_printf("EX: "l4util_idfmt": pc="l4_addr_fmt" err=0x%lx lr=%lx\n",
-	           l4util_idstr(t), exc->pc, exc->err, exc->ulr);
+	LOG_printf("EX: "l4util_idfmt": "
+	           "pc="l4_addr_fmt" "
+	           "sp="l4_addr_fmt" "
+	           "err=0x%lx lr=%lx\n",
+	           l4util_idstr(t), exc->pc, exc->sp, exc->err, exc->ulr);
 
 	if (l4x_debug_show_exceptions >= 2
 	    && !l4_utcb_exc_is_pf(exc)
@@ -3004,9 +3033,6 @@ struct l4x_exception_func_struct {
 	int           for_vcpu;
 };
 static struct l4x_exception_func_struct l4x_exception_func_list[] = {
-#ifdef CONFIG_L4_USE_L4VMM
-	{ .trap_mask = ~0UL,   .for_vcpu = 1, .f = l4vmm_handle_exception_r0 },
-#endif
 #ifdef ARCH_x86
 	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_hlt_for_bugs_test }, // before kprobes!
 #ifdef CONFIG_KPROBES
@@ -3155,6 +3181,7 @@ static int l4x_default(l4_cap_idx_t *src_id, l4_msgtag_t *tag)
 			return 0;
 		}
 
+		LOG_printf("EXvcada: pfa=%lx pc=%lx\n", pfa, pc);
 		/* Make exception out of PF */
 		*tag = l4_msgtag(-1, 1, 0, 0);
 		l4_utcb_mr()->mr[0] = -1;
@@ -3449,42 +3476,6 @@ void l4x_setup_threads(void)
 }
 
 /* -------------------------------------------------- */
-/* some irq stuff */
-
-#ifndef CONFIG_L4_TAMED
-#include <asm/hardirq.h>
-
-void l4x_local_irq_disable(void)
-{
-	l4x_real_irq_disable();
-	l4x_irq_flag(smp_processor_id()) = L4_IRQ_DISABLED;
-}
-EXPORT_SYMBOL(l4x_local_irq_disable);
-
-void l4x_local_irq_enable(void)
-{
-	l4x_irq_flag(smp_processor_id()) = L4_IRQ_ENABLED;
-	l4x_real_irq_enable();
-}
-EXPORT_SYMBOL(l4x_local_irq_enable);
-
-unsigned long l4x_local_save_flags(void)
-{
-	return l4x_irq_flag(smp_processor_id());
-}
-EXPORT_SYMBOL(l4x_local_save_flags);
-
-void l4x_local_irq_restore(unsigned long flags)
-{
-	l4x_irq_flag(smp_processor_id()) = flags;
-	if (flags == L4_IRQ_ENABLED)
-		l4x_real_irq_enable();
-
-}
-EXPORT_SYMBOL(l4x_local_irq_restore);
-#endif
-
-/* ----------------------------------------------------- */
 
 int l4x_peek_upage(unsigned long addr,
                    unsigned long __user *datap,

@@ -12,11 +12,11 @@ endif
 nostackp := $(call cc-option, -fno-stack-protector)
 CFLAGS_common.o		:= $(nostackp)
 
-obj-y			:= intel_cacheinfo.o addon_cpuid_features.o
+obj-y			:= intel_cacheinfo.o scattered.o topology.o
 obj-y			+= proc.o capflags.o powerflags.o common.o
 obj-y			+= vmware.o hypervisor.o sched.o mshyperv.o
 
-obj-$(CONFIG_X86_32)	+= bugs.o cmpxchg.o
+obj-$(CONFIG_X86_32)	+= bugs.o
 obj-$(CONFIG_X86_64)	+= bugs_64.o
 
 obj-$(CONFIG_CPU_SUP_INTEL)		+= intel.o
@@ -52,7 +52,6 @@ cyrix-y		       := $(b)/cyrix.o
 centaur-y	       := $(b)/centaur.o
 transmeta-y	       := $(b)/transmeta.o
 intel_cacheinfo-y      := $(b)/intel_cacheinfo.o
-addon_cpuid_features-y := $(b)/addon_cpuid_features.o
 rise-y		       := $(b)/rise.o
 nexgen-y	       := $(b)/nexgen.o
 umc-y		       := $(b)/umc.o
@@ -61,8 +60,9 @@ bugs-y		       := $(b)/bugs.o
 perfctr-watchdog-y     := $(b)/perfctr-watchdog.o
 feature_names-y        := $(b)/feature_names.o
 powerflags-y           := $(b)/powerflags.o
-cmpxchg-y              := $(b)/cmpxchg.o
 vmware-y               := $(b)/vmware.o
 hypervisor-y           := $(b)/hypervisor.o
 sched-y                := $(b)/sched.o
 mshyperv-y             := $(b)/mshyperv.o
+scattered-y            := $(b)/scattered.o
+topology-y             := $(b)/topology.o

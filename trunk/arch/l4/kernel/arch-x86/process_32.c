@@ -57,6 +57,8 @@
 #include <asm/syscalls.h>
 #include <asm/debugreg.h>
 
+#include <trace/events/power.h>
+
 #include <asm/api/macros.h>
 
 #include <asm/generic/sched.h>
@@ -67,7 +69,6 @@
 #include <asm/generic/stack_id.h>
 
 #include <asm/l4lxapi/task.h>
-#include <asm/l4x/iodb.h>
 
 /*
  * Return saved PC of a blocked thread.
@@ -122,6 +123,8 @@ void cpu_idle(void)
 			stop_critical_timings();
 			pm_idle();
 			start_critical_timings();
+
+			trace_power_end(smp_processor_id());
 		}
 		tick_nohz_restart_sched_tick();
 		preempt_enable_no_resched();
@@ -323,7 +326,7 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 	struct task_struct *p, struct pt_regs *regs)
 {
 	struct pt_regs *childregs;
-	struct task_struct *cur = current;
+	struct task_struct *tsk = current;
 	int err;
 
 #ifdef CONFIG_L4_VCPU
@@ -350,18 +353,26 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 #endif
 	//p->thread.ip = (unsigned long) ret_from_fork;
 
-	/* Copy segment registers */
-	p->thread.gs = cur->thread.gs;
+	//task_user_gs(p) = get_user_gs(regs);
 
+	p->thread.io_bitmap_ptr = NULL;
+	tsk = current;
 	err = -ENOMEM;
+
+	/* Copy segment registers */
+	p->thread.gs = tsk->thread.gs;
 
 	memset(p->thread.ptrace_bps, 0, sizeof(p->thread.ptrace_bps));
 
-	/*
-	 * Inherit the IOPL
-	 */
-	if (unlikely(cur->thread.iodb))
-		l4x_iodb_copy(cur, p);
+	if (unlikely(test_tsk_thread_flag(tsk, TIF_IO_BITMAP))) {
+		p->thread.io_bitmap_ptr = kmemdup(tsk->thread.io_bitmap_ptr,
+						IO_BITMAP_BYTES, GFP_KERNEL);
+		if (!p->thread.io_bitmap_ptr) {
+			p->thread.io_bitmap_max = 0;
+			return -ENOMEM;
+		}
+		set_tsk_thread_flag(p, TIF_IO_BITMAP);
+	}
 
 	err = 0;
 
@@ -372,12 +383,10 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 		err = do_set_thread_area(p, -1,
 			(struct user_desc __user *)childregs->si, 0);
 
-#ifdef NOT_FOR_L4
 	if (err && p->thread.io_bitmap_ptr) {
 		kfree(p->thread.io_bitmap_ptr);
 		p->thread.io_bitmap_max = 0;
 	}
-#endif
 
 #ifdef CONFIG_L4_VCPU
 	if (!err)
@@ -432,7 +441,10 @@ EXPORT_SYMBOL(start_thread);
 
 #ifndef CONFIG_L4_VCPU
 /* kernel-internal execve() */
-asmlinkage int l4_kernelinternal_execve(char * file, char ** argv, char ** envp)
+asmlinkage int
+l4_kernelinternal_execve(const char * file,
+                         const char * const * argv,
+                         const char * const * envp)
 {
 	int ret;
 	struct thread_struct *t = &current->thread;

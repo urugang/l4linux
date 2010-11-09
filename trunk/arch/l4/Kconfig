@@ -254,19 +254,10 @@ config L4_MEMSIZE
 	  kernel parameter.
 
 config L4_TAMED
-	bool
-	#bool "Use tamed mode"
-	default y
-	help
-	The normal Linux server uses simple means like cli and sti
-	to protect critical sections. If you say Y here the Linux server
-	uses a queued lock to implement synchronization.
-
-	Note: This works only with recent versions of Fiasco! The Fiasco
-	config option "Deceit bit disables switch" must be enabled!
+	def_bool y
 
 config L4_VCPU
-	bool "Use alternative execution model (WIP)"
+	bool "Use alternative execution model"
 
 
 menu "Priority configuration"
@@ -380,28 +371,6 @@ endmenu # priority configuration
 #	  Do not use, unless you know what you're doing.
 #
 #endmenu # monitoring options
-
-#config L4_USE_L4VMM
-#	bool "Use L4VMM (EXPERIMENTAL)"
-#	default n
-#	depends on L4_ARCH_X86
-#	help
-#	  L4VMM can emulate hardware and provide access to virtual and
-#	  physical host devices. For PCI, enable PCI support (choose direct
-#	  access mode) and the required device drivers.
-#
-#	  Note: Don't use loader's allow_bios flag when enabling this
-#	        option.
-#
-#config L4_USE_L4VMM_DBG
-#	bool "Use L4VMM with debugging support"
-#	default n
-#	depends on L4_USE_L4VMM
-#	help
-#	  Use a debug build of L4VMM to ease debugging. This version is
-#	  bigger and slower than a normal version.
-#
-#	  If unsure, say N.
 
 config L4_CONFIG_CHECKS
 	bool "Configuration sanity checks"

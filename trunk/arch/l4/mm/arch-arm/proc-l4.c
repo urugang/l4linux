@@ -95,10 +95,10 @@ void cpu_v6_proc_init(void) { printk("%s\n", __func__); }
  *  - Disable interrupts
  *  - Clean and turn off caches.
  */
-void cpu_sa1100_proc_fin(void) { local_irq_disable(); }
-void cpu_arm926_proc_fin(void) { local_irq_disable(); }
+void cpu_sa1100_proc_fin(void) { }
+void cpu_arm926_proc_fin(void) { }
 #ifdef CONFIG_CPU_V6
-void cpu_v6_proc_fin(void) { local_irq_disable(); }
+void cpu_v6_proc_fin(void) { }
 #endif
 
 void  __attribute__((noreturn)) l4x_cpu_reset(unsigned long addr)

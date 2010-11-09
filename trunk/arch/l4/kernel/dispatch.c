@@ -162,7 +162,6 @@ static inline void verbose_segfault(struct task_struct *p,
 
 static inline int l4x_handle_page_fault(struct task_struct *p,
                                         struct pt_regs *regs,
-                                        l4_msgtag_t tag,
                                         l4_umword_t pfa, l4_umword_t ip,
                                         l4_umword_t *d0, l4_umword_t *d1)
 {
@@ -172,13 +171,6 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 	l4x_debug_stats_pagefault_hit();
 
 	*d0 = pfa;
-
-#ifndef CONFIG_L4_VCPU
-	if (l4_msgtag_is_io_page_fault(tag))
-		return l4x_handle_io_page_fault(p, pfa, d0, d1);
-#else
-	(void)tag;
-#endif
 
 	if (likely(pfa < TASK_SIZE)) {
 
@@ -682,7 +674,6 @@ static void l4x_evict_mem(l4_umword_t d)
 
 static inline void l4x_dispatch_page_fault(struct task_struct *p,
                                            struct thread_struct *t,
-                                           l4_msgtag_t tag,
                                            struct pt_regs *regsp,
                                            l4_umword_t *d0,
                                            l4_umword_t *d1,
@@ -698,7 +689,7 @@ static inline void l4x_dispatch_page_fault(struct task_struct *p,
 		return;
 	}
 
-	if (l4x_handle_page_fault(p, regsp, tag, l4x_l4pfa(t),
+	if (l4x_handle_page_fault(p, regsp, l4x_l4pfa(t),
 	                          regs_pc(t), d0, d1)) {
 		if (!signal_pending(p))
 			force_sig(SIGSEGV, p);
@@ -866,6 +857,7 @@ asmlinkage void l4x_user_dispatcher(void)
 	struct task_struct *p = current;
 	struct thread_struct *t = &p->thread;
 	l4_utcb_t *utcb;
+	unsigned cpu;
 	l4_umword_t data0 = 0, data1 = 0;
 	int error = 0;
 	l4_umword_t label;
@@ -877,13 +869,16 @@ asmlinkage void l4x_user_dispatcher(void)
 	t->restart = 0;
 restart_loop:
 	utcb = l4_utcb();
+	preempt_disable();
+	cpu = smp_processor_id();
+	preempt_enable();
 	l4x_spawn_cpu_thread(0, p, t);
 	reply_with_fpage = 0;
 	goto reply_IPC;
 
 	while (1) {
 		if (l4x_ispf(t)) {
-			l4x_dispatch_page_fault(p, t, tag, &t->regs,
+			l4x_dispatch_page_fault(p, t, &t->regs,
 			                        &data0, &data1, &reply_with_fpage);
 		} else {
 			if ((ret = l4x_dispatch_exception(p, t, 0, L4X_THREAD_REGSP(t)))) {
@@ -896,18 +891,21 @@ restart_loop:
 		}
 
 		utcb = l4_utcb();
+		preempt_disable();
+		cpu  = smp_processor_id();
+		preempt_enable();
 
-		if (!test_bit(smp_processor_id(), &p->thread.threads_up))
+		if (!test_bit(cpu, &p->thread.threads_up))
 			l4x_spawn_cpu_thread(1, p, t);
 
 		p->thread.user_thread_id
-			= p->thread.user_thread_ids[smp_processor_id()];
+			= p->thread.user_thread_ids[cpu];
 
 reply_IPC:
 		thread_struct_to_utcb(t, utcb,
 		                      L4_UTCB_EXCEPTION_REGS_SIZE);
 
-		per_cpu(l4x_current_proc_run, smp_processor_id()) = current_thread_info();
+		per_cpu(l4x_current_proc_run, cpu) = current_thread_info();
 
 		/*
 		 * Actually we could use l4_ipc_call here but for our
@@ -922,20 +920,20 @@ reply_IPC:
 
 		/* send the reply message and wait for a new request. */
 		if (reply_with_fpage) {
-			int i = per_cpu(utcb_snd_size, smp_processor_id());
+			int i = per_cpu(utcb_snd_size, cpu);
 			l4_utcb_mr_u(utcb)->mr[i]     = data0;
 			l4_utcb_mr_u(utcb)->mr[i + 1] = data1;
 		}
 
-		tag = l4_msgtag(0, per_cpu(utcb_snd_size, smp_processor_id()),
-		                reply_with_fpage, l4x_msgtag_fpu() | l4x_msgtag_copy_ureg(utcb));
+		tag = l4_msgtag(0, per_cpu(utcb_snd_size, cpu),
+		                reply_with_fpage, l4x_msgtag_fpu(cpu) | l4x_msgtag_copy_ureg(utcb));
 
-		if (l4x_msgtag_fpu())
+		if (l4x_msgtag_fpu(cpu))
 			l4_utcb_inherit_fpu_u(utcb, 1);
 		tag = l4_ipc_send_and_wait(p->thread.user_thread_id, utcb,
 		                           tag, &label, L4_IPC_SEND_TIMEOUT_0);
 after_IPC:
-		per_cpu(l4x_current_proc_run, smp_processor_id()) = NULL;
+		per_cpu(l4x_current_proc_run, cpu) = NULL;
 		l4_utcb_inherit_fpu_u(utcb, 0);
 
 		error = l4_ipc_error(tag, utcb);
@@ -952,17 +950,17 @@ after_IPC:
 			LOG_printf("dispatch%d: "
 			           "IPC error SETIMEOUT (context) (to = "
 			           PRINTF_L4TASK_FORM ", src = %lx)\n",
-			           smp_processor_id(),
+			           cpu,
 			           PRINTF_L4TASK_ARG(p->thread.user_thread_id),
 			           label);
 			enter_kdebug("L4_IPC_SETIMEOUT?!");
 
 only_receive_IPC:
-			per_cpu(l4x_current_proc_run, smp_processor_id()) = current_thread_info();
+			per_cpu(l4x_current_proc_run, cpu) = current_thread_info();
 			TBUF_LOG_DSP_IPC_IN(fiasco_tbuf_log_3val("DSP-in (O) ",
 			                    TBUF_TID(current->thread.user_thread_id),
 			                    label, 0));
-			if (l4x_msgtag_fpu())
+			if (l4x_msgtag_fpu(cpu))
 				l4_utcb_inherit_fpu_u(utcb, 1);
 			tag = l4_ipc_wait(utcb, &label, L4_IPC_SEND_TIMEOUT_0);
 			goto after_IPC;
@@ -975,7 +973,7 @@ only_receive_IPC:
 
 			LOG_printf("dispatch%d: IPC error = 0x%x (context) (to = "
 			           PRINTF_L4TASK_FORM ", src = %lx)\n",
-			           smp_processor_id(), error,
+			           cpu, error,
 			           PRINTF_L4TASK_ARG(p->thread.user_thread_id),
 			           label);
 			enter_kdebug("ipc error");
@@ -1102,7 +1100,7 @@ void l4x_vcpu_iret(struct task_struct *p,
 		                     | L4_VCPU_F_EXCEPTIONS
 		                     | L4_VCPU_F_PAGE_FAULTS;
 
-		if (l4x_msgtag_fpu())
+		if (l4x_msgtag_fpu(smp_processor_id()))
 			vcpu->saved_state |= L4_VCPU_F_FPU_ENABLED;
 		else
 			vcpu->saved_state &= ~L4_VCPU_F_FPU_ENABLED;
@@ -1197,6 +1195,14 @@ l4x_vcpu_entry_kern(l4_vcpu_state_t *vcpu)
 		}
 	}
 
+#ifdef CONFIG_PREEMPT
+	if (!preempt_count()) {
+		extern asmlinkage void __sched preempt_schedule_irq(void);
+		while (need_resched() && (regsp->flags & X86_EFLAGS_IF))
+			preempt_schedule_irq();
+	}
+#endif
+
 	mb();
 	l4x_vcpu_iret(p, t, regsp, 0, 0, copy_ptregs);
 }
@@ -1254,7 +1260,7 @@ asmlinkage void l4x_vcpu_entry(void)
 		l4_umword_t data0 = 0, data1 = 0;
 		int reply_with_fpage;
 
-		l4x_dispatch_page_fault(p, t, l4_msgtag(0, 0, 0, 0), regsp,
+		l4x_dispatch_page_fault(p, t, regsp,
 		                        &data0, &data1, &reply_with_fpage);
 		if (signal_pending(p))
 			l4x_do_signal(regsp, 0);

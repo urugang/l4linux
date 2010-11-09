@@ -92,6 +92,7 @@ asm(
 "	ldmia sp!, {r1}\n" // func
 "	ldmia sp!, {lr}\n" // ret
 "	ldmia sp!, {r0}\n" // arg1
+"	bic sp, sp, #7\n"
 "	mov pc, r1\n"
 );
 #endif
@@ -188,8 +189,9 @@ l4_cap_idx_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 		return L4_INVALID_CAP;
 	}
 
-	LOG_printf("%s: Created thread " PRINTF_L4TASK_FORM " (%s) (u:%08lx)\n",
-	           __func__, PRINTF_L4TASK_ARG(l4cap), name, (l4_addr_t)utcb);
+	LOG_printf("%s: Created thread " PRINTF_L4TASK_FORM " (%s) (u:%08lx, sp:%08lx)\n",
+	           __func__, PRINTF_L4TASK_ARG(l4cap), name,
+	           (l4_addr_t)utcb, (l4_umword_t)sp);
 
 
 #ifdef ARCH_arm

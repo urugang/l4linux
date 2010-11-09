@@ -497,8 +497,7 @@ static int l4fb_input_setup(void)
 
 	set_bit(ABS_PRESSURE,   l4input_dev_mouse->absbit);
 	set_bit(ABS_TOOL_WIDTH, l4input_dev_mouse->absbit);
-	l4input_dev_mouse->absmin[ABS_PRESSURE] = 0;
-	l4input_dev_mouse->absmax[ABS_PRESSURE] = 1;
+	input_set_abs_params(l4input_dev_mouse, ABS_PRESSURE, 0, 1, 0, 0);
 
 	/* Coordinates are 1:1 pixel in frame buffer */
 	input_set_abs_params(l4input_dev_mouse, ABS_X, 0, fbi.width, 0, 0);

@@ -26,7 +26,9 @@ int l4x_vcpu_handle_kernel_pf(unsigned long pfa, unsigned long ip, int wr);
 int l4x_vcpu_handle_kernel_exc(l4_vcpu_regs_t *vr);
 #endif
 
-asmlinkage int l4_kernelinternal_execve(char * file, char ** argv, char ** envp);
+asmlinkage int l4_kernelinternal_execve(const char * file,
+                                        const char * const * argv,
+                                        const char * const * envp);
 
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
 void l4x_print_vm_area_maps(struct task_struct *p);

@@ -2,9 +2,16 @@
  *  This file is questionable as we also could define these memory areas
  *  in C files, on the other hand this "asm" code looks very portable...
  */
+#include <linux/init.h>
 #include <linux/linkage.h>
+#include <asm/asm-offsets.h>
 
 #ifdef ARCH_x86
+
+/* Physical address */
+//#define pa(X) ((X) - __PAGE_OFFSET)
+#define pa(X) ((X))
+
 .section ".text"
 	mov 0(%esi), %edi
 	mov %edi, __l4_external_resolver
@@ -20,9 +27,30 @@
 
 	jmp main
 .previous
+
+	__REFDATA
+.align 4
+ENTRY(initial_page_table)
+	.long pa(swapper_pg_dir)
+
+/*
+ * BSS section
+ */
 __PAGE_ALIGNED_BSS
+	.align PAGE_SIZE_asm
+#ifdef CONFIG_X86_PAE
+swapper_pg_pmd:
+	.fill 1024*KPMDS,4,0
+#else
 ENTRY(swapper_pg_dir)
 	.fill 1024,4,0
+#endif
+swapper_pg_fixmap:
+	.fill 1024,4,0
+#ifdef CONFIG_X86_TRAMPOLINE
+ENTRY(trampoline_pg_dir)
+	.fill 1024,4,0
+#endif
 ENTRY(empty_zero_page)
 	.fill 4096,1,0
 .previous

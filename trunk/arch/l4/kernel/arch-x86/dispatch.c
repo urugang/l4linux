@@ -41,7 +41,6 @@
 
 #include <asm/l4x/exception.h>
 #include <asm/l4x/fpu.h>
-#include <asm/l4x/iodb.h>
 #include <asm/l4x/l4_syscalls.h>
 #include <asm/l4x/lx_syscalls.h>
 #include <asm/l4x/utcb.h>
@@ -89,12 +88,12 @@ void l4x_fpu_set(int on_off)
 
 struct l4x_arch_cpu_fpu_state *l4x_fpu_get(unsigned cpu)
 {
-	return &per_cpu(l4x_cpu_fpu_state, smp_processor_id());
+	return &per_cpu(l4x_cpu_fpu_state, cpu);
 }
 
-static inline int l4x_msgtag_fpu(void)
+static inline int l4x_msgtag_fpu(unsigned cpu)
 {
-	return l4x_fpu_get(smp_processor_id())->enabled
+	return l4x_fpu_get(cpu)->enabled
 	       ?  L4_MSGTAG_TRANSFER_FPU : 0;
 }
 
@@ -211,8 +210,8 @@ static inline void l4x_print_regs(struct thread_struct *t, struct pt_regs *r)
 	       r->ip, r->sp, t->error_code, t->trap_no);
 	printk("ax: %08lx bx: %08lx  cx: %08lx  dx: %08lx\n",
 	       r->ax, r->bx, r->cx, r->dx);
-	printk("di: %08lx si: %08lx  bp: %08lx\n",
-	       r->di, r->si, r->bp);
+	printk("di: %08lx si: %08lx  bp: %08lx  gs: %08lx fs: %08lx\n",
+	       r->di, r->si, r->bp, r->gs, r->fs);
 }
 
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
@@ -348,7 +347,7 @@ static inline void utcb_to_thread_struct(l4_utcb_t *utcb,
                                          struct thread_struct *t)
 {
 	l4_exc_regs_t *exc = l4_utcb_exc_u(utcb);
-	utcb_exc_to_ptregs(exc, &t->regs);
+	utcb_exc_to_ptregs(exc, L4X_THREAD_REGSP(t));
 	t->gs         = exc->gs;
 	t->trap_no    = exc->trapno;
 	t->error_code = exc->err;
@@ -359,9 +358,12 @@ static inline void thread_struct_to_utcb(struct thread_struct *t,
                                          l4_utcb_t *utcb,
                                          unsigned int send_size)
 {
-	ptregs_to_utcb_exc(&t->regs, l4_utcb_exc_u(utcb));
-	l4_utcb_exc_u(utcb)->gs   = t->gs;
+	l4_exc_regs_t *exc = l4_utcb_exc_u(utcb);
+	ptregs_to_utcb_exc(L4X_THREAD_REGSP(t), exc);
+	exc->gs   = t->gs;
+#ifndef CONFIG_L4_VCPU
 	per_cpu(utcb_snd_size, smp_processor_id()) = send_size;
+#endif
 }
 #endif
 
@@ -614,6 +616,24 @@ static int l4x_kdebug_emulation(struct pt_regs *regs)
 typedef void l4_vcpu_state_t;
 #endif
 
+static inline unsigned r_trapno(struct thread_struct *t, l4_vcpu_state_t *v)
+{
+#ifdef CONFIG_L4_VCPU
+	return v->r.trapno;
+#else
+	return t->trap_no;
+#endif
+}
+
+static inline unsigned r_err(struct thread_struct *t, l4_vcpu_state_t *v)
+{
+#ifdef CONFIG_L4_VCPU
+	return v->r.err;
+#else
+	return t->error_code;
+#endif
+}
+
 /*
  * Return values: 0 -> do send a reply
  *                1 -> don't send a reply
@@ -637,11 +657,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 
 		return 0;
 #endif
-#ifdef CONFIG_L4_VCPU
-	} else if (likely(v->r.trapno == 0xd && v->r.err == 0x402)) {
-#else
-	} else if (likely(t->trap_no == 0xd && t->error_code == 0x402)) {
-#endif
+	} else if (likely(r_trapno(t, v) == 0xd && r_err(t, v) == 0x402)) {
 		/* int 0x80 is trap 0xd and err 0x402 (0x80 << 3 | 2) */
 
 		TBUF_LOG_INT80(fiasco_tbuf_log_3val("int80  ", TBUF_TID(t->user_thread_id), regs->ip, regs->ax));
@@ -667,11 +683,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		return 2;
 #endif
 
-#ifdef CONFIG_L4_VCPU
-	} else if (v->r.trapno == 7) {
-#else
-	} else if (t->trap_no == 7) {
-#endif
+	} else if (r_trapno(t, v) == 7) {
 		math_state_restore();
 
 		/* XXX: math emu*/
@@ -679,42 +691,22 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 
 		return 0;
 
-#ifdef CONFIG_L4_VCPU
-	} else if (v->r.trapno == 1) {
-#else
-	} else if (unlikely(t->trap_no == 0x1)) {
-#endif
+	} else if (unlikely(r_trapno(t, v) == 1)) {
 		/* Singlestep */
-#if 0
-		LOG_printf("ip: %08lx sp: %08lx err: %08lx trp: %08lx\n",
-		           regs->ip, regs->sp,
-		           t->error_code, t->trap_no);
-		LOG_printf("ax: %08lx ebx: %08lx ecx: %08lx edx: %08lx\n",
-		           regs->ax, regs->bx, regs->cx,
-		           regs->dx);
-#endif
 		return 0;
+	} else if (r_trapno(t, v) == 0xd) {
 #ifndef CONFIG_L4_VCPU
-	} else if (t->trap_no == 0xd) {
 		if (l4x_hybrid_begin(p, t))
 			return 0;
+#endif
 
 		/* Fall through otherwise */
-#endif
 	}
 
-#ifdef CONFIG_L4_VCPU
-	if (v->r.trapno == 3) {
-#else
-	if (t->trap_no == 3) {
-#endif
+	if (r_trapno(t, v) == 3) {
 		if (l4x_kdebug_emulation(regs))
 			return 0; /* known and handled */
-#ifndef CONFIG_L4_VCPU
-		do_int3(regs, t->error_code);
-#else
-		do_int3(regs, v->r.err);
-#endif
+		do_int3(regs, r_err(t, v));
 		if (signal_pending(p))
 			l4x_do_signal(regs, 0);
 		if (need_resched())
@@ -727,11 +719,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 
 	TBUF_LOG_EXCP(fiasco_tbuf_log_3val("except ", TBUF_TID(t->user_thread_id), t->trap_no, t->error_code));
 
-#ifdef CONFIG_L4_VCPU
-	if (l4x_deliver_signal(v->r.trapno, v->r.err))
-#else
-	if (l4x_deliver_signal(t->trap_no, t->error_code))
-#endif
+	if (l4x_deliver_signal(r_trapno(t, v), r_err(t, v)))
 		return 0; /* handled signal, reply */
 
 	/* This path should never be reached... */
@@ -751,40 +739,6 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
 {
 	return 0; // not for us
-}
-
-static inline int l4x_handle_io_page_fault(struct task_struct *p,
-                                           l4_umword_t pfa,
-                                           l4_umword_t *d0, l4_umword_t *d1)
-{
-	l4_fpage_t fp;
-
-	fp.fpage = pfa;
-	DBG_IODB("USR [%s]: IO port 0x%04x", p->comm, l4_fpage_page(fp));
-	if (l4_fpage_size(fp))
-		DBG_IODB("-0x%04x",
-			 l4_fpage_page(fp) + (1 << l4_fpage_size(fp)) - 1);
-	DBG_IODB("\n");
-
-	if (l4x_iodb_read_portrange(p, L4X_IODB_PORT_IOPL, 0) == 3) {
-		DBG_IODB("USR [%s]: IOPL == 3.\n", p->comm);
-		*d0  = 0;
-		*d1  = fp.fpage;
-	} else {
-		DBG_IODB("USR [%s]: IOPL != 3.\n", p->comm);
-		if (l4x_iodb_read_portrange(p, l4_fpage_page(fp),
-		                            1 << l4_fpage_size(fp))) {
-			DBG_IODB("USR [%s]: port allowed.\n",
-			         p->comm);
-			*d0  = 0;
-			*d1  = fp.fpage;
-		} else {
-			DBG_IODB("USR  [%s]: I/O not allowed.\n",
-			         p->comm);
-			return 1;
-		}
-	}
-	return 0;
 }
 
 #ifdef CONFIG_L4_VCPU

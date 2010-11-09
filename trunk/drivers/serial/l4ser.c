@@ -270,6 +270,7 @@ static int __init l4ser_init_port(int num, const char *name)
 	l4ser_port[num].vcon_irq_cap = l4x_cap_alloc();
 	if (l4_is_invalid_cap(l4ser_port[num].vcon_irq_cap)) {
 		l4x_cap_free(l4ser_port[num].vcon_cap);
+		L4XV_U(f);
 		l4ser_port[num].vcon_cap = L4_INVALID_CAP;
 		return -ENOMEM;
 	}

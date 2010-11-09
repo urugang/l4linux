@@ -30,6 +30,7 @@
 #include <asm/unistd.h>
 #include <asm/traps.h>
 #include <asm/unwind.h>
+#include <asm/tls.h>
 
 #include "ptrace.h"
 #include "signal.h"
@@ -254,6 +255,7 @@ static int __die(const char *str, int err, struct thread_info *thread, struct pt
 		dump_backtrace(regs, tsk);
 		dump_instr(KERN_EMERG, regs);
 	}
+
 
 	return ret;
 }
@@ -523,17 +525,22 @@ asmlinkage int arm_syscall(int no, struct pt_regs *regs)
 #ifdef CONFIG_L4_ARM_UPAGE_TLS
 		*(unsigned long *)(upage_addr + UPAGE_USER_TLS_OFFSET) = regs->ARM_r0;
 #endif
-#if defined(CONFIG_L4) || defined(CONFIG_HAS_TLS_REG)
-		//l4/asm ("mcr p15, 0, %0, c13, c0, 3" : : "r" (regs->ARM_r0) );
-#elif !defined(CONFIG_TLS_REG_EMUL)
-		/*
-		 * User space must never try to access this directly.
-		 * Expect your app to break eventually if you do so.
-		 * The user helper at 0xffff0fe0 must be used instead.
-		 * (see entry-armv.S for details)
-		 */
-		//l4/*((unsigned int *)0xffff0ff0) = regs->ARM_r0;
-#endif
+		if (tls_emu)
+			return 0;
+		if (1)
+			return 0;
+		if (has_tls_reg) {
+			asm ("mcr p15, 0, %0, c13, c0, 3"
+				: : "r" (regs->ARM_r0));
+		} else {
+			/*
+			 * User space must never try to access this directly.
+			 * Expect your app to break eventually if you do so.
+			 * The user helper at 0xffff0fe0 must be used instead.
+			 * (see entry-armv.S for details)
+			 */
+			*((unsigned int *)0xffff0ff0) = regs->ARM_r0;
+		}
 		return 0;
 
 //#ifdef CONFIG_NEEDS_SYSCALL_FOR_CMPXCHG
@@ -701,6 +708,7 @@ baddataabort(int code, unsigned long instr, struct pt_regs *regs)
 void __attribute__((noreturn)) __bug(const char *file, int line)
 {
 	printk(KERN_CRIT"kernel BUG at %s:%d!\n", file, line);
+	while (1);
 	*(int *)0 = 0;
 
 	/* Avoid "noreturn function does return" */
@@ -751,6 +759,17 @@ void __init trap_init(void)
 	return;
 }
 
+static void __init kuser_get_tls_init(unsigned long vectors)
+{
+	/*
+	 * vectors + 0xfe0 = __kuser_get_tls
+	 * vectors + 0xfe8 = hardware TLS instruction at 0xffff0fe8
+	 * L4: one instruction more, see asm
+	 */
+	if (tls_emu || has_tls_reg)
+		memcpy((void *)vectors + 0xfe0, (void *)vectors + 0xfec, 12);
+}
+
 void __init early_trap_init(void)
 {
 #if 0
@@ -772,6 +791,18 @@ void __init early_trap_init(void)
 
 #ifdef CONFIG_L4
 	extern char __upage_asm_start[], __upage_asm_end[];
+
+	memcpy((void *)(upage_addr + 0xfa0), __upage_asm_start,
+	       __upage_asm_end - __upage_asm_start);
+#endif
+
+	/*
+	 * Do processor specific fixups for the kuser helpers
+	 */
+#ifdef CONFIG_L4
+	kuser_get_tls_init(upage_addr);
+#else
+	kuser_get_tls_init(vectors);
 #endif
 
 	/*
@@ -782,13 +813,6 @@ void __init early_trap_init(void)
 	       sizeof(sigreturn_codes));
 	memcpy((void *)KERN_RESTART_CODE, syscall_restart_code,
 	       sizeof(syscall_restart_code));
-
-#ifdef CONFIG_L4
-	memcpy((void *)(upage_addr + 0xfa0), __upage_asm_start,
-	       __upage_asm_end - __upage_asm_start);
-#endif
-
-
 
 #if 0
 	flush_icache_range(vectors, vectors + PAGE_SIZE);

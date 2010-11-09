@@ -11,6 +11,7 @@
 #include <asm/io.h>
 #include <asm/unistd.h>
 #include <asm/pgalloc.h>
+#include <asm/tls.h>
 
 #include <l4/sys/cache.h>
 #include <l4/sys/ipc.h>
@@ -57,6 +58,11 @@
 #define USER_PATCH_CMPXCHG
 #define USER_PATCH_GETTLS
 #define USER_PATCH_DMB
+enum {
+ USER_PATCH_CMPXCHG_SHOW = 0,
+ USER_PATCH_GETTLS_SHOW  = 0,
+ USER_PATCH_DMB_SHOW     = 0,
+};
 
 
 #if 0
@@ -96,12 +102,12 @@ static DEFINE_PER_CPU(struct l4x_arch_cpu_fpu_state, l4x_cpu_fpu_state);
 
 struct l4x_arch_cpu_fpu_state *l4x_fpu_get(unsigned cpu)
 {
-	return &per_cpu(l4x_cpu_fpu_state, smp_processor_id());
+	return &per_cpu(l4x_cpu_fpu_state, cpu);
 }
 
-static inline int l4x_msgtag_fpu(void)
+static inline int l4x_msgtag_fpu(unsigned cpu)
 {
-	return (l4x_fpu_get(smp_processor_id())->fpexc & (1 << 30)) ?  L4_MSGTAG_TRANSFER_FPU : 0;
+	return (l4x_fpu_get(cpu)->fpexc & (1 << 30)) ?  L4_MSGTAG_TRANSFER_FPU : 0;
 }
 
 #ifdef CONFIG_VFP
@@ -116,10 +122,10 @@ static void l4x_fpu_get_info(l4_utcb_t *utcb)
 
 static inline int l4x_msgtag_copy_ureg(l4_utcb_t *u)
 {
-#ifdef CONFIG_HAS_TLS_REG
-	l4_utcb_mr_u(u)->mr[25] = current_thread_info()->tp_value;
-	return 0x8000;
-#endif
+	if (tls_emu || has_tls_reg) {
+		l4_utcb_mr_u(u)->mr[25] = current_thread_info()->tp_value;
+		return 0x8000;
+	}
 	return 0;
 }
 
@@ -263,6 +269,9 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #ifndef CONFIG_L4_VCPU
 	next->thread.user_thread_id = next->thread.user_thread_ids[smp_processor_id()];
 #endif
+	/* Migrated thread? */
+	l4x_stack_struct_get(next->stack)->l4utcb
+	  = l4x_stack_struct_get(prev->stack)->l4utcb;
 #endif
 
 #ifdef CONFIG_L4_VCPU
@@ -318,7 +327,9 @@ static inline void thread_struct_to_utcb(struct thread_struct *t,
                                          unsigned int send_size)
 {
 	ptregs_to_utcb_exc(L4X_THREAD_REGSP(t), l4_utcb_exc_u(utcb));
+#ifndef CONFIG_L4_VCPU
 	per_cpu(utcb_snd_size, smp_processor_id()) = send_size;
+#endif
 }
 #endif
 
@@ -358,7 +369,7 @@ static inline void call_system_call_args(syscall_t *sctbl,
 	syscall_t syscall_fn;
 
 #ifdef DEBUG_SYSCALL_PRINTFS
-	if (0)
+	if (1)
 		printk("Syscall call: %ld for %d(%s, pc=%p, lr=%p, sp=%08lx, "
 		       "cpu=%d) (%08lx %08lx %08lx %08lx %08lx %08lx)\n",
 		       syscall, current->pid, current->comm,
@@ -395,6 +406,13 @@ static inline void call_system_call_args(syscall_t *sctbl,
 		       current->pid, current->comm,
 		       IS_ERR(filename) ? "INVALID" : filename, arg1);
 		putname(filename);
+	}
+	if (0 && syscall == 12) {
+		char *f1 = getname((char *)arg1);
+		printk("chdir: pid: %d(%s): %s\n",
+		       current->pid, current->comm,
+		       IS_ERR(f1) ? "INVALID" : f1);
+		putname(f1);
 	}
 	if (0 && syscall == 14) {
 		char *f1 = getname((char *)arg1);
@@ -926,7 +944,7 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
 #ifdef USER_PATCH_GETTLS
 		unsigned long val;
 
-		if (0) {
+		if (USER_PATCH_GETTLS_SHOW) {
 			unsigned long op;
 			printk("GETTLS hit at lr=%lx pc=%lx\n", regs->ARM_lr, regs->ARM_pc);
 			get_user(op, (unsigned long *)regs->ARM_lr);
@@ -982,6 +1000,8 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
 			l4_cache_coherent(val, val + 12);
 
 			regs->ARM_pc = tlsfunc;
+			if (USER_PATCH_GETTLS_SHOW)
+				printk("  handled (1)\n");
 			return 1; // handled
 		}
 
@@ -1014,11 +1034,13 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
 			l4_cache_coherent(val, val + 12);
 
 			regs->ARM_pc = regs->ARM_lr - 12;
+			if (USER_PATCH_GETTLS_SHOW)
+				printk("  handled (2)\n");
 			return 1; // handled
 		}
 
 trap_and_emulate:
-		if (0)
+		if (USER_PATCH_GETTLS_SHOW)
 			printk("   failed... emulating get-tls-func lr=%lx\n", regs->ARM_lr);
 #endif
 		regs->ARM_r0 = current_thread_info()->tp_value;
@@ -1035,7 +1057,7 @@ trap_and_emulate:
 #ifdef USER_PATCH_CMPXCHG
 		unsigned long val;
 
-		if (0) {
+		if (USER_PATCH_CMPXCHG_SHOW) {
 			printk("CMPXCHG hit at lr=%lx pc=%lx\n", regs->ARM_lr, regs->ARM_pc);
 			fiasco_tbuf_log_3val("cmpxchg", regs->ARM_lr, regs->ARM_pc, 0);
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
@@ -1078,13 +1100,14 @@ trap_and_emulate:
 			l4_cache_coherent(val, val + 12);
 
 			regs->ARM_pc = regs->ARM_lr - 12;
-			//printk("   patched\n");
+			if (USER_PATCH_CMPXCHG_SHOW)
+				printk("   patched\n");
 			return 1; // handled
 		}
 
 
 trap_and_emulate_cmpxchg:
-		if (0)
+		if (USER_PATCH_CMPXCHG_SHOW)
 			printk("   failed... still taking the cmpxchg hit lr=%lx\n", regs->ARM_lr);
 #endif
 #if 0
@@ -1106,7 +1129,7 @@ trap_and_emulate_cmpxchg:
 		// dmb
 		unsigned long val;
 
-		if (0) {
+		if (USER_PATCH_DMB_SHOW) {
 			printk("DMB hit at lr=%lx pc=%lx\n", regs->ARM_lr, regs->ARM_pc);
 			fiasco_tbuf_log_3val("ARMdmb", regs->ARM_lr, regs->ARM_pc, 0);
 		}
@@ -1150,7 +1173,7 @@ trap_and_emulate_cmpxchg:
 		}
 
 trap_and_emulate_dmb:
-		if (0)
+		if (USER_PATCH_DMB_SHOW)
 			printk("   failed... still taking the dmb hit lr=%lx\n", regs->ARM_lr);
 
 #endif

@@ -108,31 +108,15 @@
 #include <asm/generic/irq.h>
 #include <asm/generic/vcpu.h>
 
-#ifndef CONFIG_L4_TAMED
-#include <l4/sys/kdebug.h>
+extern void l4x_global_cli(void);
+extern void l4x_global_sti(void);
+extern unsigned long l4x_global_save_flags(void);
+extern void l4x_global_restore_flags(unsigned long flags);
 
-  #define raw_local_save_flags(x)	do { (x) = l4x_local_save_flags(); } while (0)
-  #define raw_local_irq_restore(x)	do { l4x_local_irq_restore(x); } while (0)
-  #define l4x_real_irq_disable()	do { l4_sys_cli(); } while (0)
-  #define l4x_real_irq_enable()		do { l4_sys_sti(); } while (0)
-  #define raw_local_irq_disable()	do { l4x_local_irq_disable(); } while (0)
-  #define raw_local_irq_enable()	do { l4x_local_irq_enable(); } while (0)
-
-#else
-
-  extern void l4x_global_cli(void);
-  extern void l4x_global_sti(void);
-  extern unsigned long l4x_global_save_flags(void);
-  extern void l4x_global_restore_flags(unsigned long flags);
-
-  #define raw_local_save_flags(x)	do { (x) = l4x_global_save_flags(); } while (0)
-  #define raw_local_irq_restore(x)	do { l4x_global_restore_flags(x); } while (0)
-  #define l4x_real_irq_disable()	BUG()
-  #define l4x_real_irq_enable()		BUG()
-  #define raw_local_irq_disable()	do { l4x_global_cli(); } while (0)
-  #define raw_local_irq_enable()	do { l4x_global_sti(); } while (0)
-
-#endif
+#define raw_local_save_flags(x)	do { (x) = l4x_global_save_flags(); } while (0)
+#define raw_local_irq_restore(x)	do { l4x_global_restore_flags(x); } while (0)
+#define raw_local_irq_disable()	do { l4x_global_cli(); } while (0)
+#define raw_local_irq_enable()	do { l4x_global_sti(); } while (0)
 
 #define local_fiq_enable()	do { } while (0)
 

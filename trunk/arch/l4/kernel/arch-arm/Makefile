@@ -7,12 +7,15 @@ obj-y		:= process.o sys_arm.o time.o traps.o stacktrace.o \
 		   ptrace.o entry.o dispatch.o mach_setup.o io.o elf.o \
 		   return_address.o
 
+obj-$(CONFIG_DEPRECATED_PARAM_STRUCT) += compat.o
+
 obj-$(CONFIG_SMP)				+= smp.o platsmp.o
 obj-$(CONFIG_MODULES)				+= armksyms.o module.o
 obj-$(CONFIG_ISA_DMA_API)			+= dma.o
 obj-$(CONFIG_HOTPLUG_CPU)			+= hotplug.o
 obj-$(CONFIG_ARM_UNWIND)			+= unwind.o
 obj-$(CONFIG_OABI_COMPAT)                       += sys_oabi-compat.o
+obj-$(CONFIG_CRASH_DUMP)			+= crash_dump.o
 
 dma-y		:= ../../../arm/kernel/dma.o
 irq-y		:= ../../../arm/kernel/irq.o
@@ -24,10 +27,12 @@ unwind-y	:= ../../../arm/kernel/unwind.o
 stacktrace-y	:= ../../../arm/kernel/stacktrace.o
 return_address-y := ../../../arm/kernel/return_address.o
 sys_oabi-compat-y := ../../../arm/kernel/sys_oabi-compat.o
+compat-y        := ../../../arm/kernel/compat.o
+crash_dump-y    := ../../../arm/kernel/crash_dump.c
 
 KBUILD_CPPFLAGS	+= -I$(srctree)/arch/arm/kernel
 
-CPPFLAGS_vmlinux.lds += -DTEXT_OFFSET=0x1100000
+CPPFLAGS_vmlinux.lds += -DTEXT_OFFSET=0x0100000
 
 CFLAGS_REMOVE_return_address.o = -pg
 

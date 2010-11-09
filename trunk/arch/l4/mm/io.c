@@ -3,12 +3,7 @@
 #endif
 
 #include <asm/generic/io.h>
-
 #include <l4/sys/kdebug.h>
-
-#ifdef CONFIG_L4_USE_L4VMM
-#include <l4/vmm/vmm-compat.h>
-#endif
 
 #define MAX_IOREMAP_ENTRIES 20
 struct ioremap_table {

@@ -9,7 +9,6 @@
 #include <asm/mmu_context.h>
 #include <asm/l4lxapi/task.h>
 #include <asm/l4lxapi/thread.h>
-#include <asm/l4x/iodb.h>
 
 #include <l4/log/log.h>
 #include <l4/sys/debugger.h>
@@ -78,7 +77,6 @@ void l4x_exit_thread(void)
 
 	}
 #endif
-	l4x_iodb_free(current);
 
 #ifdef CONFIG_X86_DS
 	ds_exit_thread(current);
