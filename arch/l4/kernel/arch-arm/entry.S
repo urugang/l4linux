@@ -204,18 +204,23 @@ __kuser_cmpxchg:                          @ 0x0fc0
 	.align 5
 
 __kuser_get_tls:                          @ 0x0fe0
-#if !defined(CONFIG_HAS_TLS_REG) && !defined(CONFIG_TLS_REG_EMUL)
 	ldr	r0, [pc, #(16 - 8)]
-#else
+	usr_ret lr
+	.word	0
+
 	// haha, non-virtualizable...
 #ifdef CONFIG_L4_VCPU
 	mrc	p15, 0, r0, c13, c0, 2    @ tls-reg
+	usr_ret lr
+	.word	0
 #else
 	mrc	p15, 0, r0, c13, c0, 3    @ utcb-addr
 	ldr	r0, [r0, #(127*4)]        @ tcr-user[2]
-#endif
-#endif
 	usr_ret lr
+#endif
+
+	.word	0
+	.word	0                         @ 0x0ff0, software TLS value
 
 
 .global __upage_asm_end

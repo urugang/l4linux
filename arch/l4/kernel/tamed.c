@@ -276,8 +276,6 @@ no_reply:
 }
 #endif /* vcpu */
 
-//#include <l4/sys/ktrace.h>
-
 void l4x_global_cli(void)
 {
 #ifdef CONFIG_L4_VCPU

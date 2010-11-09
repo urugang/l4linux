@@ -5,6 +5,7 @@
 #include <linux/interrupt.h>
 #include <linux/clockchips.h>
 #include <linux/irq.h>
+#include <linux/clk.h>
 
 #include <asm/mach-types.h>
 
@@ -114,6 +115,20 @@ static struct clock_event_device timer0_clockevent = {
 	.rating         = 300,
 	.irq            = 0,
 };
+
+int clk_enable(struct clk *clk)
+{
+	printk("%s %d\n", __func__, __LINE__);
+        return 0;
+}
+EXPORT_SYMBOL(clk_enable);
+
+void clk_disable(struct clk *clk)
+{
+	printk("%s %d\n", __func__, __LINE__);
+}
+EXPORT_SYMBOL(clk_disable);
+
 
 static irqreturn_t l4_timer_interrupt_handler(int irq, void *dev_id)
 {

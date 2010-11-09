@@ -15,7 +15,6 @@ enum {
   L4LX_USER_CAP_PAGER      = L4_BASE_PAGER_CAP,    // 3
   L4LX_USER_CAP_LOG        = L4_BASE_LOG_CAP,      // 4
   L4LX_USER_CAP_MA         = 7 << L4_CAP_SHIFT,
-  L4LX_USER_CAP_NS         = 8 << L4_CAP_SHIFT,
 
   L4LX_USER_CAP_PAGER_BASE = 0x10 << L4_CAP_SHIFT,
 

@@ -35,9 +35,6 @@
 //#define dd_printk(format, args...) LOG_printf(format , ## args)
 #define dd_printk(format, args...) do { } while (0)
 
-
-/* There's a copy of this in l4lxlib/generic/irq_omega0.c
- * XXX: join this is a sane way! */
 static char irq_prio[NR_IRQS] =
    /*  0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f */
      { 1, 0,15, 6, 5, 4, 3, 2,14,13,12,11,10, 9, 8, 7};

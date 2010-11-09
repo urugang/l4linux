@@ -68,8 +68,6 @@ static int stats_init(void)
 
 #endif
 
-
-
 static int __init l4x_debugfs_init(void)
 {
 	int err;

@@ -228,6 +228,17 @@ endif
 KBUILD_CFLAGS	+=$(CFLAGS_ABI) $(CFLAGS_THUMB2) $(arch-y) $(tune-y) $(call cc-option,-mshort-load-bytes,$(call cc-option,-malignment-traps,)) -msoft-float -Uarm
 KBUILD_AFLAGS	+=$(CFLAGS_ABI) $(AFLAGS_THUMB2) $(arch-y) $(tune-y) -include asm/unified.h -msoft-float
 
+# Never generate .eh_frame
+KBUILD_CFLAGS   += $(call cc-option,-fno-dwarf2-cfi-asm)
+
+ifeq ($(CONFIG_FRAME_POINTER),y)
+KBUILD_CFLAGS	+=-fno-omit-frame-pointer -mapcs -mno-sched-prolog
+endif
+
+ifeq ($(CONFIG_CC_STACKPROTECTOR),y)
+KBUILD_CFLAGS  +=-fstack-protector
+endif
+
 endif
 
 
@@ -250,7 +261,6 @@ L4LX_E_L-$(CONFIG_L4_ORE_DRV)      += ore
 L4LX_E_L-$(CONFIG_L4_IRQ_OMEGA0)   += omega0
 L4LX_E_L-$(CONFIG_L4_PDSPBLK_DRV)  += pers_dsp
 L4LX_E_L-$(CONFIG_L4_TCG_STPM)     += stpm-client
-L4LX_E_L-$(CONFIG_L4_USE_L4VMM)	   += l4vmm$(if $(CONFIG_L4_USE_L4VMM_DBG),-dbg)
 L4LX_E_L-$(CONFIG_L4_FERRET)       += ferret
 
 L4INC		= -I$(L4OBJ)/include/$(L4_MK_ARCH)/$(L4_MK_API) \
@@ -269,6 +279,10 @@ drivers-$(CONFIG_PCI)		+= arch/l4/pci/
 drivers-$(CONFIG_PM)		+= arch/l4/power/arch-x86/
 drivers-$(CONFIG_FB)		+= arch/x86/video/
 core-$(CONFIG_KVM)		+= arch/l4/kvm/arch-x86/
+endif
+
+ifeq ($(BASEARCH),arm)
+core-y				+= arch/l4/common/arch-arm/
 endif
 
 core-y += arch/l4/
@@ -312,7 +326,7 @@ KBUILD_CPPFLAGS += -DL4SYS_USE_UTCB_WRAP=1
 
 
 ifneq ($(CONFIG_L4_ARCH_ARM),)
-KBUILD_CPPFLAGS += -DTEXT_OFFSET=0x1100000
+KBUILD_CPPFLAGS += -DTEXT_OFFSET=0x0100000
 endif
 
 all: lImage

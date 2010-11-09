@@ -137,6 +137,9 @@
  */
 #define MCE_SELF_VECTOR			0xeb
 
+/* Xen vector callback to receive events in a HVM domain */
+#define XEN_HVM_EVTCHN_CALLBACK		0xe9
+
 #define NR_VECTORS			 256
 
 #define FPU_IRQ				  13

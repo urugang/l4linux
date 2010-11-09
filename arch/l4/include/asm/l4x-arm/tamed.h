@@ -24,9 +24,10 @@ static inline void l4x_tamed_sem_down(void)
 {
 	l4_msgtag_t t;
 	l4_umword_t l;
+	unsigned cpu = current_thread_info()->cpu;
 	while (1) {
 		if (likely(l4x_atomic_dec(&tamed_per_nr(cli_lock,
-		                          get_tamer_nr(smp_processor_id())).sem.counter)
+		                          get_tamer_nr(cpu)).sem.counter)
 		           >= 0))
 			break;
 #ifdef CONFIG_L4_DEBUG_TAMED_COUNT_INTERRUPT_DISABLE
@@ -34,7 +35,7 @@ static inline void l4x_tamed_sem_down(void)
 #endif
 		t = l4_msgtag((l4x_stack_prio_get() << 4) | 1, 0, 0, 0);
 		t = l4_ipc(tamed_per_nr(cli_sem_thread_id,
-		                        get_tamer_nr(smp_processor_id())),
+		                        get_tamer_nr(cpu)),
 		           l4_utcb(),
 		           L4_SYSF_CALL, l4x_stack_id_get(),
 		           t, &l, L4_IPC_NEVER);
@@ -50,12 +51,13 @@ static inline void l4x_tamed_sem_down(void)
 static inline void l4x_tamed_sem_up(void)
 {
 	l4_umword_t l;
+	unsigned cpu = current_thread_info()->cpu;
 
 	if (unlikely(l4x_atomic_inc(&tamed_per_nr(cli_lock,
-	                            get_tamer_nr(smp_processor_id())).sem.counter)
+	                            get_tamer_nr(cpu)).sem.counter)
 	             <= 0))
 		if (l4_ipc_error(l4_ipc(tamed_per_nr(cli_sem_thread_id,
-		                                     get_tamer_nr(smp_processor_id())),
+		                                     get_tamer_nr(cpu)),
 		                        l4_utcb(),
 		                        L4_SYSF_CALL, l4x_stack_id_get(),
 		                        l4_msgtag((l4x_stack_prio_get() << 4) | 2, 0, 0, 0),
