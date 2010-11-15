@@ -398,12 +398,9 @@ static inline void dispatch_system_call(struct task_struct *p,
 #endif
 
 #if 0
-	L4XV_V(f);
-	L4XV_L(f);
-	LOG_printf("Syscall %3d for %s(%d at %p): arg1 = %lx\n",
+	printk("Syscall %3d for %s(%d at %p): arg1 = %lx\n",
 	           syscall, p->comm, p->pid, (void *)regsp->ip,
 	           regsp->bx);
-	L4XV_U(f);
 #endif
 #if 0
 	if (syscall == 11) {
@@ -416,19 +413,18 @@ static inline void dispatch_system_call(struct task_struct *p,
 #endif
 #if 0
 	if (syscall == 120) {
-		LOG_printf("Syscall %3d for %s(%d at %p): arg1 = %lx ebp=%lx\n",
-		           syscall, p->comm, p->pid, (void *)regsp->ip,
-		           regsp->bx, regsp->bp);
+		printk("Syscall %3d for %s(%d at %p): arg1 = %lx ebp=%lx\n",
+		       syscall, p->comm, p->pid, (void *)regsp->ip,
+		       regsp->bx, regsp->bp);
 	}
 #endif
 
 #if 0
 	if (syscall == 21)
-		LOG_printf("Syscall %3d mount for %s(%d at %p): %lx %lx %lx %lx %lx %lx\n",
-		           syscall, p->comm, p->pid, (void *)regsp->ip,
-			   regsp->bx, regsp->cx,
-			   regsp->dx, regsp->si,
-			   regsp->di, regsp->bp);
+		printk("Syscall %3d mount for %s(%d at %p): %lx %lx %lx %lx %lx %lx\n",
+		       syscall, p->comm, p->pid, (void *)regsp->ip,
+		       regsp->bx, regsp->cx, regsp->dx, regsp->si,
+		       regsp->di, regsp->bp);
 #endif
 #if 0
 	if (syscall == 5) {
@@ -442,9 +438,9 @@ static inline void dispatch_system_call(struct task_struct *p,
 #endif
 
 	if (!is_lx_syscall(syscall)) {
-		LOG_printf("Syscall %3d for %s(%d at %p): arg1 = %lx\n",
-		           syscall, p->comm, p->pid, (void *)regsp->ip,
-		           regsp->bx);
+		printk("Syscall %3d for %s(%d at %p): arg1 = %lx\n",
+		       syscall, p->comm, p->pid, (void *)regsp->ip,
+		       regsp->bx);
 		l4x_print_regs(&p->thread, regsp);
 		enter_kdebug("no syscall");
 	}
@@ -470,7 +466,6 @@ static inline void dispatch_system_call(struct task_struct *p,
 			                       regsp->di, regsp->bp);
 		}
 	}
-	//LOG_printf("syscall: %d ret=%d\n", syscall, regsp->ax);
 
 	if (signal_pending(p))
 		l4x_do_signal(regsp, syscall);
@@ -479,12 +474,12 @@ static inline void dispatch_system_call(struct task_struct *p,
 		schedule();
 
 #if 0
-	LOG_printf("Syscall %3d for %s(%d at %p): return %lx/%ld\n",
-	           syscall, p->comm, p->pid, (void *)regsp->ip,
-	           regsp->ax, regsp->ax);
-#endif
+	printk("Syscall %3d for %s(%d at %p): return %lx/%ld\n",
+	       syscall, p->comm, p->pid, (void *)regsp->ip,
+	       regsp->ax, regsp->ax);
 	if (unlikely(syscall == -38))
 		enter_kdebug("no syscall");
+#endif
 }
 
 /*
