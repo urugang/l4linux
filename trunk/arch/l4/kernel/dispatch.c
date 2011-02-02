@@ -24,6 +24,7 @@
 #include <asm/generic/vcpu.h>
 #include <asm/generic/stats.h>
 #include <asm/generic/log.h>
+#include <asm/server/server.h>
 #include <asm/l4x/utcb.h>
 
 #ifndef CONFIG_L4_VCPU
@@ -152,10 +153,10 @@ static inline void verbose_segfault(struct task_struct *p,
 		           smp_processor_id(), p->comm, p->pid,
 		           l4_debugger_global_id(p->mm->context.task),
 		           pfa, ip, pferror);
-	           l4x_print_vm_area_maps(p);
-	           l4x_print_regs(&p->thread, regs);
-	           enter_kdebug("segfault");
-		   l4x_dbg_stop_on_segv_pf--;
+		l4x_print_vm_area_maps(p);
+		l4x_print_regs(&p->thread, regs);
+		enter_kdebug("segfault");
+		l4x_dbg_stop_on_segv_pf--;
 	}
 #endif
 }
@@ -223,8 +224,10 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 		 * device memory.  Go grab it. */
 		if (unlikely(phy > (l4_umword_t)high_memory)) {
 			unsigned long devmem = l4x_handle_dev_mem(phy);
-			if (!devmem)
+			if (!devmem) {
+				verbose_segfault(p, regs, pfa, ip, pferror);
 				return 1; /* No region found */
+			}
 
 			*d0 = (*d0 & L4_PAGEMASK) | L4_ITEM_MAP;
 			*d1  = l4_fpage(devmem & L4_PAGEMASK,
@@ -259,6 +262,72 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 }
 
 #ifndef CONFIG_L4_VCPU
+
+static int l4x_hybrid_return(struct thread_info *ti,
+                             l4_utcb_t *utcb,
+                             l4_msgtag_t tag)
+{
+	struct task_struct *h = ti->task;
+	struct thread_struct *t = &h->thread;
+
+	if (!t->hybrid_sc_in_prog)
+                return 0;
+
+	if (l4_msgtag_is_page_fault(tag)) {
+		l4x_printf("HYBRID PF!!\n");
+		/* No exception IPC, it's a page fault, but shouldn't happen */
+		goto out_fail;
+	}
+
+	if (!l4x_hybrid_check_after_syscall(utcb))
+		goto out_fail;
+
+	t->hybrid_sc_in_prog = 0;
+
+	/* Keep registers */
+	utcb_to_thread_struct(utcb, t);
+
+	TBUF_LOG_HYB_RETURN(fiasco_tbuf_log_3val("hyb-ret", TBUF_TID(t->user_thread_id), l4_utcb_exc_pc(l4_utcb_exc_u(utcb)), 0));
+
+	/* Wake up hybrid task h and reschedule */
+	wake_up_process(h);
+	set_need_resched();
+
+	return 1;
+
+out_fail:
+	LOG_printf("%s: Invalid hybrid return for %p ("
+	           "%p, %lx, err=%lx, sc=%d, pc=%lx, sp=%lx, tag=%lx)!\n",
+	           __func__, ti,
+	           h, l4_utcb_exc_typeval(l4_utcb_exc_u(utcb)),
+	           l4_utcb_exc_u(utcb)->err,
+	           l4x_l4syscall_get_nr(l4_utcb_exc_u(utcb)->err,
+			                l4_utcb_exc_pc(l4_utcb_exc_u(utcb))),
+	           l4_utcb_exc_pc(l4_utcb_exc_u(utcb)),
+	           l4_utcb_exc_u(utcb)->sp, tag.raw);
+	LOG_printf("%s: Currently running user thread: " PRINTF_L4TASK_FORM
+	           "  service: " PRINTF_L4TASK_FORM " pid=%d\n",
+	           __func__, PRINTF_L4TASK_ARG(current->thread.user_thread_id),
+	           PRINTF_L4TASK_ARG(l4x_stack_id_get()), current->pid);
+	enter_kdebug("hybrid_return failed");
+	return 0;
+}
+
+struct l4x_hybrid_object
+{
+	struct l4x_srv_object o;
+	struct thread_info *ti;
+};
+
+static L4_CV long
+l4x_hybrid_dispatch(struct l4x_srv_object *_this,
+                    l4_umword_t obj, l4_utcb_t *msg,
+                    l4_msgtag_t *tag)
+{
+	struct l4x_hybrid_object *ho = (struct l4x_hybrid_object *)_this;
+	return l4x_hybrid_return(ho->ti, msg, *tag);
+}
+
 /*
  * First phase of a L4 system call by the user program
  */
@@ -280,7 +349,8 @@ static int l4x_hybrid_begin(struct task_struct *p,
 
 	if (!t->is_hybrid) {
 		l4_cap_idx_t hybgate;
-                l4_umword_t ti;
+		struct l4x_hybrid_object *ho;
+
 #ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
 		char s[20] = "*";
 
@@ -292,13 +362,18 @@ static int l4x_hybrid_begin(struct task_struct *p,
 
 		t->is_hybrid = 1;
 
-                ti = (l4_umword_t)current_thread_info();
+		hybgate = L4LX_KERN_CAP_HYBRID_BASE + (p->pid << L4_CAP_SHIFT);
 
-		hybgate = L4LX_KERN_CAP_HYBRID_BASE
-		           + (p->pid << L4_CAP_SHIFT);
+		ho = kmalloc(sizeof(*ho), GFP_KERNEL);
+		if (!ho)
+			return 0;
+
+		ho->o.dispatch = l4x_hybrid_dispatch;
+		ho->ti = current_thread_info();
 
 		tag = l4_factory_create_gate(l4re_env()->factory, hybgate,
-		                             l4x_stack_id_get(), ti);
+		                             l4x_stack_id_get(),
+		                             (l4_umword_t)ho);
 		if (unlikely(l4_error(tag)))
 			LOG_printf("Error creating hybrid gate\n");
 
@@ -384,58 +459,6 @@ static int l4x_hybrid_begin(struct task_struct *p,
 	return 1;
 }
 
-static int l4x_hybrid_return(l4_umword_t label,
-                             l4_utcb_t *utcb,
-                             l4_umword_t d0, l4_umword_t d1,
-                             l4_msgtag_t tag)
-{
-        struct thread_info *ti = (struct thread_info *)label;
-	struct task_struct *h = ti->task;
-	struct thread_struct *t = &h->thread;
-
-	if (!t->hybrid_sc_in_prog)
-                return 0;
-
-	if (l4_msgtag_is_page_fault(tag)) {
-		l4x_printf("HYBRID PF!!\n");
-		/* No exception IPC, it's a page fault, but shouldn't happen */
-		goto out_fail;
-	}
-
-	if (!l4x_hybrid_check_after_syscall(utcb))
-		goto out_fail;
-
-	t->hybrid_sc_in_prog = 0;
-
-	/* Keep registers */
-	utcb_to_thread_struct(utcb, t);
-
-	TBUF_LOG_HYB_RETURN(fiasco_tbuf_log_3val("hyb-ret", TBUF_TID(t->user_thread_id), l4_utcb_exc_pc(l4_utcb_exc_u(utcb)), 0));
-
-	/* Wake up hybrid task h and reschedule */
-	wake_up_process(h);
-	set_need_resched();
-
-	return 1;
-
-out_fail:
-	LOG_printf("%s: Invalid hybrid return for %lx ("
-	           "%p, %lx, err=%lx, sc=%d, pc=%lx, sp=%lx, tag=%lx)!\n",
-	           __func__, label,
-	           h, l4_utcb_exc_typeval(l4_utcb_exc_u(utcb)),
-	           l4_utcb_exc_u(utcb)->err,
-	           l4x_l4syscall_get_nr(l4_utcb_exc_u(utcb)->err,
-			                l4_utcb_exc_pc(l4_utcb_exc_u(utcb))),
-	           l4_utcb_exc_pc(l4_utcb_exc_u(utcb)),
-	           l4_utcb_exc_u(utcb)->sp, tag.raw);
-	LOG_printf("%s: Currently running user thread: " PRINTF_L4TASK_FORM
-	           "  service: " PRINTF_L4TASK_FORM " pid=%d\n",
-	           __func__, PRINTF_L4TASK_ARG(current->thread.user_thread_id),
-	           PRINTF_L4TASK_ARG(l4x_stack_id_get()), current->pid);
-	enter_kdebug("hybrid_return failed");
-	return 0;
-}
-
 static void l4x_dispatch_suspend(struct task_struct *p,
                                  struct thread_struct *t)
 {
@@ -473,14 +496,15 @@ void l4x_shutdown_cpu(unsigned cpu)
 
 	// suicide
 	l4x_global_cli();
-	l4lx_thread_shutdown(l4x_cpu_thread_get(cpu));
+	l4lx_thread_shutdown(l4x_cpu_thread_get(cpu),
+	                     l4x_vcpu_state(cpu));
 }
 #endif
 
 #else
 
-static l4_cap_idx_t idler_thread[NR_CPUS];
-static int          idler_up[NR_CPUS];
+static l4lx_thread_t idler_thread[NR_CPUS];
+static int           idler_up[NR_CPUS];
 
 #ifdef CONFIG_HOTPLUG_CPU
 void l4x_shutdown_cpu(unsigned cpu)
@@ -503,7 +527,7 @@ void l4x_shutdown_cpu(unsigned cpu)
 	l4x_destroy_ugate(cpu);
 
 	// kill idler
-	l4lx_thread_shutdown(idler_thread[cpu]);
+	l4lx_thread_shutdown(idler_thread[cpu], 0);
 
 	// kill ipi thread
 	l4x_cpu_ipi_thread_stop(cpu);
@@ -514,16 +538,24 @@ void l4x_shutdown_cpu(unsigned cpu)
 	asm volatile ("mov %0, %%gs" : : "r" (0x43));
 #endif
 	// suicide
-	l4lx_thread_shutdown(l4x_cpu_thread_get(cpu));
+	l4lx_thread_shutdown(l4x_cpu_thread_get(cpu), 0);
 }
 #endif
+
+static int l4x_handle_async_event(l4_umword_t label,
+                                  l4_utcb_t *u,
+                                  l4_msgtag_t tag)
+{
+	struct l4x_srv_object *o = (struct l4x_srv_object *)label;
+	return o->dispatch(o, label, u, &tag);
+}
 
 void l4x_wakeup_idler(int cpu)
 {
 	if (!idler_up[cpu])
 		return;
 
-	l4_thread_ex_regs(idler_thread[cpu], ~0UL, ~0UL,
+	l4_thread_ex_regs(l4lx_thread_get_cap(idler_thread[cpu]), ~0UL, ~0UL,
 			  L4_THREAD_EX_REGS_TRIGGER_EXCEPTION
 	                   | L4_THREAD_EX_REGS_CANCEL);
 	TBUF_LOG_WAKEUP_IDLE(fiasco_tbuf_log_3val("wakeup idle", cpu, 0, 0));
@@ -555,11 +587,11 @@ void l4x_idle(void)
 	idler_thread[cpu] = l4lx_thread_create(idler_func, cpu,
 	                                       NULL, NULL, 0,
 	                                       CONFIG_L4_PRIO_IDLER, 0, s);
-	if (l4_is_invalid_cap(idler_thread[cpu])) {
+	if (!l4lx_thread_is_valid(idler_thread[cpu])) {
 		LOG_printf("Could not create idler thread... exiting\n");
 		l4x_exit_l4linux();
 	}
-	l4lx_thread_pager_change(idler_thread[cpu], me);
+	l4lx_thread_pager_change(l4lx_thread_get_cap(idler_thread[cpu]), me);
 	idler_up[cpu] = 1;
 
 	tick_nohz_stop_sched_tick(1);
@@ -597,6 +629,9 @@ void l4x_idle(void)
 		TBUF_LOG_IDLE(fiasco_tbuf_log_3val("l4x_idle <", cpu, 0, 0));
 
 wait_again:
+#ifdef CONFIG_L4_SERVER
+		l4x_srv_setup_recv(utcb);
+#endif
 		tag = l4_ipc_wait(utcb, &label, L4_IPC_SEND_TIMEOUT_0);
 		error = l4_ipc_error(tag, utcb);
 		u_err = l4_utcb_exc_typeval(l4_utcb_exc_u(utcb));
@@ -658,8 +693,8 @@ wait_again:
 			LOG_printf("non hybrid in idle?!\n");
 			enter_kdebug("non hybrid in idle?!");
 		} else {
-			if (unlikely(!l4x_hybrid_return(label, utcb, data0, data1, tag)))
-				l4x_printf("invalid hybrid return\n");
+			if (unlikely(l4x_handle_async_event(label, utcb, tag)))
+				l4x_printf("Async return with error\n");
 		}
 	}
 }
@@ -930,6 +965,9 @@ reply_IPC:
 
 		if (l4x_msgtag_fpu(cpu))
 			l4_utcb_inherit_fpu_u(utcb, 1);
+#ifdef CONFIG_L4_SERVER
+		l4x_srv_setup_recv(utcb);
+#endif
 		tag = l4_ipc_send_and_wait(p->thread.user_thread_id, utcb,
 		                           tag, &label, L4_IPC_SEND_TIMEOUT_0);
 after_IPC:
@@ -962,6 +1000,9 @@ only_receive_IPC:
 			                    label, 0));
 			if (l4x_msgtag_fpu(cpu))
 				l4_utcb_inherit_fpu_u(utcb, 1);
+#ifdef CONFIG_L4_SERVER
+			l4x_srv_setup_recv(utcb);
+#endif
 			tag = l4_ipc_wait(utcb, &label, L4_IPC_SEND_TIMEOUT_0);
 			goto after_IPC;
 		} else if (unlikely(error)) {
@@ -986,10 +1027,9 @@ only_receive_IPC:
                         // kernel internal wakeup, just wait again
 			goto only_receive_IPC;
                 } else if (label != 0x12) {
-                        // hybrid process came in, check for possible
-                        // l4syscall return
-			if (l4x_hybrid_return(label, utcb, data0, data1, tag))
-				goto only_receive_IPC;
+			// other event
+			l4x_handle_async_event(label, utcb, tag);
+			goto only_receive_IPC;
 		} else {
                         // normal user, do normal path
                 }
@@ -1008,19 +1048,33 @@ only_receive_IPC:
 
 
 #ifdef CONFIG_L4_VCPU
-#include <asm/l4lxapi/irq.h>
-void l4x_vcpu_handle_irq(l4_vcpu_state_t *t, struct pt_regs *regs)
+static void l4x_handle_external_event(l4_vcpu_state_t *v,
+                                      struct pt_regs *regs)
 {
-	int irq = t->i.label >> 2;
+	struct l4x_srv_object *o = (struct l4x_srv_object *)v->i.label;
+	l4_msgtag_t tag = v->i.tag;
+	o->dispatch((struct l4x_srv_object *)v->i.label, v->i.label,
+	             l4_utcb(), &tag);
+}
+
+
+void l4x_vcpu_handle_irq(l4_vcpu_state_t *v, struct pt_regs *regs)
+{
+	int irq;
 	unsigned long flags;
+
 	local_irq_save(flags);
+	irq = v->i.label >> 2;
 
 #ifdef CONFIG_SMP
-	if (irq & L4X_VCPU_IRQ_IPI)
+	if (irq == L4X_VCPU_IRQ_IPI)
 		l4x_vcpu_handle_ipi(regs);
 	else
 #endif
-	{
+	if (unlikely(v->i.label > (NR_IRQS << 2)))
+		l4x_handle_external_event(v, regs);
+	else {
+
 #ifdef ARCH_x86
 		do_IRQ(irq, regs);
 #else
@@ -1029,7 +1083,7 @@ void l4x_vcpu_handle_irq(l4_vcpu_state_t *t, struct pt_regs *regs)
 
 #ifdef ARCH_arm
 		if (irq != TIMER_IRQ)
-			l4lx_irq_dev_eoi(irq);
+			l4lx_irq_dev_eoi(irq_get_irq_data(irq));
 #endif
 #ifdef CONFIG_SMP
 		if (smp_processor_id() == 0 && irq == TIMER_IRQ)
@@ -1079,7 +1133,7 @@ void l4x_vcpu_iret(struct task_struct *p,
 
 	local_irq_disable();
 	utcb = l4_utcb();
-	vcpu = l4x_vcpu_state_u(utcb);
+	vcpu = l4x_stack_vcpu_state_get();
 
 	if (copy_ptregs)
 		ptregs_to_vcpu(vcpu, regs);
@@ -1091,7 +1145,7 @@ void l4x_vcpu_iret(struct task_struct *p,
 		if (unlikely(p->mm && l4_is_invalid_cap(p->mm->context.task))) {
 			l4x_vcpu_create_user_task(p);
 			vcpu->user_task = p->mm->context.task;
-			l4x_arch_task_start_setup(p);
+			l4x_arch_task_start_setup(vcpu, p);
 		}
 
 		thread_struct_to_vcpu(vcpu, t);
@@ -1118,8 +1172,10 @@ void l4x_vcpu_iret(struct task_struct *p,
 #endif
 	}
 
-
 	while (1) {
+#ifdef CONFIG_L4_SERVER
+		l4x_srv_setup_recv(utcb);
+#endif
 		tag = l4_thread_vcpu_resume_start_u(utcb);
 		if (fp1)
 			l4_sndfpage_add_u((l4_fpage_t)fp2, fp1, &tag, utcb);
@@ -1130,6 +1186,8 @@ void l4x_vcpu_iret(struct task_struct *p,
 		if (l4_ipc_error(tag, utcb) == L4_IPC_SEMAPFAILED)
 			l4x_evict_mem(fp2);
 		else {
+			LOG_printf("l4x: resume returned: %d\n",
+			           l4_ipc_error(tag, utcb));
 			enter_kdebug("IRET returned");
 			while (1)
 				;

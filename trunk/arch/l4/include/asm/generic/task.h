@@ -22,7 +22,7 @@ void l4x_sig_current_kill(void);
 #define l4x_idle_task(cpu) (&init_task)
 #endif
 
-DECLARE_PER_CPU(struct task_struct *, l4x_current_process);
+DECLARE_PER_CPU(struct thread_info *, l4x_current_ti);
 
 void l4x_exit_thread(void);
 

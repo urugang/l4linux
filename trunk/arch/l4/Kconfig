@@ -49,7 +49,6 @@ config PHYSICAL_START
 
 config L4_LINK_LIBIO_DIRECT
 	bool
-	default n
 
 menu "Features"
 
@@ -62,6 +61,14 @@ config L4_ARM_UPAGE_TLS
 	  in 0xbffffff0 at the cost of writing it in there on every thread
 	  switch. If you do not need the TLS register do not enable this
 	  option. Setting the register is still done via the normal way.
+
+config L4_SERVER
+	bool "Make Linux be a server"
+	help
+	  Linux can act as an L4Re server and offer services to other
+	  L4Re clients. Enabling this option adds the infrastructure for
+	  this, additional options need to be enabled to get specific
+	  services.
 
 endmenu
 
@@ -105,7 +112,6 @@ config L4_VPCI
 
 #config L4_BLK_DRV
 #	bool "Block driver for the generic_blk interface"
-#	default n
 #	help
 #	  Build block driver for the generic_blk interface of DROPS.
 #	  It does not harm to include this driver, it needs to be
@@ -113,17 +119,22 @@ config L4_VPCI
 
 config L4_BLK_DS_DRV
 	bool "Block driver for dataspaces"
-	default n
 	help
 	  This driver implements block devices which are backed by L4Re
 	  dataspaces.
 
 config L4_CHR_DS_DRV
 	bool "Character driver for dataspaces"
-	default n
 	help
 	  This driver implements a character device which are backed by
 	  L4Re dataspaces.
+
+config L4_SERVER_INPUT
+	bool "Input server"
+	depends on L4_SERVER
+	help
+	  This makes Linux be an L4Re::Event server that forwards input
+	  events.
 
 comment "Enable Linux framebuffer support for framebuffer driver!"
 	depends on !FRAMEBUFFER_CONSOLE
@@ -140,7 +151,6 @@ config L4_FB_DRIVER
 
 config L4_FB_DRIVER_DBG
 	bool "Include tuning and statistics for l4fb driver"
-	default n
 	depends on L4_DEBUG_STATS
 	depends on L4_FB_DRIVER
 	help
@@ -148,21 +158,19 @@ config L4_FB_DRIVER_DBG
 
 config L4_FB_DRIVER_XF86IF
 	bool #"Support for the X Window System driver"
-	default n
 	depends on L4_FB_DRIVER
 	help
 	  This enables the compile of support for the X Window System driver
 	  for the console.
 
-config L4_ORE_DRV
-	bool #"Network driver for ORe"
-	default n
+config L4_NET_ANKH_DRV
+	bool "Network driver for Ankh"
+	depends on !L4_VCPU
 	help
-	  Network driver for the ORe network service.
+	  Network driver for the Ankh network service.
 
 config L4_NET_L4SHM
 	bool "l4shm based network driver"
-	default n
 	select L4_USE_L4SHMC
 	help
 	  Network driver based on l4shm.
@@ -193,7 +201,6 @@ config L4_SERIAL_SHM
 
 config L4_TCG_STPM
 	bool #"(virtual) TPM support"
-	default n
 	depends on TCG_TPM
 	help
 	  Support for (virtual) TPMs provided by the L4 service STPM of TUD:OS.
@@ -204,14 +211,12 @@ menu "Debugging options"
 
 config L4_DEBUG
 	bool "Debugging options"
-	default n
 	help
 	  Show possible debugging options.
 
 config L4_DEBUG_REGISTER_NAMES
 	bool "Register Linux program names in the kernel debugger"
 	depends on L4_DEBUG
-	default n
 	help
 	  The program names of Linux programs can be registered so that they
 	  show up in various debugging aids that are displaying thread
@@ -221,7 +226,6 @@ config L4_DEBUG_SEGFAULTS
 	bool "Print error information on user program segfaults"
 	depends on L4_DEBUG
 	select DEBUG_FS
-	default n
 	help
 	  When this option is turned on additional information is printed
 	  when a program causes a page fault that cannot be resolved (a
@@ -231,13 +235,11 @@ config L4_DEBUG_STATS
 	bool "Do some statistics"
 	depends on L4_DEBUG
 	select DEBUG_FS
-	default n
 	help
 	  Statistics.
 
 config L4_DEBUG_TAMED_COUNT_INTERRUPT_DISABLE
 	bool "Count interrupt disables"
-	default n
 	depends on L4_DEBUG && L4_TAMED && !L4_VCPU
 	help
 	  Counts the interrupts disabled events.
@@ -304,8 +306,8 @@ config L4_PRIO_L4FB_REFRESH
 	help
 	  Leave unchanged if unsure.
 
-config L4_PRIO_L4ORE
-	int "Priority of l4ore receive thread"
+config L4_PRIO_L4ANKH
+	int "Priority of l4ankh receive thread"
 	default 7
 	help
 	  Leave unchanged if unsure.
@@ -380,7 +382,6 @@ config L4_CONFIG_CHECKS
 	  
 config L4_SAMPLE_MODULE
 	tristate "Compile sample module"
-	default n
 	help
 	  Enable as module if you want to compile the sample module.
 
@@ -390,7 +391,6 @@ endmenu # l4linux options
 
 config L4_USE_L4SHMC
 	bool
-	default n
 
 
 # some delimiter (for .config)

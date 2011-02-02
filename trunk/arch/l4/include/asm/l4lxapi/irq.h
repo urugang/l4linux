@@ -9,16 +9,12 @@
 #ifndef __ASM_L4__L4LXAPI__IRQ_H__
 #define __ASM_L4__L4LXAPI__IRQ_H__
 
+#include <linux/irq.h>
 #include <asm/l4lxapi/generic/irq_gen.h>
 
 /**
  * \defgroup irq Interrupt handling functionality.
  * \ingroup l4lxapi
- */
-
-/**
- * \defgroup irq_dev Device IRQ handling functionality.
- * \ingroup irq
  */
 
 /**
@@ -40,176 +36,25 @@ void l4lx_irq_init(void);
  */
 int l4lx_irq_prio_get(unsigned int irq);
 
-/**
- * Startup of a device IRQ.
- * \ingroup irq_dev
- *
- * \param irq	IRQ.
- * \return 1 if successful, 0 on failure.
- */
-unsigned int l4lx_irq_dev_startup(unsigned int irq);
+unsigned int l4lx_irq_dev_startup(struct irq_data *data);
+void l4lx_irq_dev_shutdown(struct irq_data *data);
+int l4lx_irq_set_type(struct irq_data *data, unsigned int type);
+void l4lx_irq_dev_enable(struct irq_data *data);
+void l4lx_irq_dev_disable(struct irq_data *data);
+void l4lx_irq_dev_ack(struct irq_data *data);
+void l4lx_irq_dev_mask(struct irq_data *data);
+void l4lx_irq_dev_unmask(struct irq_data *data);
+int l4lx_irq_dev_set_affinity(struct irq_data *data,
+                              const struct cpumask *dest, bool force);
+void l4lx_irq_dev_eoi(struct irq_data *data);
 
-/**
- * \brief Shutdown of a device IRQ.
- * \ingroup irq_dev
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_dev_shutdown(unsigned int irq);
-
-/**
- * \brief Set IRQ type.
- *
- * \param irq   IRQ.
- * \param type  Type.
- *
- * \return 0 on success, negative on error
- */
-int l4lx_irq_set_type(unsigned int irq, unsigned int type);
-
-/**
- * \brief Enable a device IRQ.
- * \ingroup irq_dev
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_dev_enable(unsigned int irq);
-
-
-/**
- * \brief Disable a device IRQ.
- * \ingroup irq_dev
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_dev_disable(unsigned int irq);
-
-/**
- * \brief Acknowledge (and possibly mask) a device IRQ.
- * \ingroup irq_dev
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_dev_ack(unsigned int irq);
-
-/**
- * \brief Mask a device IRQ.
- * \ingroup irq_dev
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_dev_mask(unsigned int irq);
-
-/**
- * \brief Unmask a device IRQ.
- * \ingroup irq_dev
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_dev_unmask(unsigned int irq);
-
-/**
- * \brief Unmask a device IRQ.
- * \ingroup irq_dev
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_dev_end(unsigned int irq);
-
-/**
- * \brief Set affinity of an IRQ.
- * \ingroup irq_dev
- *
- * \param irq   IRQ.
- * \param mask  CPU mask.
- */
-int l4lx_irq_dev_set_affinity(unsigned irq, const struct cpumask *dest);
-
-/**
- * \brief EOI IRQ.
- * \ingroup irq_dev
- *
- * \param irq   IRQ.
- */
-void l4lx_irq_dev_eoi(unsigned int irq);
-
-/**
- * \defgroup irq_timer Timer interrupt functionality.
- * \ingroup  irq
- */
-
-/**
- * \brief Startup of the timer interrupt.
- * \ingroup irq_timer
- *
- * \param irq	IRQ.
- * \return 1 if successful, 0 on failure.
- */
-unsigned int l4lx_irq_timer_startup(unsigned int irq);
-
-/**
- * \brief Shutdown of an IRQ.
- * \ingroup irq_timer
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_timer_shutdown(unsigned int irq);
-
-/**
- * \brief Enable an IRQ.
- * \ingroup irq_timer
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_timer_enable(unsigned int irq);
-
-/**
- * \brief Disable an IRQ.
- * \ingroup irq_timer
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_timer_disable(unsigned int irq);
-
-/**
- * \brief Acknowledge (and possibly mask) an IRQ.
- * \ingroup irq_timer
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_timer_ack(unsigned int irq);
-
-/**
- * \brief Mask an IRQ.
- * \ingroup irq_timer
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_timer_mask(unsigned int irq);
-
-/**
- * \brief Unmask an IRQ.
- * \ingroup irq_timer
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_timer_unmask(unsigned int irq);
-
-/**
- * \brief Unmask an IRQ.
- * \ingroup irq_timer
- *
- * \param irq	IRQ.
- */
-void l4lx_irq_timer_end(unsigned int irq);
-
-/**
- * \brief Set affinity of an IRQ.
- * \ingroup irq_timer
- *
- * \param irq   IRQ.
- * \param mask  CPU mask.
- */
-int l4lx_irq_timer_set_affinity(unsigned irq, const struct cpumask *dest);
+unsigned int l4lx_irq_timer_startup(struct irq_data *data);
+void l4lx_irq_timer_shutdown(struct irq_data *data);
+void l4lx_irq_timer_enable(struct irq_data *data);
+void l4lx_irq_timer_disable(struct irq_data *data);
+void l4lx_irq_timer_ack(struct irq_data *data);
+void l4lx_irq_timer_mask(struct irq_data *data);
+void l4lx_irq_timer_unmask(struct irq_data *data);
+int l4lx_irq_timer_set_affinity(struct irq_data *data, const struct cpumask *dest);
 
 #endif /* ! __ASM_L4__L4LXAPI__IRQ_H__ */

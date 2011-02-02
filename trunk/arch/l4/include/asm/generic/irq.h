@@ -1,10 +1,10 @@
 #ifndef __ASM_L4__GENERIC__IRQ_H__
 #define __ASM_L4__GENERIC__IRQ_H__
 
-#include <l4/sys/types.h>
+#include <asm/generic/kthreads.h>
 
 #ifdef CONFIG_L4_VCPU
-#define L4X_VCPU_IRQ_IPI (0x80000000 >> 2)
+#define L4X_VCPU_IRQ_IPI (NR_CPUS)
 #else
 #define L4_IRQ_DISABLED 0
 #define L4_IRQ_ENABLED  1
@@ -27,7 +27,7 @@ l4_cap_idx_t l4x_have_irqcap(int irqnum);
 struct l4x_irq_desc_private {
 	l4_cap_idx_t irq_cap;
 #ifndef CONFIG_L4_VCPU
-	l4_cap_idx_t irq_thread;
+	l4lx_thread_t irq_thread;
 #endif
 	unsigned enabled;
 	unsigned cpu;

@@ -35,9 +35,6 @@ void __check_kvm_seq(struct mm_struct *mm)
  * NOTE! We need to allow non-page-aligned mappings too: we will obviously
  * have to convert them into an offset in a page-aligned mapping, but the
  * caller shouldn't need to know that small detail.
- *
- * 'flags' are the extra L_PTE_ flags that you want to specify for this
- * mapping.  See include/asm-arm/proc-armv/pgtable.h for more information.
  */
 
 

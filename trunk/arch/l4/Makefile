@@ -94,7 +94,7 @@ ifeq ($(CONFIG_X86_32),y)
 	KBUILD_CFLAGS += -mregparm=3
 
         # prevent gcc from keeping the stack 16 byte aligned
-        KBUILD_CFLAGS += $(call cc-option,-mpreferred-stack-boundary=2,)
+        KBUILD_CFLAGS += $(call cc-option,-mpreferred-stack-boundary=2)
 
         # Disable unit-at-a-time mode on pre-gcc-4.0 compilers, it makes gcc use
         # a lot more stack due to the lack of sharing of stacklots:
@@ -153,8 +153,12 @@ cfi := $(call as-instr,.cfi_startproc\n.cfi_rel_offset $(sp-y)$(comma)0\n.cfi_en
 # is .cfi_signal_frame supported too?
 cfi-sigframe := $(call as-instr,.cfi_startproc\n.cfi_signal_frame\n.cfi_endproc,-DCONFIG_AS_CFI_SIGNAL_FRAME=1)
 cfi-sections := $(call as-instr,.cfi_sections .debug_frame,-DCONFIG_AS_CFI_SECTIONS=1)
-KBUILD_AFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections)
-KBUILD_CFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections)
+
+# does binutils support specific instructions?
+asinstr := $(call as-instr,fxsaveq (%rax),-DCONFIG_AS_FXSAVEQ=1)
+
+KBUILD_AFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections) $(asinstr)
+KBUILD_CFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections) $(asinstr)
 
 LDFLAGS := -m elf_$(UTS_MACHINE)
 
@@ -257,7 +261,7 @@ L4LX_E_L-$(CONFIG_L4_VCPU)         += libvcpu
 L4LX_E_L-$(CONFIG_L4_USE_L4SHMC)   += shmc
 L4LX_E_L-$(CONFIG_L4_BLK_DRV)      += generic_blk
 L4LX_E_L-$(CONFIG_L4_EXTERNAL_RTC) += rtc
-L4LX_E_L-$(CONFIG_L4_ORE_DRV)      += ore
+L4LX_E_L-$(CONFIG_L4_NET_ANKH_DRV) += ankh
 L4LX_E_L-$(CONFIG_L4_IRQ_OMEGA0)   += omega0
 L4LX_E_L-$(CONFIG_L4_PDSPBLK_DRV)  += pers_dsp
 L4LX_E_L-$(CONFIG_L4_TCG_STPM)     += stpm-client
@@ -333,8 +337,16 @@ all: lImage
 
 boot := arch/l4/boot
 
-lImage: vmlinux
+lImage: check_for_l4defs $(if $(CONFIG_L4_SERVER),server) vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $@
+
+check_for_l4defs:
+	test -e $(L4OBJ)/l4defs.mk.inc
+
+server:
+	$(Q)$(MAKE) $(build)=arch/l4/server
+
+PHONY += server check_for_l4defs
 
 mtags:
 	(cd $(srctree) && $(MAKE) tags > /dev/null 2>&1; \

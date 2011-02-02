@@ -88,6 +88,7 @@ obj-$(CONFIG_SERIAL_ALTERA_JTAGUART) += altera_jtaguart.o
 obj-$(CONFIG_SERIAL_ALTERA_UART) += altera_uart.o
 obj-$(CONFIG_SERIAL_MRST_MAX3110)	+= mrst_max3110.o
 obj-$(CONFIG_SERIAL_MFD_HSU)	+= mfd.o
+obj-$(CONFIG_SERIAL_OMAP) += omap-serial.o
 
 obj-$(CONFIG_L4_SERIAL) += l4ser.o
 obj-$(CONFIG_L4_SERIAL_SHM) += l4ser_shm.o

@@ -1,12 +1,13 @@
 #ifndef __ASM_L4__GENERIC__SMP_H__
 #define __ASM_L4__GENERIC__SMP_H__
 
+#include <l4/sys/types.h>
+#include <asm/l4lxapi/thread.h>
+
 #ifdef CONFIG_SMP
 
 #include <linux/sched.h>
 #include <linux/bitops.h>
-
-#include <l4/sys/types.h>
 
 #define L4X_TIMER_VECTOR	9
 
@@ -16,7 +17,6 @@ void do_l4x_smp_process_IPI(int vector, struct pt_regs *regs);
 
 void l4x_cpu_spawn(int cpu, struct task_struct *idle);
 void l4x_cpu_release(int cpu);
-l4_cap_idx_t l4x_cpu_thread_get(int cpu);
 struct task_struct *l4x_cpu_idle_get(int cpu);
 void l4x_smp_broadcast_timer(void);
 void l4x_send_IPI_mask_bitmask(unsigned long, int);
@@ -44,11 +44,6 @@ void l4x_load_percpu_gdt_descriptor(struct desc_struct *gdt);
 /* UP Systems */
 
 #include <asm/generic/kthreads.h>
-
-static inline l4_cap_idx_t l4x_cpu_thread_get(int _cpu)
-{
-	return linux_server_thread_id;
-}
 
 static inline int l4x_IPI_pending_tac(int cpu)
 {

@@ -79,7 +79,6 @@ static void set_mm_context(struct mm_struct *mm, unsigned int asid)
 	 */
 	cpumask_set_cpu(smp_processor_id(), mm_cpumask(mm));
 }
-#endif
 
 /*
  * Reset the ASID on the current CPU. This function call is broadcast
@@ -87,7 +86,6 @@ static void set_mm_context(struct mm_struct *mm, unsigned int asid)
  */
 static void reset_context(void *info)
 {
-#ifdef NOT_FOR_L4
 	unsigned int asid;
 	unsigned int cpu = smp_processor_id();
 	struct mm_struct *mm = per_cpu(current_mm, cpu);
@@ -107,9 +105,9 @@ static void reset_context(void *info)
 
 	/* set the new ASID */
 	asm("mcr	p15, 0, %0, c13, c0, 1\n" : : "r" (mm->context.id));
-#endif
 	isb();
 }
+#endif
 
 #else
 

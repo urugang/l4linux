@@ -14,13 +14,17 @@ obj-y				+= dumpstack_32.o
 obj-y				+= irq.o irq_32.o irq_l4.o irqinit.o
 obj-y				+= dumpstack.o dumpstack_32.o
 obj-y				+= hw_breakpoint.o
+obj-y				+= jump_label.o
+obj-y				+= pci-iommu_table.o
+obj-y				+= resource.o
+obj-y				+= head32.o
 
 obj-$(CONFIG_STACKTRACE)	+= stacktrace.o
 obj-y				+= cpu/
 obj-$(CONFIG_ACPI)		+= acpi.o
 obj-$(CONFIG_MODULES)		+= module.o
 obj-$(CONFIG_KPROBES)		+= kprobes.o
-obj-$(CONFIG_K8_NB)		+= k8.o
+obj-$(CONFIG_AMD_NB)		+= amd_nb.o
 obj-$(CONFIG_PCI)               += early-quirks.o
 obj-$(CONFIG_SMP)		+= apic/
 obj-$(CONFIG_SMP)		+= mpparse.o smp.o \
@@ -38,9 +42,8 @@ pci-nommu-y	:= $(b)/pci-nommu.o
 pci-dma-y	:= $(b)/pci-dma.o
 sys_i386-y	:= $(b)/sys_i386_32.o
 topology-y	:= $(b)/topology.o
-i387-y		:= $(b)/i387.o
 xsave-y		:= $(b)/xsave.o
-k8-y		+= $(b)/k8.o
+amd_nb-y	+= $(b)/amd_nb.o
 stacktrace-y	+= $(b)/stacktrace.o
 tls-y		+= $(b)/tls.o
 step-y		+= $(b)/step.o
@@ -55,6 +58,9 @@ dumpstack_32-y	+= $(b)/dumpstack_32.o
 dumpstack-y	+= $(b)/dumpstack.o
 hw_breakpoint-y += $(b)/hw_breakpoint.o
 i8259-y         += $(b)/i8259.o
+jump_label-y    += $(b)/jump_label.o
+resource-y      += $(b)/resource.o
+pci-iommu_table-y += $(b)/pci-iommu_table.o
 
 # we have our own versions of destroy_context and init_new_context,
 # so rename the original one

@@ -64,6 +64,7 @@
 #include <asm/generic/log.h>
 #include <asm/generic/util.h>
 #include <asm/generic/vcpu.h>
+#include <asm/server/server.h>
 
 #include <asm/l4x/exception.h>
 #include <asm/l4x/lx_syscalls.h>
@@ -168,15 +169,18 @@ L4_EXTERNAL_FUNC(l4shmc_add_signal);
 L4_EXTERNAL_FUNC(l4shmc_get_signal_to);
 #endif
 
+#ifdef CONFIG_L4_SERVER
+L4_EXTERNAL_FUNC(l4x_srv_init);
+L4_EXTERNAL_FUNC(l4x_srv_setup_recv);
+#endif
+
 #if defined(ARCH_x86) && defined(CONFIG_L4_EXTERNAL_RTC)
 L4_EXTERNAL_FUNC(l4rtc_get_seconds_since_1970);
 #endif
 
 unsigned long upage_addr;
-
-#ifdef CONFIG_L4_VCPU
 l4_vcpu_state_t *l4x_vcpu_states[NR_CPUS];
-#endif
+EXPORT_SYMBOL(l4x_vcpu_states);
 
 #ifdef ARCH_x86
 struct desc_struct cpu_gdt_table[GDT_ENTRIES];
@@ -213,9 +217,10 @@ static struct l4x_cpu_physmap_struct l4x_cpu_physmap[NR_CPUS];
 
 unsigned l4x_fiasco_nr_of_syscalls = 3;
 
+#ifdef ARCH_arm
 extern void start_kernel(void);
+#endif
 
-l4_cap_idx_t linux_server_thread_id __nosavedata = L4_INVALID_CAP;
 l4_cap_idx_t l4x_start_thread_id __nosavedata = L4_INVALID_CAP;
 l4_cap_idx_t l4x_start_thread_pager_id __nosavedata = L4_INVALID_CAP;
 
@@ -463,16 +468,6 @@ static int l4x_pagein(unsigned long addr, unsigned long size,
 #endif
 
 #ifdef ARCH_x86
-l4_utcb_t *l4x_utcb_check(void)
-{
-	l4_utcb_t *utcb;
-	__asm__ __volatile__ ("mov 0xeacfd000, %0" : "=r" (utcb));
-	//__asm__ __volatile__ ("mov 0xbfff0000, %0" : "=r" (utcb));
-	return utcb;
-}
-#endif
-
-#ifdef ARCH_x86
 static unsigned l4x_x86_orig_utcb_segment;
 static inline void l4x_x86_utcb_save_orig_segment(void)
 {
@@ -490,18 +485,16 @@ L4_CV l4_utcb_t *l4_utcb_wrap(void)
 {
 #ifdef ARCH_arm
 	return l4_utcb_direct();
-#else
-#if 0
-	if (l4x_utcb_check() != l4_utcb_direct())
-		enter_kdebug("UTCB mismatch");
-	return l4_utcb_direct();
-#else
-	unsigned gsvalue;
-	asm volatile ("mov %%gs, %0": "=r" (gsvalue));
-	if (gsvalue == 0x43 || gsvalue == 7)
-		return l4_utcb_direct();
+#elif defined(ARCH_x86)
+	unsigned long v;
+	asm volatile ("mov %%gs, %0": "=r" (v));
+	if (v == 0x43 || v == 7) {
+		asm volatile("mov %%gs:0, %0" : "=r" (v));
+		return (l4_utcb_t *)v;
+	}
 	return l4x_stack_utcb_get();
-#endif
+#else
+#error Add your arch
 #endif
 }
 
@@ -1072,7 +1065,7 @@ static void l4x_register_pointer_section(void *p_in_addr,
 	l4x_register_region(ds, (void *)addr, allow_noncontig, tag);
 }
 
-void __init setup_l4x_memory(char *cmdl,
+void __init l4x_setup_memory(char *cmdl,
                              unsigned long *main_mem_start,
                              unsigned long *main_mem_size,
                              unsigned long *isa_dma_mem_start,
@@ -1203,7 +1196,8 @@ void __init setup_l4x_memory(char *cmdl,
 	/** Second: the main memory */
 	if (l4re_rm_attach(&l4x_main_memory_start, l4x_mainmem_size,
 	                   L4RE_RM_IN_AREA | L4RE_RM_EAGER_MAP,
-	                   l4x_ds_mainmem, 0, L4_SUPERPAGESHIFT)) {
+	                   l4x_ds_mainmem, 0,
+	                   MAX_ORDER + PAGE_SHIFT)) {
 		LOG_printf("Error attaching to L4Linux main memory\n");
 		l4x_exit_l4linux();
 	}
@@ -1277,6 +1271,7 @@ void __init setup_l4x_memory(char *cmdl,
 void l4x_update_mapping(unsigned long addr)
 {
 	pte_t *ptep;
+
 	/* currently only used for fixmaps */
 	if (l4x_fixmap_space_start > addr
 	    || addr >= l4x_fixmap_space_start + __end_of_permanent_fixed_addresses * PAGE_SIZE)
@@ -1326,17 +1321,6 @@ unsigned long l4x_get_isa_dma_memory_end(void)
 	return 0;
 }
 
-void l4x_setup_thread_stack(void)
-{
-	struct thread_info *ti = current_thread_info();
-
-	// XXX only call on CPU0!
-	BUG_ON(smp_processor_id());
-
-	*ti = (struct thread_info) INIT_THREAD_INFO(init_task);
-	ti->task->stack = ti;
-}
-
 static void l4x_create_ugate(l4_cap_idx_t forthread, unsigned cpu)
 {
 	l4_msgtag_t r;
@@ -1348,7 +1332,8 @@ static void l4x_create_ugate(l4_cap_idx_t forthread, unsigned cpu)
 	                           l4x_user_gate[cpu],
 	                           forthread, 0x10);
 	if (l4_error(r))
-		LOG_printf("Error creating user-gate %d\n", cpu);
+		LOG_printf("Error creating user-gate %d, error=%lx\n",
+		           cpu, l4_error(r));
 
 	{
 		char n[14];
@@ -1382,6 +1367,25 @@ unsigned l4x_cpu_physmap_get_id(unsigned lcpu)
 	return l4x_cpu_physmap[lcpu].phys_id;
 }
 
+static l4lx_thread_t l4x_cpu_threads[NR_CPUS];
+
+l4lx_thread_t l4x_cpu_thread_get(int cpu)
+{
+	BUG_ON(cpu >= NR_CPUS);
+	return l4x_cpu_threads[cpu];
+}
+
+l4_cap_idx_t l4x_cpu_thread_get_cap(int cpu)
+{
+	return l4lx_thread_get_cap(l4x_cpu_thread_get(cpu));
+}
+
+static void l4x_cpu_thread_set(int cpu, l4lx_thread_t tid)
+{
+	BUG_ON(cpu >= NR_CPUS);
+	l4x_cpu_threads[cpu] = tid;
+}
+
 #ifdef CONFIG_SMP
 
 #ifdef ARCH_x86
@@ -1409,14 +1413,7 @@ static int l4x_cpu_check_pcpu(unsigned pcpu, l4_umword_t max_cpus)
 	       && l4_scheduler_is_online(l4re_env()->scheduler, pcpu);
 }
 
-static l4_cap_idx_t l4x_cpu_threads[NR_CPUS];
 static struct task_struct *l4x_cpu_idler[NR_CPUS] = { &init_task, 0, };
-
-l4_cap_idx_t l4x_cpu_thread_get(int cpu)
-{
-	BUG_ON(cpu >= NR_CPUS);
-	return l4x_cpu_threads[cpu];
-}
 
 #ifdef ARCH_arm
 int l4x_cpu_cpu_get(void)
@@ -1425,18 +1422,13 @@ int l4x_cpu_cpu_get(void)
 	l4_cap_idx_t id = l4x_stack_id_get();
 
 	for (; i < NR_CPUS; i++)
-		if (l4_capability_equal(id, l4x_cpu_threads[i]))
+		if (l4x_cpu_threads[i] &&
+		    l4_capability_equal(id, l4lx_thread_get_cap(l4x_cpu_threads[i])))
 			return i;
 
 	BUG();
 }
 #endif
-
-static void l4x_cpu_thread_set(int cpu, l4_cap_idx_t tid)
-{
-	BUG_ON(cpu >= NR_CPUS);
-	l4x_cpu_threads[cpu] = tid;
-}
 
 struct task_struct *l4x_cpu_idle_get(int cpu)
 {
@@ -1445,11 +1437,11 @@ struct task_struct *l4x_cpu_idle_get(int cpu)
 }
 
 #ifndef CONFIG_L4_VCPU
-static l4_cap_idx_t l4x_cpu_ipi_threads[NR_CPUS];
+static l4lx_thread_t l4x_cpu_ipi_threads[NR_CPUS];
 #endif
-static l4_cap_idx_t l4x_cpu_ipi_irqs[NR_CPUS];
+static l4_cap_idx_t  l4x_cpu_ipi_irqs[NR_CPUS];
 #ifdef ARCH_x86
-static atomic_t     l4x_cpu_ipi_vector_mask[NR_CPUS];
+static atomic_t      l4x_cpu_ipi_vector_mask[NR_CPUS];
 #endif
 
 #ifndef CONFIG_L4_VCPU
@@ -1563,7 +1555,7 @@ void l4x_cpu_ipi_thread_start(unsigned cpu)
 	                             NULL, &cpu, sizeof(cpu),
 	                             l4lx_irq_prio_get(0), 0, s);
 
-	if (l4_is_invalid_cap(l4x_cpu_ipi_threads[cpu])) {
+	if (!l4lx_thread_is_valid(l4x_cpu_ipi_threads[cpu])) {
 		LOG_printf("Failed to create thread %s\n", s);
 		l4x_exit_l4linux();
 	}
@@ -1588,9 +1580,11 @@ void l4x_cpu_ipi_thread_start(unsigned cpu)
 #endif
 
 #ifdef CONFIG_L4_VCPU
-	t = l4_irq_attach(c, L4X_VCPU_IRQ_IPI << 2, l4x_cpu_threads[cpu]);
+	t = l4_irq_attach(c, L4X_VCPU_IRQ_IPI << 2,
+	                  l4lx_thread_get_cap(l4x_cpu_threads[cpu]));
 #else
-	t = l4_irq_attach(c, 0, l4x_cpu_ipi_threads[cpu]);
+	t = l4_irq_attach(c, 0,
+	                  l4lx_thread_get_cap(l4x_cpu_ipi_threads[cpu]));
 #endif
 	if (l4_error(t)) {
 		LOG_printf("Failed to attach IPI IRQ%d\n", cpu);
@@ -1630,7 +1624,7 @@ void l4x_cpu_ipi_thread_stop(unsigned cpu)
 	l4x_cpu_ipi_irqs[cpu] = L4_INVALID_CAP;
 
 #ifndef CONFIG_L4_VCPU
-	l4lx_thread_shutdown(l4x_cpu_ipi_threads[cpu]);
+	l4lx_thread_shutdown(l4x_cpu_ipi_threads[cpu], 0);
 #endif
 }
 
@@ -1640,9 +1634,9 @@ static L4_CV void __cpu_starter(void *x)
 	l4_msgtag_t tag;
 	l4_utcb_t *u = l4_utcb();
 
-	l4x_stack_setup(current_thread_info());
+	l4x_stack_setup(current_thread_info(), u, 0);
 
-	tag = l4_ipc_receive(l4x_cpu_thread_get(0), u, L4_IPC_NEVER);
+	tag = l4_ipc_receive(l4x_cpu_thread_get_cap(0), u, L4_IPC_NEVER);
 	cpu = l4_utcb_mr_u(u)->mr[0];
 	BUG_ON(l4_ipc_error(tag, u));
 
@@ -1651,17 +1645,13 @@ static L4_CV void __cpu_starter(void *x)
 	l4lx_thread_pager_change(l4x_stack_id_get(), l4x_start_thread_id);
 
 #ifdef CONFIG_L4_VCPU
-	l4x_vcpu_states[cpu] = l4x_vcpu_state_u(l4_utcb());
-	l4x_vcpu_state(cpu)->state = L4_VCPU_F_EXCEPTIONS;
-	l4x_vcpu_state(cpu)->entry_ip = (l4_addr_t)&l4x_vcpu_entry;
-	l4x_vcpu_state(cpu)->user_task = L4_INVALID_CAP;
+	l4x_vcpu_init(l4x_vcpu_states[cpu]);
 #endif
 
 #ifdef ARCH_x86
 	l4x_load_percpu_gdt_descriptor(get_cpu_gdt_table(cpu));
-#endif
-#ifdef ARCH_x86
-	l4x_stack_setup((struct thread_info *)((unsigned long)stack_start.sp & ~(THREAD_SIZE - 1)));
+	l4x_stack_setup((struct thread_info *)((unsigned long)stack_start.sp & ~(THREAD_SIZE - 1)),
+	                u, cpu);
 	asm volatile ("movl (stack_start), %esp; jmp *(initial_code)");
 #endif
 #ifdef ARCH_arm
@@ -1696,7 +1686,8 @@ void l4x_cpu_spawn(int cpu, struct task_struct *idle)
 	l4x_cpu_threads[cpu]
 	   = l4lx_thread_create(__cpu_starter, cpu,
 	                        NULL, NULL, 0, CONFIG_L4_PRIO_SERVER_PROC,
-	                        L4_THREAD_CONTROL_VCPU_ENABLED, s);
+	                        &l4x_vcpu_states[cpu],
+	                        s);
 	L4XV_U(f);
 }
 
@@ -1708,7 +1699,7 @@ void l4x_cpu_release(int cpu)
 
 	L4XV_L(f);
 	l4_utcb_mr()->mr[0] = cpu;
-	tag = l4_ipc_send(l4x_cpu_thread_get(cpu), l4_utcb(),
+	tag = l4_ipc_send(l4x_cpu_thread_get_cap(cpu), l4_utcb(),
 	                  l4_msgtag(0, 1, 0, 0), L4_IPC_NEVER);
 	if ((error = l4_ipc_error(tag, l4_utcb())))
 		LOG_printf("Failed to release CPU%d; ipc error %d\n",
@@ -1804,7 +1795,7 @@ void l4x_migrate_thread(l4_cap_idx_t thread, unsigned from_cpu, unsigned to_cpu)
 //----------------------
 // repnop start
 #ifndef CONFIG_L4_VCPU
-l4_cap_idx_t l4x_repnop_id;
+l4lx_thread_t l4x_repnop_id;
 
 static char l4x_repnop_stack[L4LX_THREAD_STACK_SIZE];
 
@@ -1830,7 +1821,7 @@ void l4x_rep_nop(void)
 {
 	l4_msgtag_t t;
 	LOG_printf("%s %d\n", __func__, __LINE__); 
-	t = l4_ipc_call(l4x_repnop_id, l4_utcb(),
+	t = l4_ipc_call(l4lx_thread_get_cap(l4x_repnop_id), l4_utcb(),
 	                l4_msgtag(0, 0, 0, L4_MSGTAG_SCHEDULE), L4_IPC_NEVER);
 	BUG_ON(l4_ipc_error(t, l4_utcb()));
 }
@@ -1849,7 +1840,6 @@ static void l4x_repnop_init(void)
 #endif
 
 #else
-static inline void l4x_cpu_thread_set(int cpu, l4_cap_idx_t tid) {}
 #ifndef CONFIG_L4_VCPU
 static inline void l4x_repnop_init(void) {}
 #endif
@@ -1937,7 +1927,7 @@ static int l4x_cpu_virt_phys_map_init(const char *boot_command_line)
 	}
 #endif
 
-	LOG_printf("CPU mapping (l:p): ");
+	LOG_printf("CPU mapping (l:p)[%d]: ", l4x_nr_cpus);
 	for (i = 0; i < l4x_nr_cpus; i++)
 		LOG_printf("%u:%u%s", i, l4x_cpu_physmap[i].phys_id,
 		           i == l4x_nr_cpus - 1 ? "\n" : ", ");
@@ -1970,14 +1960,12 @@ static long l4x_blink(int state)
 static L4_CV void __init l4x_linux_startup(void *data)
 {
 	l4_cap_idx_t caller_id = *(l4_cap_idx_t *)data;
+	struct thread_info *ti = current_thread_info();
 
-	l4x_stack_setup(current_thread_info());
+	l4x_stack_setup(ti, l4_utcb(), 0);
 
 #ifdef CONFIG_L4_VCPU
-	l4x_vcpu_states[0] = l4x_vcpu_state_u(l4_utcb());
-	l4x_vcpu_state(0)->state = L4_VCPU_F_EXCEPTIONS;
-	l4x_vcpu_state(0)->entry_ip = (l4_addr_t)&l4x_vcpu_entry;
-	l4x_vcpu_state(0)->user_task = L4_INVALID_CAP;
+	l4x_vcpu_init(l4x_vcpu_states[0]);
 #endif
 
 	LOG_printf("%s: thread "l4util_idfmt".\n",
@@ -1988,36 +1976,34 @@ static L4_CV void __init l4x_linux_startup(void *data)
 
 	LOG_printf("main thread: received startup message.\n");
 
-	linux_server_thread_id = l4x_stack_id_get();
-	l4x_create_ugate(linux_server_thread_id, 0);
-
-	l4lx_thread_pager_change(linux_server_thread_id, caller_id);
-
-	//l4x_utcb_set(linux_server_thread_id, l4_utcb_get());
+	l4x_create_ugate(l4x_stack_id_get(), 0);
+	l4lx_thread_pager_change(l4x_stack_id_get(), caller_id);
 
 #ifdef ARCH_x86
 	asm volatile("movl %%ds,  %%eax \n"
-	             "movl %%eax, %%fs  \n"  // fs == ds
-		     "xorl %%eax, %%eax \n"
-		     //"movl %%eax, %%gs  \n"  // clear gs
+	             "movl %%eax, %%fs  \n"  // fs == ds for percpu
 		     : : : "eax", "memory");
 #endif
-	l4x_setup_thread_stack();
+	*ti = (struct thread_info) INIT_THREAD_INFO(init_task);
+	ti->task->stack = ti;
 
 #ifdef CONFIG_L4_VCPU
-	current_thread_info()->task->thread.regsp = task_pt_regs_v(current);
+	ti->task->thread.regsp = task_pt_regs_v(ti->task);
 #endif
 
 	panic_blink = l4x_blink;
 
 #ifdef ARCH_x86
 	// todo: also do more ..._early_setup stuff here
-	reserve_early(__pa_symbol(&_text), __pa_symbol(&__bss_stop), "TEXT DATA BSS");
 	legacy_pic = &null_legacy_pic;
 #endif
 
 	local_irq_disable();
+#ifdef ARCH_x86
+	i386_start_kernel();
+#else
 	start_kernel();
+#endif
 }
 
 #ifdef CONFIG_BLK_DEV_INITRD
@@ -2242,12 +2228,15 @@ static void l4x_scan_hw_resources(void)
 
 int __init_refok L4_CV main(int argc, char **argv)
 {
-	l4_cap_idx_t main_id;
-	l4_msgtag_t tag;
+	l4lx_thread_t main_id;
 	extern char _end[];
 	extern char boot_command_line[];
 	unsigned i;
 	char *p;
+
+#ifdef CONFIG_L4_SERVER
+	l4x_srv_init();
+#endif
 
 	LOG_printf("\033[34;1m======> L4Linux 2.6 starting... <========\033[0m\n");
 	LOG_printf("%s", linux_banner);
@@ -2320,11 +2309,6 @@ int __init_refok L4_CV main(int argc, char **argv)
 	/* some things from head.S */
 	get_initial_cpu_capabilities();
 
-	/* This is not the final try to set linux_server_thread_id
-	 * but l4lx_thread_create needs some initial data for the return
-	 * value... */
-	linux_server_thread_id = l4re_env()->main_thread;
-
 #ifdef ARCH_x86
 #ifdef CONFIG_VGA_CONSOLE
 	/* map VGA range */
@@ -2367,14 +2351,14 @@ int __init_refok L4_CV main(int argc, char **argv)
 	l4x_repnop_init();
 #endif
 
-#ifdef ARCH_x86
+	l4x_scan_hw_resources();
 
+#ifdef ARCH_x86
 	if (l4util_kip_kernel_has_feature(l4lx_kinfo, "io_prot")) {
 #ifndef CONFIG_L4_TAMED
 		enter_kdebug("ioprot-microkernel -> enable TAMED mode!");
 #endif
 	}
-	l4x_scan_hw_resources();
 
 	/* Initialize GDT entry offset */
 	l4x_fiasco_gdt_entry_offset = fiasco_gdt_get_entry_offset(l4re_env()->main_thread, l4_utcb());
@@ -2414,19 +2398,19 @@ int __init_refok L4_CV main(int argc, char **argv)
 	                             &l4x_start_thread_id,
 	                             sizeof(l4x_start_thread_id),
 	                             CONFIG_L4_PRIO_SERVER_PROC,
-	                             L4_THREAD_CONTROL_VCPU_ENABLED,
+	                             &l4x_vcpu_states[0],
 	                             "cpu0");
 
-	if (l4_is_invalid_cap(main_id))
+	if (!l4lx_thread_is_valid(main_id))
 		return 1;
 
 
 	l4x_cpu_thread_set(0, main_id);
 
 	LOG_printf("main thread will be " PRINTF_L4TASK_FORM "\n",
-	           PRINTF_L4TASK_ARG(main_id));
+	           PRINTF_L4TASK_ARG(l4lx_thread_get_cap(main_id)));
 
-	l4x_register_pointer_section(&__init_begin, 0, "sec-w-init");
+	l4x_register_pointer_section(&__init_begin, 0, "section-with-init");
 
 #ifdef ARCH_x86
 	/* Needed for smp alternatives -- nobody will ever use this for a
@@ -2441,8 +2425,8 @@ int __init_refok L4_CV main(int argc, char **argv)
 	//l4x_register_pointer_section(&_edata, 0, "data");
 
 	/* Send start message to main thread. */
-	tag = l4_msgtag(0, 0, 0, 0);
-	l4_ipc_send(main_id, l4_utcb(), tag, L4_IPC_NEVER);
+	l4_ipc_send(l4lx_thread_get_cap(main_id),
+	            l4_utcb(), l4_msgtag(0, 0, 0, 0), L4_IPC_NEVER);
 
 	LOG_printf("Main thread running, waiting...\n");
 
@@ -2860,7 +2844,6 @@ static void l4x_setup_die_utcb(l4_exc_regs_t *exc)
 	extern void die(const char *msg, struct pt_regs *regs, int err);
 	static char message[40];
 
-	LOG_printf("%s %d\n", __func__, __LINE__); 
 	snprintf(message, sizeof(message), "Boom!");
 	message[sizeof(message) - 1] = 0;
 
@@ -3181,7 +3164,7 @@ static int l4x_default(l4_cap_idx_t *src_id, l4_msgtag_t *tag)
 			return 0;
 		}
 
-		LOG_printf("EXvcada: pfa=%lx pc=%lx\n", pfa, pc);
+		LOG_printf("Page fault (non-resolved): pfa=%lx pc=%lx\n", pfa, pc);
 		/* Make exception out of PF */
 		*tag = l4_msgtag(-1, 1, 0, 0);
 		l4_utcb_mr()->mr[0] = -1;
@@ -3470,13 +3453,6 @@ void l4x_thread_set_pc(l4_cap_idx_t thread, void *pc)
 
 /* -------------------------------------------------- */
 
-void l4x_setup_threads(void)
-{
-	//l4lx_thread_prio_set(linux_server_thread_id, CONFIG_L4_PRIO_SERVER_PROC);
-}
-
-/* -------------------------------------------------- */
-
 int l4x_peek_upage(unsigned long addr,
                    unsigned long __user *datap,
                    int *ret)
@@ -3500,6 +3476,7 @@ void l4x_printk_func(char *buf, int len)
 	outnstring(buf, len);
 }
 
+#ifndef CONFIG_L4_VCPU
 #include <linux/hardirq.h>
 
 /* ----------------------------------------------------- */
@@ -3509,22 +3486,25 @@ void l4x_prepare_irq_thread(struct thread_info *ti, unsigned _cpu)
 	/* Stack setup */
 	*ti = (struct thread_info) INIT_THREAD_INFO(init_task);
 
-	l4x_stack_setup(ti);
+	l4x_stack_setup(ti, l4_utcb(), _cpu);
 	barrier();
 
 	ti->task          = l4x_idle_task(_cpu);
-	ti->preempt_count = HARDIRQ_OFFSET;
+	ti->exec_domain   = NULL;
 	ti->cpu           = _cpu;
+	ti->preempt_count = HARDIRQ_OFFSET;
+#ifdef ARCH_x86
+	ti->addr_limit    = MAKE_MM_SEG(0);
+#endif
 
 	/* Set pager */
 	l4lx_thread_set_kernel_pager(l4x_stack_id_get());
 
-#ifdef CONFIG_SMP
-#ifdef ARCH_x86
+#if defined(CONFIG_SMP) && defined(ARCH_x86)
 	l4x_load_percpu_gdt_descriptor(get_cpu_gdt_table(_cpu));
 #endif
-#endif
 }
+#endif
 
 /* ----------------------------------------------------- */
 void l4x_show_process(struct task_struct *t)
@@ -3726,7 +3706,9 @@ EXPORT_SYMBOL(l4_sleep);
 char l4x_ipc_errstrings[0];
 EXPORT_SYMBOL(l4x_ipc_errstrings);
 
+#ifndef CONFIG_L4_VCPU
 EXPORT_SYMBOL(l4x_prepare_irq_thread);
+#endif
 
 EXPORT_SYMBOL(l4lx_task_create);
 EXPORT_SYMBOL(l4lx_task_get_new_task);

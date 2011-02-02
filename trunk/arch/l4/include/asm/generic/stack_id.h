@@ -1,21 +1,34 @@
 #ifndef __ASM_L4__GENERIC__STACK_ID_H__
 #define __ASM_L4__GENERIC__STACK_ID_H__
 
-#include <asm/thread_info.h>
-#include <asm/l4lxapi/thread.h>
-#include <l4/sys/utcb.h>
-#ifdef CONFIG_L4_VCPU
-#include <l4/sys/vcpu.h>
-#endif
-
-struct l4x_stack_struct {
-	l4_utcb_t *l4utcb;
-};
-
 enum {
 	L4X_UTCB_TCR_ID = 0,
 	L4X_UTCB_TCR_PRIO = 1,
 };
+
+#include <asm/thread_info.h>
+#include <asm/l4lxapi/thread.h>
+#include <l4/sys/utcb.h>
+#ifdef CONFIG_L4_VCPU
+#include <asm/generic/vcpu.h>
+#endif
+
+struct l4x_stack_struct {
+	l4_utcb_t *l4utcb;
+#ifdef CONFIG_L4_VCPU
+	l4_vcpu_state_t *vcpu;
+#endif
+};
+
+static inline
+int l4x_is_vcpu(void)
+{
+#ifdef CONFIG_L4_VCPU
+	return 1;
+#else
+	return 0;
+#endif
+}
 
 static inline
 struct l4x_stack_struct *l4x_stack_struct_get(struct thread_info *ti)
@@ -32,27 +45,23 @@ static inline l4_utcb_t *l4x_stack_utcb_get(void)
 #ifdef CONFIG_L4_VCPU
 static inline l4_vcpu_state_t *l4x_stack_vcpu_state_get(void)
 {
-	return (l4_vcpu_state_t *)((char *)l4x_stack_utcb_get()
-	                           + L4_UTCB_OFFSET);
+	return l4x_stack_struct_get(current_thread_info())->vcpu;
 }
 #endif
 
-static inline void l4x_stack_setup(struct thread_info *ti)
+static inline void l4x_stack_setup(struct thread_info *ti,
+                                   l4_utcb_t *u, unsigned cpu)
 {
 	struct l4x_stack_struct *s = l4x_stack_struct_get(ti);
-	s->l4utcb = l4_utcb();
+	s->l4utcb = u;
+#ifdef CONFIG_L4_VCPU
+	s->vcpu = l4x_vcpu_state(cpu);
+#endif
 }
 
 static inline l4_cap_idx_t l4x_stack_id_get(void)
 {
 	return l4_utcb_tcr_u(l4x_stack_utcb_get())->user[L4X_UTCB_TCR_ID];
-}
-
-static inline void l4x_stack_id_set(struct thread_info *ti,
-                                    l4_cap_idx_t id)
-{
-	l4_utcb_t *u = l4x_stack_struct_get(ti)->l4utcb;
-	l4_utcb_tcr_u(u)->user[L4X_UTCB_TCR_ID] = id;
 }
 
 #ifndef CONFIG_L4_VCPU

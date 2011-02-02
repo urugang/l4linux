@@ -50,13 +50,18 @@ static int l4x_irq_wake_empty(unsigned int irq, unsigned int type)
 
 static void l4x_irq_startup(unsigned int irq)
 {
-	l4lx_irq_dev_startup(irq);
+	l4lx_irq_dev_startup(irq_get_irq_data(irq));
+}
+
+static void irq_shutdown(unsigned int irq)
+{
+	l4lx_irq_dev_shutdown(irq_get_irq_data(irq));
 }
 
 static struct irq_chip l4_irq_dev_chip = {
 	.name           = "L4",
 	.ack            = l4x_irq_ackmaskun_empty,
-	.mask           = l4lx_irq_dev_shutdown,
+	.mask           = irq_shutdown,
 	.unmask         = l4x_irq_startup,
 	.set_type       = l4x_irq_type_empty,
 	.set_wake       = l4x_irq_wake_empty,
@@ -193,7 +198,7 @@ static void l4x_timer_init(void)
 	clockevents_register_device(&timer0_clockevent);
 
 #if defined(CONFIG_L4_IRQ_SINGLE)
-	l4lx_irq_timer_startup(0);
+	l4lx_irq_timer_startup(irq_get_irq_data(0));
 #endif
 }
 
@@ -207,8 +212,6 @@ struct sys_timer l4x_timer = {
 };
 
 MACHINE_START(L4, "L4")
-	.phys_io	= 0,
-	.io_pg_offst	= 0,
 	.boot_params	= 0,
 	.fixup		= fixup_l4,
 	.map_io		= map_io_l4,

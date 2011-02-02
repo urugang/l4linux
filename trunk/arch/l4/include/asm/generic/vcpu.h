@@ -1,10 +1,18 @@
 #ifndef __ASM_L4__GENERIC__VCPU_H__
 #define __ASM_L4__GENERIC__VCPU_H__
 
-#ifdef CONFIG_L4_VCPU
-
+#include <linux/threads.h>
 #include <l4/sys/vcpu.h>
-#include <l4/sys/utcb.h>
+
+extern l4_vcpu_state_t *l4x_vcpu_states[NR_CPUS];
+
+static inline
+l4_vcpu_state_t *l4x_vcpu_state(int cpu)
+{
+	return l4x_vcpu_states[cpu];
+}
+
+#ifdef CONFIG_L4_VCPU
 
 #include <linux/irqflags.h>
 #include <linux/threads.h>
@@ -15,24 +23,16 @@
 #define  L4XV_L(n) local_irq_save(n)
 #define  L4XV_U(n) local_irq_restore(n)
 
-static inline
-l4_vcpu_state_t *l4x_vcpu_state_u(l4_utcb_t *u)
-{
-	char *a = (char *)l4_utcb() + L4_UTCB_OFFSET;
-	return (l4_vcpu_state_t*)a;
-}
-
-extern l4_vcpu_state_t *l4x_vcpu_states[NR_CPUS];
-
-static inline
-l4_vcpu_state_t *l4x_vcpu_state(int cpu)
-{
-	return l4x_vcpu_states[cpu];
-}
-
 void l4x_vcpu_handle_irq(l4_vcpu_state_t *t, struct pt_regs *regs);
 void l4x_vcpu_handle_ipi(struct pt_regs *regs);
 asmlinkage void l4x_vcpu_entry(void);
+
+static inline void l4x_vcpu_init(l4_vcpu_state_t *v)
+{
+	v->state     = L4_VCPU_F_EXCEPTIONS;
+	v->entry_ip  = (l4_addr_t)&l4x_vcpu_entry;
+	v->user_task = L4_INVALID_CAP;
+}
 
 #else
 

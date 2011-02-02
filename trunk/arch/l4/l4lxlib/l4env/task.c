@@ -104,7 +104,7 @@ static int l4lx_task_delete_obj(l4_cap_idx_t obj)
 	L4XV_L(f);
 	t = l4_task_unmap_u(L4RE_THIS_TASK_CAP,
 	                    l4_obj_fpage(obj, 0, L4_FPAGE_RWX),
-	                    L4_FP_ALL_SPACES, u);
+	                    L4_FP_DELETE_OBJ, u);
 	L4XV_U(f);
 	return l4_error_u(t, u);
 }

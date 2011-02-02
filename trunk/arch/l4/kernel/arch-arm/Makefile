@@ -5,7 +5,7 @@
 obj-y		:= process.o sys_arm.o time.o traps.o stacktrace.o \
 		   switch_to.o setup.o l4.o signal.o irq.o \
 		   ptrace.o entry.o dispatch.o mach_setup.o io.o elf.o \
-		   return_address.o
+		   return_address.o head.o
 
 obj-$(CONFIG_DEPRECATED_PARAM_STRUCT) += compat.o
 

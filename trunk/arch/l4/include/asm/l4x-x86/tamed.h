@@ -51,7 +51,6 @@ static inline void l4x_tamed_sem_down(void)
 	   : "memory", "cc");
 }
 
-#include <l4/sys/ktrace.h>
 static inline void l4x_tamed_sem_up(void)
 {
 	unsigned dummy1, dummy2, dummy3, dummy4;

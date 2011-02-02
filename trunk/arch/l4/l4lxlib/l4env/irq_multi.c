@@ -35,7 +35,7 @@ enum irq_cmds {
 };
 
 static l4_umword_t irq_state[NR_IRQS];
-static l4_cap_idx_t irq_ths[NR_CPUS];
+static l4lx_thread_t irq_ths[NR_CPUS];
 static l4_cap_idx_t irq_caps[NR_IRQS];
 static unsigned char irq_trigger[NR_IRQS] = { L4_IRQ_F_NONE };
 static l4_umword_t irq_disable_cmd_state[NR_IRQS]; /* Make this a bitmask?! */
@@ -54,7 +54,8 @@ static inline unsigned get_irq_cpu(unsigned irq)
 {
         return irq_cpus[irq];
 }
-int l4lx_irq_dev_set_affinity(unsigned int irq, const struct cpumask *dest)
+int l4lx_irq_dev_set_affinity(struct irq_data *data,
+                              const struct cpumask *dest, bool force)
 {
 	return 0;
 }
@@ -88,7 +89,7 @@ static void attach_to_IRQ(unsigned int irq)
 
 	/* Associate INTR */
 	if ((ret = l4_error(l4_irq_attach(irq_caps[irq], irq << 2,
-	                                  irq_ths[0 * smp_processor_id()]))))
+	                                  l4lx_thread_get_cap(irq_ths[0 * smp_processor_id()])))))
 		dd_printk("%s: can't register to irq %u: return=%d\n",
 		          __func__, irq, ret);
 	if ((ret = l4_error(l4_irq_unmask(irq_caps[irq]))) != L4_PROTO_IRQ)
@@ -118,7 +119,8 @@ static void send_msg_to_irq_thread(unsigned int irq, unsigned int cpu,
 
 	do {
 		l4_utcb_mr()->mr[0] = irq;
-		tag = l4_ipc_send(irq_ths[0 * smp_processor_id()], l4_utcb(),
+		tag = l4_ipc_send(l4lx_thread_get_cap(irq_ths[0 * smp_processor_id()]),
+		                  l4_utcb(),
 		                  l4_msgtag(cmd, 1, 0, 0), L4_IPC_NEVER);
 
 		if (l4_ipc_error(tag, l4_utcb()))
@@ -237,13 +239,15 @@ void l4lx_irq_init(void)
 	                                  &cpu, sizeof(cpu),
 	                                  l4lx_irq_prio_get(1),
 	                                  0, thread_name);
-	if (l4_is_invalid_cap(irq_ths[cpu]))
+	if (!l4lx_thread_is_valid(irq_ths[cpu]))
 		enter_kdebug("Error creating IRQ-thread!");
 }
 
 
-int l4lx_irq_set_type(unsigned int irq, unsigned int type)
+int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 {
+	unsigned irq = data->irq;
+
 	if (unlikely(irq >= NR_IRQS))
 		return -1;
 
@@ -272,8 +276,9 @@ int l4lx_irq_set_type(unsigned int irq, unsigned int type)
 
 
 
-unsigned int l4lx_irq_dev_startup(unsigned int irq)
+unsigned int l4lx_irq_dev_startup(struct irq_data *data)
 {
+	unsigned irq = data->irq;
 
 	if (irq) { // not the timer
 		irq_caps[irq] = l4x_have_irqcap(irq);
@@ -288,56 +293,52 @@ unsigned int l4lx_irq_dev_startup(unsigned int irq)
 		}
 	}
 
-	l4lx_irq_dev_enable(irq);
+	l4lx_irq_dev_enable(data);
 
 	return 1;
 }
 
-void l4lx_irq_dev_shutdown(unsigned int irq)
+void l4lx_irq_dev_shutdown(struct irq_data *data)
 {
-	l4lx_irq_dev_disable(irq);
-	if (l4_is_invalid_cap(l4x_have_irqcap(irq)))
-		l4io_release_irq(irq, irq_caps[irq]);
+	l4lx_irq_dev_disable(data);
+	if (l4_is_invalid_cap(l4x_have_irqcap(data->irq)))
+		l4io_release_irq(data->irq, irq_caps[data->irq]);
 }
 
-void l4lx_irq_dev_enable(unsigned int irq)
+void l4lx_irq_dev_enable(struct irq_data *data)
 {
-	dd_printk("%s: %u\n", __func__, irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
 
-	if (!irq_state[irq]) {
+	if (!irq_state[data->irq]) {
 		// actually we would also need to wake-up the IRQ thread...
 		// but the timer will do it sometimes...
-		attach_to_IRQ(irq);
+		attach_to_IRQ(data->irq);
 		//send_msg_to_irq_thread(irq, smp_processor_id(), CMD_IRQ_ENABLE);
 	}
 }
 
-void l4lx_irq_dev_disable(unsigned int irq)
+void l4lx_irq_dev_disable(struct irq_data *data)
 {
-	dd_printk("%s: %u\n", __func__, irq);
-	if (irq_state[irq])
-		send_msg_to_irq_thread(irq, smp_processor_id(), CMD_IRQ_DISABLE);
+	dd_printk("%s: %u\n", __func__, data->irq);
+	if (irq_state[data->irq])
+		send_msg_to_irq_thread(data->irq, smp_processor_id(), CMD_IRQ_DISABLE);
 }
 
 
-void l4lx_irq_dev_ack(unsigned int irq)
+void l4lx_irq_dev_ack(struct irq_data *data)
 {
 }
 
-void l4lx_irq_dev_mask(unsigned int irq)
+void l4lx_irq_dev_mask(struct irq_data *data)
 {
 }
 
-void l4lx_irq_dev_unmask(unsigned int irq)
+void l4lx_irq_dev_unmask(struct irq_data *data)
 {
 }
 
-void l4lx_irq_dev_end(unsigned int irq)
+void l4lx_irq_dev_eoi(struct irq_data *data)
 {
-}
-
-void l4lx_irq_dev_eoi(unsigned int irq)
-{
-	dd_printk("%s: %u\n", __func__, irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
 	//l4_irq_unmask(irq_caps[irq]);
 }

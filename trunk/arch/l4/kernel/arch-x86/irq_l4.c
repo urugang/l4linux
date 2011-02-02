@@ -16,39 +16,36 @@
 
 #ifdef CONFIG_L4_IRQ_SINGLE
 struct irq_chip l4x_irq_timer_chip = {
-	.name		= "L4-timer",
-	.startup	= l4lx_irq_timer_startup,
-	.shutdown	= l4lx_irq_timer_shutdown,
-	.enable		= l4lx_irq_timer_enable,
-	.disable	= l4lx_irq_timer_disable,
-	.ack		= l4lx_irq_timer_ack,
-	.mask		= l4lx_irq_timer_mask,
-	.unmask		= l4lx_irq_timer_unmask,
-	.end		= l4lx_irq_timer_end,
-	.eoi		= l4lx_irq_timer_end,
+	.name			= "L4-timer",
+	.irq_startup		= l4lx_irq_timer_startup,
+	.irq_shutdown		= l4lx_irq_timer_shutdown,
+	.irq_enable		= l4lx_irq_timer_enable,
+	.irq_disable		= l4lx_irq_timer_disable,
+	.irq_ack		= l4lx_irq_timer_ack,
+	.irq_mask		= l4lx_irq_timer_mask,
+	.irq_unmask		= l4lx_irq_timer_unmask,
 #ifndef CONFIG_L4_VCPU
 #ifdef CONFIG_SMP
-	.set_affinity	= l4lx_irq_timer_set_affinity,
+	.irq_set_affinity	= l4lx_irq_timer_set_affinity,
 #endif
 #endif
 };
 #endif
 
 struct irq_chip l4x_irq_dev_chip = {
-	.name		= "L4-irq",
-	.startup	= l4lx_irq_dev_startup,
-	.shutdown	= l4lx_irq_dev_shutdown,
-	.enable		= l4lx_irq_dev_enable,
-	.disable	= l4lx_irq_dev_disable,
-	.ack		= l4lx_irq_dev_ack,
-	.mask		= l4lx_irq_dev_mask,
-	.unmask		= l4lx_irq_dev_unmask,
-	.end		= l4lx_irq_dev_end,
-	.eoi		= l4lx_irq_dev_eoi,
-	.set_type	= l4lx_irq_set_type,
+	.name			= "L4-irq",
+	.irq_startup		= l4lx_irq_dev_startup,
+	.irq_shutdown		= l4lx_irq_dev_shutdown,
+	.irq_enable		= l4lx_irq_dev_enable,
+	.irq_disable		= l4lx_irq_dev_disable,
+	.irq_ack		= l4lx_irq_dev_ack,
+	.irq_mask		= l4lx_irq_dev_mask,
+	.irq_unmask		= l4lx_irq_dev_unmask,
+	.irq_eoi		= l4lx_irq_dev_eoi,
+	.irq_set_type		= l4lx_irq_set_type,
 #ifdef CONFIG_L4_VCPU
 #ifdef CONFIG_SMP
-	.set_affinity	= l4lx_irq_dev_set_affinity,
+	.irq_set_affinity	= l4lx_irq_dev_set_affinity,
 #endif
 #endif
 };
@@ -103,4 +100,9 @@ void __init l4x_init_IRQ(void)
 		} else
 			set_irq_chip_and_handler(i, &no_irq_chip, handle_edge_irq);
 	}
+
+	/* from native_init_IRQ() */
+#ifdef CONFIG_X86_32
+	irq_ctx_init(smp_processor_id());
+#endif
 }
