@@ -36,6 +36,7 @@
 #include <asm/procinfo.h>
 #include <asm/sections.h>
 #include <asm/setup.h>
+#include <asm/smp_plat.h>
 #include <asm/mach-types.h>
 #include <asm/cacheflush.h>
 #include <asm/cachetype.h>
@@ -248,6 +249,35 @@ int cpu_architecture(void)
 	return cpu_arch;
 }
 
+static int cpu_has_aliasing_icache(unsigned int arch)
+{
+	int aliasing_icache;
+	unsigned int id_reg, num_sets, line_size;
+
+	/* arch specifies the register format */
+	switch (arch) {
+	case CPU_ARCH_ARMv7:
+		asm("mcr	p15, 2, %0, c0, c0, 0 @ set CSSELR"
+		    : /* No output operands */
+		    : "r" (1));
+		isb();
+		asm("mrc	p15, 1, %0, c0, c0, 0 @ read CCSIDR"
+		    : "=r" (id_reg));
+		line_size = 4 << ((id_reg & 0x7) + 2);
+		num_sets = ((id_reg >> 13) & 0x7fff) + 1;
+		aliasing_icache = (line_size * num_sets) > PAGE_SIZE;
+		break;
+	case CPU_ARCH_ARMv6:
+		aliasing_icache = read_cpuid_cachetype() & (1 << 11);
+		break;
+	default:
+		/* I-cache aliases will be handled by D-cache aliasing code */
+		aliasing_icache = 0;
+	}
+
+	return aliasing_icache;
+}
+
 static void __init cacheid_init(void)
 {
 	unsigned int cachetype = read_cpuid_cachetype();
@@ -259,10 +289,15 @@ static void __init cacheid_init(void)
 			cacheid = CACHEID_VIPT_NONALIASING;
 			if ((cachetype & (3 << 14)) == 1 << 14)
 				cacheid |= CACHEID_ASID_TAGGED;
-		} else if (cachetype & (1 << 23))
+			else if (cpu_has_aliasing_icache(CPU_ARCH_ARMv7))
+				cacheid |= CACHEID_VIPT_I_ALIASING;
+		} else if (cachetype & (1 << 23)) {
 			cacheid = CACHEID_VIPT_ALIASING;
-		else
+		} else {
 			cacheid = CACHEID_VIPT_NONALIASING;
+			if (cpu_has_aliasing_icache(CPU_ARCH_ARMv6))
+				cacheid |= CACHEID_VIPT_I_ALIASING;
+		}
 	} else {
 		cacheid = CACHEID_VIVT;
 	}
@@ -273,7 +308,7 @@ static void __init cacheid_init(void)
 		cache_is_vipt_nonaliasing() ? "VIPT nonaliasing" : "unknown",
 		cache_is_vivt() ? "VIVT" :
 		icache_is_vivt_asid_tagged() ? "VIVT ASID tagged" :
-		cache_is_vipt_aliasing() ? "VIPT aliasing" :
+		icache_is_vipt_aliasing() ? "VIPT aliasing" :
 		cache_is_vipt_nonaliasing() ? "VIPT nonaliasing" : "unknown");
 }
 
@@ -506,7 +541,7 @@ request_standard_resources(struct meminfo *mi, struct machine_desc *mdesc)
 
 	kernel_code.start   = virt_to_phys(_text);
 	kernel_code.end     = virt_to_phys(_etext - 1);
-	kernel_data.start   = virt_to_phys(_data);
+	kernel_data.start   = virt_to_phys(_sdata);
 	kernel_data.end     = virt_to_phys(_end - 1);
 
 	for (i = 0; i < mi->nr_banks; i++) {
@@ -834,20 +869,26 @@ void __init setup_arch(char **cmdline_p)
 
 	{
 		unsigned long mem_start, mem_size, dummy;
-		setup_l4x_memory(boot_command_line, &mem_start, &mem_size,
+		l4x_setup_memory(boot_command_line, &mem_start, &mem_size,
 	                         &dummy, &dummy);
 
 		if (((unsigned long)_stext & ((1UL << 20) - 1))
 		    || (((unsigned long)_end - (unsigned long)_stext)
 		        & ((1UL << 20) - 1)))
 			BUG();
-		l4x_printf("%s %d\n", __func__, __LINE__); 
+		/*
+		 * We need to have a start aligned to (1 << MAX_ORDER), so
+		 * we need a have something at 0 if we have our .text at
+		 * 0x100000 (see mm/page_alloc.c:alloc_node_mem_map()).
+		 * Other approach: put .text to (1 << (MAX_ORDER +
+		 * PAGE_SHIFT)) and memory behind that, but that would
+		 * require that we fill out everything before.
+		 * Maybe we should set PHYS_OFFSET > 0...
+		 */
+		arm_add_memory(0, PAGE_SIZE);
 		arm_add_memory((unsigned long)_stext,
 		               (unsigned long)_end - (unsigned long)_stext);
-		l4x_printf("%s %d %lx-%lx-%lx\n", __func__, __LINE__, mem_start,
-		    mem_size, mem_start + mem_size); 
 		arm_add_memory(mem_start, mem_size);
-		l4x_printf("%s %d\n", __func__, __LINE__); 
 	}
 
 	/* parse_early_param needs a boot_command_line */
@@ -860,15 +901,14 @@ void __init setup_arch(char **cmdline_p)
 
 	parse_early_param();
 
-		l4x_printf("%s %d\n", __func__, __LINE__); 
 	arm_memblock_init(&meminfo, mdesc);
-		l4x_printf("%s %d\n", __func__, __LINE__); 
 
 	paging_init(mdesc);
 	request_standard_resources(&meminfo, mdesc);
 
 #ifdef CONFIG_SMP
-	smp_init_cpus();
+	if (is_smp())
+		smp_init_cpus();
 #endif
 	reserve_crashkernel();
 

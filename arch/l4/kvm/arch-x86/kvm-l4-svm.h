@@ -17,8 +17,6 @@
 
 #define L4X_VMCB_LOG2_SIZE 12
 
-int l4x_kvm_svm_run(l4_cap_idx_t task, l4_fpage_t vmcb_fp);
-
 static inline void l4x_svm_vmcb_seg_dump(struct kvm_vcpu *vcpu, struct vmcb_seg *seg, char *name)
 {
 	vcpu_printf(vcpu, "%s: selector = %04x, attrib = %04x limit = %08x, attrib = %016llx\n",
@@ -74,40 +72,6 @@ static inline void l4x_svm_vmcb_dump(struct kvm_vcpu *vcpu)
 	vcpu_printf(vcpu, "ncr3 = %016llx\n", c.nested_cr3);
 	vcpu_printf(vcpu, "lbr_ctl = %016llx\n", c.lbr_ctl);
 	vcpu_printf(vcpu, "*********************** end_of_dump ***********************\n");
-}
-
-static inline void l4x_l4gpregs_to_kvm_vcpu(l4_vm_gpregs_t *gpregs,
-                                            struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.regs[VCPU_REGS_RDX] = gpregs->edx;
-	vcpu->arch.regs[VCPU_REGS_RCX] = gpregs->ecx;
-	vcpu->arch.regs[VCPU_REGS_RBX] = gpregs->ebx;
-	vcpu->arch.regs[VCPU_REGS_RBP] = gpregs->ebp;
-	vcpu->arch.regs[VCPU_REGS_RSI] = gpregs->esi;
-	vcpu->arch.regs[VCPU_REGS_RDI] = gpregs->edi;
-#if 0
-	current->thread.debugreg0 = gpregs->dr0;
-	current->thread.debugreg1 = gpregs->dr1;
-	current->thread.debugreg2 = gpregs->dr2;
-	current->thread.debugreg3 = gpregs->dr3;
-#endif
-}
-
-static inline void l4x_kvm_vcpu_to_l4gpregs(struct kvm_vcpu *vcpu,
-                                            l4_vm_gpregs_t *gpregs)
-{
-	gpregs->edx = vcpu->arch.regs[VCPU_REGS_RDX];
-	gpregs->ecx = vcpu->arch.regs[VCPU_REGS_RCX];
-	gpregs->ebx = vcpu->arch.regs[VCPU_REGS_RBX];
-	gpregs->ebp = vcpu->arch.regs[VCPU_REGS_RBP];
-	gpregs->esi = vcpu->arch.regs[VCPU_REGS_RSI];
-	gpregs->edi = vcpu->arch.regs[VCPU_REGS_RDI];
-#if 0
-	gpregs->dr0 = current->thread.debugreg0;
-	gpregs->dr1 = current->thread.debugreg1;
-	gpregs->dr2 = current->thread.debugreg2;
-	gpregs->dr3 = current->thread.debugreg3;
-#endif
 }
 
 #endif //__KVM_L4_H

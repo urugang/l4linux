@@ -5,7 +5,7 @@
 #ifndef __ASM_L4__L4LXAPI__THREAD_H__
 #define __ASM_L4__L4LXAPI__THREAD_H__
 
-#include <l4/sys/types.h>
+#include <asm/generic/kthreads.h>
 
 /* Convenience include */
 #include <asm/l4lxapi/generic/thread_gen.h>
@@ -46,7 +46,7 @@ void l4lx_thread_init(void);
  * \param name		String describing the thread. Only used for
  *			debugging purposes.
  *
- * \return Thread ID of the new thread, L4_INVALID_ID if an error occured.
+ * \return Thread ID of the new thread, 0 if an error occured.
  *
  * The stack layout for non L4Env threads:
  *
@@ -65,12 +65,31 @@ void l4lx_thread_init(void);
  *                             |----------------- ESP for new thread
  * </pre>
  */
-l4_cap_idx_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
-                                unsigned cpu_nr,
-                                void *stack_pointer,
-                                void *stack_data, unsigned stack_data_size,
-                                int prio,
-                                unsigned thread_control_flags, const char *name);
+l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
+                                 unsigned cpu_nr,
+                                 void *stack_pointer,
+                                 void *stack_data, unsigned stack_data_size,
+                                 int prio,
+                                 l4_vcpu_state_t **vcpu_state,
+                                 const char *name);
+
+/**
+ * \brief Check whether a thread is valid.
+ *
+ * \param t Thread.
+ *
+ * \return != 0 if valid, 0 if not
+ */
+L4_INLINE int l4lx_thread_is_valid(l4lx_thread_t t);
+
+/**
+ * \brief Get cap of a thread.
+ *
+ * \param t Thread.
+ *
+ * \return Cap of thread t.
+ */
+L4_INLINE l4_cap_idx_t l4lx_thread_get_cap(l4lx_thread_t t);
 
 /**
  * \brief Change the pager of a (kernel) thread.
@@ -93,9 +112,10 @@ void l4lx_thread_set_kernel_pager(l4_cap_idx_t thread);
  * \brief Shutdown a thread.
  * \ingroup thread
  *
- * \param thread	Thread id of the thread to kill.
+ * \param u Thread to kill
+ * \param v Optional vcpu state
  */
-void l4lx_thread_shutdown(l4_cap_idx_t thread);
+void l4lx_thread_shutdown(l4lx_thread_t u, void *v);
 
 /**
  * \brief Check if two thread ids are equal. Do not use with different

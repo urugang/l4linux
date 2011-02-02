@@ -248,6 +248,10 @@ void l4x_flush_icache_all(void)
 {
 }
 
+void arm926_flush_icache_all(void)
+{
+}
+
 static void __data_abort(unsigned long pc)
 {
 	printk("%s called.\n", __func__);
@@ -307,6 +311,7 @@ static struct cpu_user_fns l4_cpu_user_fns = {
 };
 
 static struct cpu_cache_fns l4_cpu_cache_fns = {
+	.flush_icache_all       = arm926_flush_icache_all,
 	.flush_kern_all         = arm926_flush_kern_cache_all,
 	.flush_user_all         = arm926_flush_user_cache_all,
 	.flush_user_range       = arm926_flush_user_cache_range,

@@ -1,5 +1,5 @@
 /*
- *  linux/include/asm-arm/processor.h
+ *  arch/arm/include/asm/processor.h
  *
  *  Copyright (C) 1995-1999 Russell King
  *
@@ -19,6 +19,7 @@
 
 #ifdef __KERNEL__
 
+#include <asm/hw_breakpoint.h>
 #include <asm/ptrace.h>
 #include <asm/types.h>
 
@@ -43,6 +44,9 @@ struct debug_entry {
 struct debug_info {
 	int			nsaved;
 	struct debug_entry	bp[2];
+#ifdef CONFIG_HAVE_HW_BREAKPOINT
+	struct perf_event	*hbp[ARM_MAX_HBP_SLOTS];
+#endif
 };
 
 // same in x86...

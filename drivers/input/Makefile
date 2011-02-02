@@ -26,3 +26,5 @@ obj-$(CONFIG_INPUT_MISC)	+= misc/
 obj-$(CONFIG_INPUT_APMPOWER)	+= apm-power.o
 
 obj-$(CONFIG_XEN_KBDDEV_FRONTEND)	+= xen-kbdfront.o
+
+obj-$(CONFIG_L4_SERVER_INPUT)	+= l4-input-srv.o

@@ -149,7 +149,12 @@ static inline void l4x_dispatch_set_polling_flag(void)
 	current_thread_info()->status |= TS_POLLING;
 }
 
+#ifdef CONFIG_L4_VCPU
+static inline void l4x_arch_task_start_setup(l4_vcpu_state_t *v,
+		                             struct task_struct *p)
+#else
 static inline void l4x_arch_task_start_setup(struct task_struct *p)
+#endif
 {
 	// - remember GS in FS so that programs can find their UTCB
 	//   libl4sys-l4x.a uses %fs to get the UTCB address
@@ -163,9 +168,9 @@ static inline void l4x_arch_task_start_setup(struct task_struct *p)
 #else
 	unsigned int gs = l4_utcb_exc()->gs;
 #endif
-	unsigned int v = (gs & 0xffff) >> 3;
-	if (   v < l4x_fiasco_gdt_entry_offset
-	    || v > l4x_fiasco_gdt_entry_offset + 3)
+	unsigned int val = (gs & 0xffff) >> 3;
+	if (   val < l4x_fiasco_gdt_entry_offset
+	    || val > l4x_fiasco_gdt_entry_offset + 3)
 		L4X_THREAD_REGSP(&p->thread)->fs = gs;
 
 	/* Setup LDTs */
@@ -238,7 +243,7 @@ void l4x_idle(void);
 
 int  l4x_deliver_signal(int exception_nr, int error_code);
 
-DEFINE_PER_CPU(struct task_struct *, l4x_current_process) = &init_task;
+DEFINE_PER_CPU(struct thread_info *, l4x_current_ti) = &init_thread_info;
 DEFINE_PER_CPU(struct thread_info *, l4x_current_proc_run);
 #ifndef CONFIG_L4_VCPU
 static DEFINE_PER_CPU(unsigned, utcb_snd_size);
@@ -283,7 +288,10 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #endif
 
 	__unlazy_fpu(prev);
-	per_cpu(l4x_current_process, smp_processor_id()) = next;
+#ifndef CONFIG_L4_VCPU
+	per_cpu(l4x_current_ti, smp_processor_id())
+	  = (struct thread_info *)((unsigned long)next->stack & ~(THREAD_SIZE - 1));
+#endif
 
 	if (unlikely(task_thread_info(prev)->flags & _TIF_WORK_CTXSW_PREV ||
 	             task_thread_info(next)->flags & _TIF_WORK_CTXSW_NEXT))
@@ -295,9 +303,10 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #ifdef CONFIG_SMP
 #ifndef CONFIG_L4_VCPU
 	next->thread.user_thread_id = next->thread.user_thread_ids[smp_processor_id()];
-	//l4x_stack_id_set(next->stack, l4x_cpu_thread_get(new_cpu));
-#endif
+#else
 	/* Migrated thread? */
+	l4x_stack_struct_get(next->stack)->vcpu = vcpu;
+#endif
 	l4x_stack_struct_get(next->stack)->l4utcb
 	  = l4x_stack_struct_get(prev->stack)->l4utcb;
 #endif
@@ -370,7 +379,6 @@ static inline void thread_struct_to_utcb(struct thread_struct *t,
 #ifndef CONFIG_L4_VCPU
 static int l4x_hybrid_begin(struct task_struct *p,
                             struct thread_struct *t);
-
 
 static void l4x_dispatch_suspend(struct task_struct *p,
                                  struct thread_struct *t);
@@ -607,10 +615,6 @@ static int l4x_kdebug_emulation(struct pt_regs *regs)
 	return 0; /* Not handled here */
 }
 
-#ifndef CONFIG_L4_VCPU
-typedef void l4_vcpu_state_t;
-#endif
-
 static inline unsigned r_trapno(struct thread_struct *t, l4_vcpu_state_t *v)
 {
 #ifdef CONFIG_L4_VCPU
@@ -690,6 +694,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		/* Singlestep */
 		return 0;
 	} else if (r_trapno(t, v) == 0xd) {
+
 #ifndef CONFIG_L4_VCPU
 		if (l4x_hybrid_begin(p, t))
 			return 0;
@@ -744,9 +749,9 @@ static inline void l4x_vcpu_entry_user_arch(void)
 	     "mov %1, %%fs \n"
 	     : : "r" (l4x_x86_utcb_get_orig_segment()),
 #ifdef CONFIG_SMP
-	     "r"((l4x_fiasco_gdt_entry_offset + 2) * 8 + 3)
+	     "r" ((l4x_fiasco_gdt_entry_offset + 2) * 8 + 3)
 #else
-	     "r"(l4x_x86_utcb_get_orig_segment())
+	     "r" (l4x_x86_utcb_get_orig_segment())
 #endif
 	     : "memory");
 }

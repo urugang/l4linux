@@ -27,6 +27,7 @@
 #include <asm/l4lxapi/task.h>
 #include <asm/l4lxapi/thread.h>
 #include <asm/l4lxapi/memory.h>
+#include <asm/l4lxapi/irq.h>
 #include <asm/api/macros.h>
 
 #include <asm/generic/dispatch.h>
@@ -175,7 +176,12 @@ static inline void l4x_dispatch_set_polling_flag(void)
 {
 }
 
+#ifdef CONFIG_L4_VCPU
+static inline void l4x_arch_task_start_setup(l4_vcpu_state_t *v,
+		                             struct task_struct *p)
+#else
 static inline void l4x_arch_task_start_setup(struct task_struct *p)
+#endif
 {
 }
 
@@ -194,7 +200,7 @@ static inline int l4x_ispf(struct thread_struct *t)
 void l4x_finish_task_switch(struct task_struct *prev);
 int  l4x_deliver_signal(int exception_nr, int error_code);
 
-DEFINE_PER_CPU(struct task_struct *, l4x_current_process) = &init_task;
+DEFINE_PER_CPU(struct thread_info *, l4x_current_ti) = &init_thread_info;
 DEFINE_PER_CPU(struct thread_info *, l4x_current_proc_run);
 #ifndef CONFIG_L4_VCPU
 static DEFINE_PER_CPU(unsigned, utcb_snd_size);
@@ -258,18 +264,24 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #endif
 
 #ifndef CONFIG_L4_VCPU
-	per_cpu(l4x_current_process, smp_processor_id()) = next;
+	per_cpu(l4x_current_ti, smp_processor_id())
+	  = (struct thread_info *)((unsigned long)next->stack & ~(THREAD_SIZE - 1));
 #endif
 
 #ifdef CONFIG_L4_ARM_UPAGE_TLS
 	*(unsigned long *)(upage_addr + UPAGE_USER_TLS_OFFSET) = task_thread_info(next)->tp_value;
 #endif
+	if (has_tls_reg)
+		asm volatile("mcr p15, 0, %0, c13, c0, 2"
+		             : : "r" (task_thread_info(next)->tp_value));
 
 #ifdef CONFIG_SMP
 #ifndef CONFIG_L4_VCPU
 	next->thread.user_thread_id = next->thread.user_thread_ids[smp_processor_id()];
-#endif
+#else
 	/* Migrated thread? */
+	l4x_stack_struct_get(next->stack)->vcpu = vcpu;
+#endif
 	l4x_stack_struct_get(next->stack)->l4utcb
 	  = l4x_stack_struct_get(prev->stack)->l4utcb;
 #endif
@@ -310,8 +322,7 @@ static inline void thread_struct_to_vcpu(l4_vcpu_state_t *v,
                                          struct thread_struct *t)
 {
 }
-
-#else
+#endif
 
 static inline void utcb_to_thread_struct(l4_utcb_t *utcb,
                                          struct thread_struct *t)
@@ -331,7 +342,6 @@ static inline void thread_struct_to_utcb(struct thread_struct *t,
 	per_cpu(utcb_snd_size, smp_processor_id()) = send_size;
 #endif
 }
-#endif
 
 #ifndef CONFIG_L4_VCPU
 static int l4x_hybrid_begin(struct task_struct *p,
@@ -612,10 +622,6 @@ static inline int sc_get_user_4(unsigned long *store, unsigned long addr)
 	}
 	return get_user(*store, (unsigned long *)addr);
 }
-
-#ifndef CONFIG_L4_VCPU
-typedef void l4_vcpu_state_t;
-#endif
 
 /*
  * Return values: 0 -> do send a reply

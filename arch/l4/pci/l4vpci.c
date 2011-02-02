@@ -81,7 +81,7 @@ int l4vpci_irq_enable(struct pci_dev *dev)
 	}
 
 	dev->irq = irq;
-	l4lx_irq_set_type(irq, flags);
+	l4lx_irq_set_type(irq_get_irq_data(irq), flags);
 
 	dev_info(&dev->dev, "PCI INT %c -> GSI %u (%s, %s) -> IRQ %d\n",
 	         'A' + pin, irq,

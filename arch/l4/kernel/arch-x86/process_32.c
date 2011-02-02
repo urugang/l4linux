@@ -292,7 +292,7 @@ static int l4x_thread_create(struct task_struct *p, unsigned long clone_flags,
 	p->thread.threads_up = 0;
 
 	/* put thread id in stack */
-	l4x_stack_setup(p->stack);
+	l4x_stack_setup(p->stack, l4_utcb(), 0);
 
 	/* if creating a kernel-internal thread, return at this point */
 	if (inkernel) {
@@ -310,7 +310,7 @@ static int l4x_thread_create(struct task_struct *p, unsigned long clone_flags,
 	l4x_setup_user_dispatcher_after_fork(p);
 	return 0;
 }
-#endif /* vcpu */
+#endif /* !vcpu */
 
 /*
  * This gets called before we allocate a new thread and copy
@@ -390,7 +390,8 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 
 #ifdef CONFIG_L4_VCPU
 	if (!err)
-		l4x_stack_setup(p->stack);
+		l4x_stack_setup(p->stack, l4_utcb(),
+		                ((struct thread_info *)p->stack)->cpu);
 #else
 	/* create the user task */
 	if (!err)

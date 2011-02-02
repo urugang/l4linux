@@ -4,16 +4,15 @@
 
 SUFFIX = $(patsubst "%",%,$(CONFIG_L4_VMLINUZ_SUFFIX))
 
-targets := vmlinuz$(SUFFIX)
-
 quiet_cmd_localinst = LOCINST $@
       cmd_localinst = ([ -x "$(srctree)/arch/l4/install.local" ] && \
                        $(srctree)/arch/l4/install.local $@ $(BASEARCH)) || true
 
-Image: vmlinux FORCE
+$(obj)/Image: vmlinux FORCE
 	$(call if_changed,objcopy)
+	@echo '  Kernel: $@ is ready'
 
-lImage: Image vmlinuz$(SUFFIX) l4linux$(SUFFIX)
+lImage: $(obj)/Image vmlinuz$(SUFFIX) l4linux$(SUFFIX)
 
 vmlinuz$(SUFFIX): ldrImage FORCE
 	$(call if_changed,gzip)
@@ -24,8 +23,6 @@ l4linux$(SUFFIX): ldrImage FORCE
 
 objects-y := ldr.o res.o image.o
 
-targets	:= $(objects-y)
-
 include $(L4OBJ)/l4defs.mk.inc
 
 KBUILD_CFLAGS_i386 = -m32
@@ -35,11 +32,11 @@ KBUILD_CFLAGS	:= $(KBUILD_CFLAGS_$(BASEARCH)) \
 		   -DARCH_$(L4_MK_ARCH) -g \
 		   -I$(obj) -DL4SYS_USE_UTCB_WRAP=1
 
-KBUILD_AFLAGS   := -DVMLINUX_IMAGE=\"Image\"
+KBUILD_AFLAGS   := -DVMLINUX_IMAGE=\"$(obj)/Image\"
 
 $(obj)/res.o: $(obj)/func_list.h
 
-$(obj)/image.o: Image
+$(obj)/image.o: $(obj)/Image
 
 $(obj)/func_list.h: vmlinux
 	$(Q)$(OBJCOPY) -j .data.l4externals.str -O binary $< $@.tmp
@@ -58,11 +55,13 @@ endif
 
 L4LIBS := $(shell $(CC) -print-file-name=libgcc_eh.a) $(L4_EXT_LIBS)
 
+servers-y := $(if $(CONFIG_L4_SERVER),arch/l4/server/lib.a)
+
 ldrImage: $(OBJS)
 	@echo "  LD      $@"
 	$(Q)$(LD) -Bstatic -o $@ \
 	  $(L4_LIBDIRS) \
-	  $(L4_CRT0_STATIC) $(OBJS) \
+	  $(L4_CRT0_STATIC) $(OBJS) $(servers-y) \
 	  --start-group $(L4LIBS) $(L4_GCCLIB) --end-group \
 	  $(L4_CRTN_STATIC) \
 	  -Ttext=0xa8000000 \

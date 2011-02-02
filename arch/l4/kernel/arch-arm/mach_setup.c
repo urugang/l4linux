@@ -93,7 +93,7 @@ static void __init map_dma_mem(l4io_device_handle_t devhandle,
 	}
 
 	if (l4io_request_iomem(res.start, res.end - res.start,
-	                       L4IO_MEM_NONCACHED,
+	                       L4IO_MEM_NONCACHED | L4IO_MEM_EAGER_MAP,
 	                       &v)) {
 		printk(KERN_ERR "Could not get DMA MEM\n");
 		L4XV_U(f);

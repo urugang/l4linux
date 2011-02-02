@@ -81,7 +81,7 @@ static void request(struct request_queue *q)
 
 		blk_start_request(req);
 
-		if (!req->cmd_type != REQ_TYPE_FS) {
+		if (req->cmd_type != REQ_TYPE_FS) {
 			printk(KERN_NOTICE "Skip non-CMD request\n");
 			__blk_end_request_all(req, -EIO);
 			continue;

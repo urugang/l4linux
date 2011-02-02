@@ -20,6 +20,7 @@
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
 #include <asm/localtimer.h>
+#include <asm/unified.h>
 
 #include <asm/generic/smp.h>
 
@@ -118,7 +119,7 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
 	//l4/smp_cross_call(cpumask_of(cpu));
 	l4x_cpu_release(cpu);
 
-#if 0
+#ifdef NOT_FOR_L4
 	timeout = jiffies + (1 * HZ);
 	while (time_before(jiffies, timeout)) {
 		smp_rmb();
@@ -140,25 +141,17 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
 
 static void __init poke_milo(void)
 {
-	extern void secondary_startup(void);
-
 	/* nobody is to be released from the pen yet */
 	pen_release = -1;
 
+#ifdef NOT_FOR_L4
 	/*
-	 * write the address of secondary startup into the system-wide
-	 * flags register, then clear the bottom two bits, which is what
-	 * BootMonitor is waiting for
+	 * Write the address of secondary startup into the system-wide flags
+	 * register. The BootMonitor waits for this register to become
+	 * non-zero.
 	 */
-#if 0
-#define REALVIEW_SYS_FLAGSS_OFFSET 0x30
-	__raw_writel(virt_to_phys(realview_secondary_startup),
-		     __io_address(REALVIEW_SYS_BASE) +
-		     REALVIEW_SYS_FLAGSS_OFFSET);
-#define REALVIEW_SYS_FLAGSC_OFFSET 0x34
-	__raw_writel(3,
-		     __io_address(REALVIEW_SYS_BASE) +
-		     REALVIEW_SYS_FLAGSC_OFFSET);
+	__raw_writel(BSYM(virt_to_phys(realview_secondary_startup)),
+		     __io_address(REALVIEW_SYS_FLAGSSET));
 #endif
 
 	mb();

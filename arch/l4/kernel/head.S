@@ -30,8 +30,6 @@
 
 	__REFDATA
 .align 4
-ENTRY(initial_page_table)
-	.long pa(swapper_pg_dir)
 
 /*
  * BSS section
@@ -39,20 +37,18 @@ ENTRY(initial_page_table)
 __PAGE_ALIGNED_BSS
 	.align PAGE_SIZE_asm
 #ifdef CONFIG_X86_PAE
-swapper_pg_pmd:
+ENTRY(initial_pg_pmd)
 	.fill 1024*KPMDS,4,0
 #else
-ENTRY(swapper_pg_dir)
+ENTRY(initial_page_table)
 	.fill 1024,4,0
 #endif
-swapper_pg_fixmap:
+ENTRY(initial_pg_fixmap)
 	.fill 1024,4,0
-#ifdef CONFIG_X86_TRAMPOLINE
-ENTRY(trampoline_pg_dir)
-	.fill 1024,4,0
-#endif
 ENTRY(empty_zero_page)
 	.fill 4096,1,0
+ENTRY(swapper_pg_dir)
+	.fill 1024,4,0
 .previous
 #endif
 

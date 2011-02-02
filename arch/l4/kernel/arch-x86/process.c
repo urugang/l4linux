@@ -161,16 +161,6 @@ static void l4x_x86_flush_thread(void)
 			do_exit(9);
 
 		l4lx_task_number_free(thread_id);
-
-#if 0
-		if (ret == L4LX_TASK_DELETE_THREAD)
-			l4x_hybrid_list_thread_remove(id);
-		else {
-			l4lx_task_number_free(id);
-			l4x_hybrid_list_task_remove(id);
-		}
-#endif
-
 		tsk->thread.user_thread_ids[i] = L4_INVALID_CAP;
 	}
 

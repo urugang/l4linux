@@ -69,11 +69,12 @@ int l4lx_irq_prio_get(unsigned int irq)
 	return -1;
 }
 
-int l4lx_irq_set_type(unsigned int irq, unsigned int type)
+int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 {
 #ifdef ARCH_x86
 	extern struct irq_chip l4x_irq_dev_chip;
 #endif
+	unsigned irq = data->irq;
 	struct l4x_irq_desc_private *p;
 
 	if (unlikely(irq >= NR_IRQS))
@@ -261,12 +262,14 @@ static void send_msg(unsigned int irq, enum irq_cmds cmd)
 	 * the Linux IRQ shutdown code in tamed mode */
 	if (cmd == CMD_IRQ_DISABLE) {
 		irq_disable_cmd_state[irq] = 1;
-		tag = l4_ipc_send(p->irq_thread, l4_utcb(), tag, L4_IPC_SEND_TIMEOUT_0);
+		tag = l4_ipc_send(l4lx_thread_get_cap(p->irq_thread), l4_utcb(),
+		                  tag, L4_IPC_SEND_TIMEOUT_0);
 		error = l4_ipc_error(tag, l4_utcb());
 		if (error && error != L4_IPC_SETIMEOUT)
 			LOG_printf("%s: dis-IPC failed with %x\n", __func__, error);
 	} else {
-		tag = l4_ipc_send(p->irq_thread, l4_utcb(), tag, L4_IPC_NEVER);
+		tag = l4_ipc_send(l4lx_thread_get_cap(p->irq_thread), l4_utcb(),
+		                  tag, L4_IPC_NEVER);
 		error = l4_ipc_error(tag, l4_utcb());
 
 		if (error)
@@ -286,7 +289,8 @@ static void migrate_irq(unsigned irq, unsigned to_cpu)
 	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
 	send_msg(irq, CMD_IRQ_DISABLE);
 
-	l4x_migrate_thread(p->irq_thread, get_irq_cpu(irq), to_cpu);
+	l4x_migrate_thread(l4lx_thread_get_cap(p->irq_thread),
+	                   get_irq_cpu(irq), to_cpu);
 	set_irq_cpu(irq, to_cpu);
 	send_msg(irq, CMD_IRQ_UPDATE);
 
@@ -317,9 +321,10 @@ static void migrate_irq(unsigned irq, unsigned to_cpu)
  *
  * Seems to be called with irq_desc[irq].lock held.
  */
-unsigned int l4lx_irq_dev_startup(unsigned int irq)
+unsigned int l4lx_irq_dev_startup(struct irq_data *data)
 {
 	char thread_name[7];
+	unsigned irq = data->irq;
 	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
 
 	if (!p)
@@ -342,7 +347,7 @@ unsigned int l4lx_irq_dev_startup(unsigned int irq)
 	}
 
 	// we're done if the IRQ thread already exists
-	if (!p->irq_thread || l4_is_invalid_cap(p->irq_thread)) {
+	if (!l4lx_thread_is_valid(p->irq_thread)) {
 
 		printk("%s: creating IRQ thread for %d (IRQ-cap %lx)\n",
 		       __func__, irq, p->irq_cap);
@@ -355,7 +360,7 @@ unsigned int l4lx_irq_dev_startup(unsigned int irq)
 		                                   NULL, &irq, sizeof(irq),
 		                                   l4lx_irq_prio_get(irq),
 		                                   0, thread_name);
-		if (l4_is_invalid_cap(p->irq_thread))
+		if (!l4lx_thread_is_valid(p->irq_thread))
 			enter_kdebug("Error creating IRQ-thread!");
 
 	} else
@@ -368,7 +373,8 @@ unsigned int l4lx_irq_dev_startup(unsigned int irq)
 }
 
 #ifdef CONFIG_SMP
-int l4lx_irq_dev_set_affinity(unsigned int irq, const struct cpumask *dest)
+int l4lx_irq_dev_set_affinity(struct irq_data *data,
+                              const struct cpumask *dest, bool force)
 {
 	cpumask_t tmp;
 	unsigned target_cpu;
@@ -379,59 +385,55 @@ int l4lx_irq_dev_set_affinity(unsigned int irq, const struct cpumask *dest)
 
 	target_cpu = first_cpu(tmp);
 
-	migrate_irq(irq, target_cpu);
+	migrate_irq(data->irq, target_cpu);
 	return 0;
 }
 #endif
 
-void l4lx_irq_dev_shutdown(unsigned int irq)
+void l4lx_irq_dev_shutdown(struct irq_data *data)
 {
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
+	struct l4x_irq_desc_private *p = get_irq_chip_data(data->irq);
 
-	dd_printk("%s: %u\n", __func__, irq);
-	l4lx_irq_dev_disable(irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
+	l4lx_irq_dev_disable(data);
 
-	if (l4_is_invalid_cap(l4x_have_irqcap(irq))) {
-		l4io_release_irq(irq, p->irq_cap);
+	if (l4_is_invalid_cap(l4x_have_irqcap(data->irq))) {
+		l4io_release_irq(data->irq, p->irq_cap);
 		p->irq_cap = L4_INVALID_CAP;
 	}
 }
 
-void l4lx_irq_dev_enable(unsigned int irq)
+void l4lx_irq_dev_enable(struct irq_data *data)
 {
-	dd_printk("%s: %u\n", __func__, irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
 
 	/* Only switch if IRQ thread already exists, not if we're running
 	 * in the Linux server. */
-	//if (test_bit(irq, irq_threads_started))
-		send_msg(irq, CMD_IRQ_ENABLE);
+	//if (test_bit(data->irq, irq_threads_started))
+		send_msg(data->irq, CMD_IRQ_ENABLE);
 }
 
-void l4lx_irq_dev_disable(unsigned int irq)
+void l4lx_irq_dev_disable(struct irq_data *data)
 {
-	dd_printk("%s: %u\n", __func__, irq);
-	//if (test_bit(irq, irq_threads_started))
-		send_msg(irq, CMD_IRQ_DISABLE);
+	dd_printk("%s: %u\n", __func__, data->irq);
+	//if (test_bit(data->irq, irq_threads_started))
+		send_msg(data->irq, CMD_IRQ_DISABLE);
 }
 
-void l4lx_irq_dev_ack(unsigned int irq)
-{
-}
-
-void l4lx_irq_dev_mask(unsigned int irq)
+void l4lx_irq_dev_ack(struct irq_data *data)
 {
 }
 
-void l4lx_irq_dev_unmask(unsigned int irq)
+void l4lx_irq_dev_mask(struct irq_data *data)
 {
 }
 
-void l4lx_irq_dev_end(unsigned int irq)
+void l4lx_irq_dev_unmask(struct irq_data *data)
 {
 }
 
-void l4lx_irq_dev_eoi(unsigned int irq)
+void l4lx_irq_dev_eoi(struct irq_data *data)
 {
-	dd_printk("%s: %u\n", __func__, irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
 	//l4_irq_unmask(p->irq_cap);
 }

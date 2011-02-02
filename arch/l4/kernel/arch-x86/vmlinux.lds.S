@@ -67,7 +67,6 @@ jiffies_64 = jiffies;
 
 #endif
 
-#if 0
 PHDRS {
 	text PT_LOAD FLAGS(5);          /* R_E */
 	data PT_LOAD FLAGS(7);          /* RWE */
@@ -80,7 +79,6 @@ PHDRS {
 #endif
 	note PT_NOTE FLAGS(0);          /* ___ */
 }
-#endif
 
 SECTIONS
 {
@@ -94,7 +92,6 @@ SECTIONS
 
 	/* Text and read-only data */
 
-	PROVIDE(_prog_img_start = .);
 	startup_32 = .;
 	_stext = .;
 	.text :  AT(ADDR(.text) - LOAD_OFFSET) {
@@ -116,11 +113,11 @@ SECTIONS
 		*(.gnu.warning)
 		/* End of text section */
 		_etext = .;
-	} /* :text */ = 0x9090
+	} :text = 0x9090
 
-	NOTES /*:text :note */
+	NOTES :text :note
 
-	EXCEPTION_TABLE(16) /* :text */ = 0x9090
+	EXCEPTION_TABLE(16) :text = 0x9090
 
 	X64_ALIGN_DEBUG_RODATA_BEGIN
 	RO_DATA(PAGE_SIZE)
@@ -146,17 +143,12 @@ SECTIONS
 		DATA_DATA
 		CONSTRUCTORS
 
-		. = ALIGN(4);
-		__l4env_initcall_start = .;
-		*(.l4env_initcall.init)
-		__l4env_initcall_end = .;
-
 		/* rarely changed data like cpu maps */
 		READ_MOSTLY_DATA(INTERNODE_CACHE_BYTES)
 
 		/* End of data section */
 		_edata = .;
-	} /* :data */
+	} :data
 
 #ifdef CONFIG_X86_64
 
@@ -253,6 +245,12 @@ SECTIONS
 		__x86_cpu_dev_end = .;
 	}
 
+	/*
+	 * start address and size of operations which during runtime
+	 * can be patched with virtualization friendly instructions or
+	 * baremetal native ones. Think page table operations.
+	 * Details in paravirt_types.h
+	 */
 	. = ALIGN(8);
 	.parainstructions : AT(ADDR(.parainstructions) - LOAD_OFFSET) {
 		__parainstructions = .;
@@ -260,6 +258,11 @@ SECTIONS
 		__parainstructions_end = .;
 	}
 
+	/*
+	 * struct alt_inst entries. From the header (alternative.h):
+	 * "Alternative instructions for different CPU types or capabilities"
+	 * Think locking instructions on spinlocks.
+	 */
 	. = ALIGN(8);
 	.altinstructions : AT(ADDR(.altinstructions) - LOAD_OFFSET) {
 		__alt_instructions = .;
@@ -267,10 +270,27 @@ SECTIONS
 		__alt_instructions_end = .;
 	}
 
+	/*
+	 * And here are the replacement instructions. The linker sticks
+	 * them as binary blobs. The .altinstructions has enough data to
+	 * get the address and the length of them to patch the kernel safely.
+	 */
 	.altinstr_replacement : AT(ADDR(.altinstr_replacement) - LOAD_OFFSET) {
 		*(.altinstr_replacement)
 	}
 
+	/*
+	 * struct iommu_table_entry entries are injected in this section.
+	 * It is an array of IOMMUs which during run time gets sorted depending
+	 * on its dependency order. After rootfs_initcall is complete
+	 * this section can be safely removed.
+	 */
+	.iommu_table : AT(ADDR(.iommu_table) - LOAD_OFFSET) {
+		__iommu_table = .;
+		*(.iommu_table)
+		__iommu_table_end = .;
+	}
+	. = ALIGN(8);
 	/*
 	 * .exit.text is discard at runtime, not link time, to deal with
 	 *  references from .altinstructions and .eh_frame
@@ -284,7 +304,7 @@ SECTIONS
 	}
 
 #if !defined(CONFIG_X86_64) || !defined(CONFIG_SMP)
-	PERCPU(PAGE_SIZE)
+	PERCPU(THREAD_SIZE)
 #endif
 
 	. = ALIGN(PAGE_SIZE);
@@ -330,7 +350,6 @@ SECTIONS
 		__brk_limit = .;
 	}
 
-	PROVIDE(_prog_img_end = .);
 	_end = .;
 
         STABS_DEBUG

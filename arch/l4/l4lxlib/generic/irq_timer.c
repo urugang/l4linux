@@ -67,11 +67,11 @@ static void suspend_resume_func(enum l4x_suspend_resume_state state)
 	struct l4x_irq_desc_private *p = get_irq_chip_data(TIMER_IRQ);
 	switch (state) {
 		case L4X_SUSPEND:
-			l4x_thread_set_pc(p->irq_thread, deep_sleep);
+			l4x_thread_set_pc(l4lx_thread_get_cap(p->irq_thread), deep_sleep);
 			break;
 
 		case L4X_RESUME:
-			l4x_thread_set_pc(p->irq_thread, timer_irq_thread);
+			l4x_thread_set_pc(l4lx_thread_get_cap(p->irq_thread), timer_irq_thread);
 			break;
 	};
 }
@@ -81,10 +81,11 @@ int l4lx_timer_started;
 /*
  * public functions.
  */
-unsigned int l4lx_irq_timer_startup(unsigned int irq)
+unsigned int l4lx_irq_timer_startup(struct irq_data *data)
 {
 	char thread_name[15];
 	int cpu = smp_processor_id();
+	unsigned irq = data->irq;
 	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
 	static struct l4x_suspend_resume_struct susp_res;
 
@@ -105,40 +106,37 @@ unsigned int l4lx_irq_timer_startup(unsigned int irq)
 			 NULL,			/* stack */
 			 &cpu, sizeof(cpu),	/* data */
 			 l4lx_irq_prio_get(irq),/* prio */
-			 0,                     /* flags */
+	                 0,
 			 thread_name);		/* ID */
 
-	if (l4_is_invalid_cap(p->irq_thread))
+	if (!l4lx_thread_is_valid(p->irq_thread))
 		enter_kdebug("Error creating timer thread!");
 
 	return 1;
 }
 
 #ifdef CONFIG_SMP
-int l4lx_irq_timer_set_affinity(unsigned int irq, const struct cpumask *dest)
+int l4lx_irq_timer_set_affinity(struct irq_data *data, const struct cpumask *dest)
 {
 	// timer should always be on cpu0 currently
 	return 0;
 }
 #endif
 
-void l4lx_irq_timer_shutdown(unsigned int irq)
+void l4lx_irq_timer_shutdown(struct irq_data *data)
 {}
 
-void l4lx_irq_timer_enable(unsigned int irq)
+void l4lx_irq_timer_enable(struct irq_data *data)
 {}
 
-void l4lx_irq_timer_disable(unsigned int irq)
+void l4lx_irq_timer_disable(struct irq_data *data)
 {}
 
-void l4lx_irq_timer_ack(unsigned int irq)
+void l4lx_irq_timer_ack(struct irq_data *data)
 {}
 
-void l4lx_irq_timer_end(unsigned int irq)
+void l4lx_irq_timer_mask(struct irq_data *data)
 {}
 
-void l4lx_irq_timer_mask(unsigned int irq)
-{}
-
-void l4lx_irq_timer_unmask(unsigned int irq)
+void l4lx_irq_timer_unmask(struct irq_data *data)
 {}

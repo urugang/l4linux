@@ -7,8 +7,10 @@
 
 #define L4X_VMCB_LOG2_SIZE 12
 
-int l4x_kvm_create_task(struct kvm *kvm);
-int l4x_kvm_destroy_task(struct kvm *kvm);
+int l4x_kvm_create_vm(struct kvm *kvm);
+int l4x_kvm_destroy_vm(struct kvm *kvm);
+
+int l4x_kvm_svm_run(struct kvm_vcpu *kvcpu, unsigned long vmcb);
 
 static inline int l4x_kvm_dbg(void)
 {

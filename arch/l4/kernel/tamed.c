@@ -23,6 +23,7 @@
 #include <asm/api/macros.h>
 
 #ifdef CONFIG_L4_VCPU
+#include <asm/server/server.h>
 #include <l4/vcpu/vcpu.h>
 #else
 
@@ -80,6 +81,7 @@ static TAMED_DEFINE(sem_wq_t [MAX_WQ_ENTRIES], wq_entries);
 static TAMED_DEFINE(int, wq_len);  /* track wait queue length here */
 static TAMED_DEFINE(int, next_entry);
 static TAMED_DEFINE(l4_cap_idx_t, cli_sem_thread_id);
+static TAMED_DEFINE(l4lx_thread_t, cli_sem_thread_th);
 static TAMED_DEFINE(cli_lock_t, cli_lock);
 static TAMED_DEFINE(unsigned char [L4LX_THREAD_STACK_SIZE], stack_mem);
 
@@ -325,11 +327,20 @@ static void do_vcpu_irq(l4_vcpu_state_t *v)
 }
 #endif
 
+#ifdef CONFIG_L4_VCPU
+static void l4x_srv_setup_recv_wrap(l4_utcb_t *utcb)
+{
+#ifdef CONFIG_L4_SERVER
+	l4x_srv_setup_recv(utcb);
+#endif
+}
+#endif
+
 void l4x_global_sti(void)
 {
 #ifdef CONFIG_L4_VCPU
-	l4vcpu_irq_enable(l4x_stack_vcpu_state_get(),
-	                  do_vcpu_irq);
+	l4vcpu_irq_enable(l4x_stack_vcpu_state_get(), l4x_stack_utcb_get(),
+	                  do_vcpu_irq, l4x_srv_setup_recv_wrap);
 #else
 	l4_cap_idx_t me = l4x_stack_id_get();
 	int nr = get_tamer_nr(current_thread_info()->cpu);
@@ -354,7 +365,8 @@ EXPORT_SYMBOL(l4x_global_sti);
 #ifdef CONFIG_L4_VCPU
 void l4x_global_halt(void)
 {
-	l4vcpu_halt(l4x_stack_vcpu_state_get(), do_vcpu_irq);
+	l4vcpu_halt(l4x_stack_vcpu_state_get(), l4x_stack_utcb_get(),
+	            do_vcpu_irq, l4x_srv_setup_recv_wrap);
 }
 EXPORT_SYMBOL(l4x_global_halt);
 #endif
@@ -374,7 +386,8 @@ void l4x_global_restore_flags(unsigned long flags)
 {
 #ifdef CONFIG_L4_VCPU
 	l4vcpu_irq_restore(l4x_stack_vcpu_state_get(), flags,
-	                   do_vcpu_irq);
+	                   l4x_stack_utcb_get(), do_vcpu_irq,
+	                   l4x_srv_setup_recv_wrap);
 #else
 	switch (flags) {
 		case L4_IRQ_ENABLED:
@@ -420,10 +433,12 @@ void l4x_tamed_start(unsigned vcpu)
 	tamed_per_nr(wq_len,     nr)             = 0;
 	tamed_per_nr(next_entry, nr)             = 0;
 
-	tamed_per_nr(cli_sem_thread_id, nr) =
+	tamed_per_nr(cli_sem_thread_th, nr) =
 	  l4lx_thread_create(cli_sem_thread, vcpu,
 	                     tamed_per_nr(stack_mem, nr) + sizeof(tamed_per_nr(stack_mem, 0)),
 	                     &nr, sizeof(nr), CONFIG_L4_PRIO_TAMER, 0, s);
+	tamed_per_nr(cli_sem_thread_id, nr) =
+		l4lx_thread_get_cap(tamed_per_nr(cli_sem_thread_th, nr));
 
 	LOG_printf("Tamer%d is " PRINTF_L4TASK_FORM "\n",
 	           nr,
@@ -451,7 +466,7 @@ void l4x_tamed_shutdown(unsigned vcpu)
 
 	if (!found) {
 		// none found, shutdown thread
-		l4lx_thread_shutdown(tamed_per_nr(cli_sem_thread_id, nr));
+		l4lx_thread_shutdown(tamed_per_nr(cli_sem_thread_th, nr), 0);
 		tamed_per_nr(cli_sem_thread_id, nr) = L4_INVALID_CAP;
 		LOG_printf("Tamer%d was destroyed\n", nr);
 	}

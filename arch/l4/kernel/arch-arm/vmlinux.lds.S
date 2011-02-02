@@ -8,6 +8,19 @@
 #include <asm/memory.h>
 #include <asm/page.h>
 	
+#define PROC_INFO							\
+	VMLINUX_SYMBOL(__proc_info_begin) = .;				\
+	*(.proc.info.init)						\
+	VMLINUX_SYMBOL(__proc_info_end) = .;
+
+#ifdef CONFIG_HOTPLUG_CPU
+#define ARM_CPU_DISCARD(x)
+#define ARM_CPU_KEEP(x)		x
+#else
+#define ARM_CPU_DISCARD(x)	x
+#define ARM_CPU_KEEP(x)
+#endif
+
 OUTPUT_ARCH(arm)
 ENTRY(_start)
 
@@ -24,22 +37,25 @@ SECTIONS
 #else
 	. = PAGE_OFFSET + TEXT_OFFSET;
 #endif
-	PROVIDE(_prog_img_start = .);
+
 	.init : {			/* Init code and data		*/
 		_stext = .;
 		_sinittext = .;
 			HEAD_TEXT
 			INIT_TEXT
 		_einittext = .;
-		__proc_info_begin = .;
-			*(.proc.info.init)
-		__proc_info_end = .;
+		ARM_CPU_DISCARD(PROC_INFO)
 		__arch_info_begin = .;
 			*(.arch.info.init)
 		__arch_info_end = .;
 		__tagtable_begin = .;
 			*(.taglist.init)
 		__tagtable_end = .;
+#ifdef CONFIG_SMP_ON_UP
+		__smpalt_begin = .;
+			*(.alt.smp.init)
+		__smpalt_end = .;
+#endif
 
 		INIT_SETUP(16)
 
@@ -68,10 +84,8 @@ SECTIONS
 	/DISCARD/ : {
 		*(.ARM.exidx.exit.text)
 		*(.ARM.extab.exit.text)
-#ifndef CONFIG_HOTPLUG_CPU
-		*(.ARM.exidx.cpuexit.text)
-		*(.ARM.extab.cpuexit.text)
-#endif
+		ARM_CPU_DISCARD(*(.ARM.exidx.cpuexit.text))
+		ARM_CPU_DISCARD(*(.ARM.extab.cpuexit.text))
 #ifndef CONFIG_HOTPLUG
 		*(.ARM.exidx.devexit.text)
 		*(.ARM.extab.devexit.text)
@@ -104,15 +118,12 @@ SECTIONS
 			*(.rodata.*)
 			*(.glue_7)
 			*(.glue_7t)
+		. = ALIGN(4);
+		*(.got)			/* Global offset table		*/
+			ARM_CPU_KEEP(PROC_INFO)
 	}
 
-        .rel.plt       : { *(.rel.plt) }
-
-	NOTES
-
 	RO_DATA(PAGE_SIZE)
-
-	_etext = .;			/* End of text and rodata section */
 
 #ifdef CONFIG_ARM_UNWIND
 	/*
@@ -131,6 +142,8 @@ SECTIONS
 	}
 #endif
 
+	_etext = .;			/* End of text and rodata section */
+
 #ifdef CONFIG_XIP_KERNEL
 	__data_loc = ALIGN(4);		/* location in binary */
 	. = PAGE_OFFSET + TEXT_OFFSET;
@@ -139,10 +152,9 @@ SECTIONS
 	__data_loc = .;
 #endif
 
-
-	_sdata = .;
 	.data : AT(__data_loc) {
 		_data = .;		/* address in memory */
+		_sdata = .;
 
 		/*
 		 * first, the init task union, aligned
@@ -238,81 +250,30 @@ SECTIONS
 	}
 #endif
 
-	/* This is needed for L4Env --
-	 *   copy out of l4/pkg/crtx/lib/src/ARCH-x86/main_stat.ld */
-	.ctors :
-	{
-	  LONG(0)
-	  /* traverse this list backwards (see __attribute__((init_priority)) */
-	  KEEP (*(.mark_beg_ctors))
-	  KEEP (*(.ctors))
-	  KEEP (*(SORT(.ctors.*)))
-	  KEEP (*(.mark_end_ctors))
-	  /* traverse this list forwards */
-	  KEEP (*(.mark_beg_c_ctors))
-	  #define QM1c() .c_ctors.?
-	  #define QM2c() .c_ctors.??
-	  #define QM3c() .c_ctors.???
-	  #define QM4c() .c_ctors.????
-	  #define QM5c() .c_ctors.?????
-	  KEEP (*(SORT(QM1c())))
-	  KEEP (*(SORT(QM2c())))
-	  KEEP (*(SORT(QM3c())))
-	  KEEP (*(SORT(QM4c())))
-	  KEEP (*(SORT(QM5c())))
-	  KEEP (*(.c_ctors))
-	  KEEP (*(.mark_end_c_ctors))
-	}
-	.dtors :
-	{
-	  LONG(0)
-	  /* traverse this list backwards (see __attribute__((init_priority)) */
-	  KEEP (*(.mark_beg_dtors))
-	  KEEP (*(.dtors))
-	  KEEP (*(SORT(.dtors.*)))
-	  KEEP (*(.mark_end_dtors))
-	  /* traverse this list forwards */
-	  KEEP (*(.mark_beg_c_dtors))
-	  #define QM1d() .c_dtors.?
-	  #define QM2d() .c_dtors.??
-	  #define QM3d() .c_dtors.???
-	  #define QM4d() .c_dtors.????
-	  #define QM5d() .c_dtors.?????
-	  KEEP (*(SORT(QM1d())))
-	  KEEP (*(SORT(QM2d())))
-	  KEEP (*(SORT(QM3d())))
-	  KEEP (*(SORT(QM4d())))
-	  KEEP (*(SORT(QM5d())))
-	  KEEP (*(.c_dtors))
-	  KEEP (*(.mark_end_c_dtors))
-	}
+	BSS_SECTION(0, 0, 0)
 
-	/* BSS_SECTION(0, 0, 0) */
-	/* The '. = ALIGN(stop_align);' somehow aligns down to a really small
-	 * address (with GNU ld (Sourcery G++ Lite 2009q3-67)
-	 * 2.19.51.20090709), ld 2.18 does it all right.
-	 * The following works around that: */
-	. = ALIGN(0);
-	VMLINUX_SYMBOL(__bss_start) = .;
-	SBSS(0)
-	BSS(0)
-	/* . = ALIGN(0); */
-	VMLINUX_SYMBOL(__bss_stop) = .;
-	/* Who knows why '. = ALIGN(...);' doesn't work here? Again, ld 2.18
-	 * works fine */
-	/* . = ALIGN(1048576); */
-	_ldscript_align_marker = ALIGN(1048576);
-	. = _ldscript_align_marker;
-
+	/* L4: Align to full superpage */
+	. = ALIGN(1048576);
 	_end = .;
 
-	STABS_DEBUG
+	/* L4: Add NOTES so that .note.gnu.build-id is caught, because we do
+	 * objcopy -O elf32-littlearm vmlinux Image instead of 
+	 * objcopy -O binary vmlinux Image
+	 * which leaves an empty PHDR and makes objcopy complain and the
+	 * loader complain too */
+	NOTES
 
-	PROVIDE(_prog_img_end = .);
+	STABS_DEBUG
 	.comment 0 : { *(.comment) }
 
 	/* Default discards */
 	DISCARDS
+
+#ifndef CONFIG_SMP_ON_UP
+	/DISCARD/ : {
+		*(.alt.smp.init)
+	}
+#endif
 }
 
 /*

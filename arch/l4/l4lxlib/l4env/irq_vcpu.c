@@ -50,11 +50,12 @@ int l4lx_irq_prio_get(unsigned int irq)
 	return -1;
 }
 
-int l4lx_irq_set_type(unsigned int irq, unsigned int type)
+int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 {
 #ifdef ARCH_x86
 	extern struct irq_chip l4x_irq_dev_chip;
 #endif
+	unsigned int irq = data->irq;
 	struct l4x_irq_desc_private *p;
 
 	if (unlikely(irq >= NR_IRQS))
@@ -106,7 +107,7 @@ static inline void attach_to_irq(struct irq_desc *desc)
 
 	local_irq_save(flags);
 	if ((ret  = l4_error(l4_irq_attach(p->irq_cap, desc->irq << 2,
-	                                   l4x_cpu_thread_get(p->cpu)))))
+	                                   l4x_cpu_thread_get_cap(p->cpu)))))
 		dd_printk("%s: can't register to irq %u: return=%ld\n",
 		          __func__, desc->irq, ret);
 	local_irq_restore(flags);
@@ -132,12 +133,8 @@ void L4_CV timer_irq_thread(void *data)
 {
 	l4_timeout_t to;
 	l4_kernel_clock_t pint;
-	struct thread_info *ctx = current_thread_info();
 	l4_utcb_t *u = l4_utcb();
-	unsigned cpu = *(unsigned *)data;
 	struct l4x_irq_desc_private *p = irq_to_desc(TIMER_IRQ)->chip_data;
-
-	l4x_prepare_irq_thread(ctx, cpu);
 
 	LOG_printf("%s: Starting timer IRQ thread.\n", __func__);
 
@@ -162,21 +159,25 @@ static unsigned int l4lx_irq_dev_startup_timer(struct l4x_irq_desc_private *p)
 	char name[15];
 	int cpu = smp_processor_id();
 	l4_msgtag_t res;
-	l4_cap_idx_t timer_thread;
+	l4lx_thread_t timer_thread;
 
 	printk("%s(%d)\n", __func__, TIMER_IRQ);
 
 	sprintf(name, "timer.i%d", TIMER_IRQ);
 
 	p->irq_cap = l4x_cap_alloc();
-	if (l4_is_invalid_cap(p->irq_cap))
-		enter_kdebug("Error!");
+	if (l4_is_invalid_cap(p->irq_cap)) {
+		printk("Cap alloc failed\n");
+		l4x_exit_l4linux();
+		return 0;
+	}
 
 	res = l4_factory_create_irq(l4re_env()->factory, p->irq_cap);
 	if (l4_error(res)) {
-		LOG_printf("Failed to create IRQ\n");
+		printk("Failed to create IRQ\n");
 		l4x_cap_free(p->irq_cap);
 		l4x_exit_l4linux();
+		return 0;
 	}
 
 #ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
@@ -187,25 +188,29 @@ static unsigned int l4lx_irq_dev_startup_timer(struct l4x_irq_desc_private *p)
 			(timer_irq_thread,	      /* thread function */
 	                 cpu,                         /* cpu */
 			 NULL,			      /* stack */
-			 &cpu, sizeof(cpu),	      /* data */
+			 NULL, 0,	              /* data */
 			 l4lx_irq_prio_get(TIMER_IRQ),/* prio */
-			 0,                           /* flags */
+			 0,                           /* vcpup */
 			 name);			      /* name */
 
-	if (l4_is_invalid_cap(timer_thread))
-		enter_kdebug("Error creating timer thread!");
+	if (!l4lx_thread_is_valid(timer_thread)) {
+		printk("Error creating timer thread!");
+		l4x_exit_l4linux();
+		return 0;
+	}
 
-	l4lx_irq_dev_enable(TIMER_IRQ);
+	l4lx_irq_dev_enable(irq_get_irq_data(TIMER_IRQ));
 	return 1;
 }
 
-static void l4lx_irq_dev_shutdown_timer(unsigned int irq)
+static void l4lx_irq_dev_shutdown_timer(struct irq_data *data)
 {
 	// No one is calling this, right? Why?
 }
 
-unsigned int l4lx_irq_dev_startup(unsigned int irq)
+unsigned int l4lx_irq_dev_startup(struct irq_data *data)
 {
+	unsigned irq = data->irq;
 	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
 
 	if (irq == TIMER_IRQ)
@@ -230,75 +235,71 @@ unsigned int l4lx_irq_dev_startup(unsigned int irq)
 		}
 		local_irq_restore(irq_f);
 	}
-	l4lx_irq_dev_enable(irq);
+	l4lx_irq_dev_enable(data);
 	return 1;
 }
 
-void l4lx_irq_dev_shutdown(unsigned int irq)
+void l4lx_irq_dev_shutdown(struct irq_data *data)
 {
+	unsigned irq = data->irq;
 	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
 
 	if (irq == TIMER_IRQ) {
-		l4lx_irq_dev_shutdown_timer(irq);
+		l4lx_irq_dev_shutdown_timer(data);
 		return;
 	}
 
 	dd_printk("%s: %u\n", __func__, irq);
-	l4lx_irq_dev_disable(irq);
+	l4lx_irq_dev_disable(data);
 
 	if (l4_is_invalid_cap(l4x_have_irqcap(irq)))
 		l4io_release_irq(irq, p->irq_cap);
 }
 
-void l4lx_irq_dev_enable(unsigned int irq)
+void l4lx_irq_dev_enable(struct irq_data *data)
 {
-	struct irq_desc *desc = irq_to_desc(irq);
+	struct irq_desc *desc = irq_to_desc(data->irq);
 	struct l4x_irq_desc_private *p = desc->chip_data;
 
-	dd_printk("%s: %u\n", __func__, irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
 
 	p->enabled = 1;
 	attach_to_irq(desc);
-	l4lx_irq_dev_eoi(irq);
+	l4lx_irq_dev_eoi(data);
 }
 
-void l4lx_irq_dev_disable(unsigned int irq)
+void l4lx_irq_dev_disable(struct irq_data *data)
 {
-	struct irq_desc *desc = irq_to_desc(irq);
+	struct irq_desc *desc = irq_to_desc(data->irq);
 	struct l4x_irq_desc_private *p = desc->chip_data;
 
-	dd_printk("%s: %u\n", __func__, irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
 
 	p->enabled = 0;
 	detach_from_interrupt(desc);
 }
 
-void l4lx_irq_dev_ack(unsigned int irq)
+void l4lx_irq_dev_ack(struct irq_data *data)
 {
-	dd_printk("%s: %u\n", __func__, irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
 }
 
-void l4lx_irq_dev_mask(unsigned int irq)
+void l4lx_irq_dev_mask(struct irq_data *data)
 {
-	dd_printk("%s: %u\n", __func__, irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
 }
 
-void l4lx_irq_dev_unmask(unsigned int irq)
+void l4lx_irq_dev_unmask(struct irq_data *data)
 {
-	dd_printk("%s: %u\n", __func__, irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
 }
 
-void l4lx_irq_dev_end(unsigned int irq)
+void l4lx_irq_dev_eoi(struct irq_data *data)
 {
-	dd_printk("%s: %u\n", __func__, irq);
-}
-
-void l4lx_irq_dev_eoi(unsigned int irq)
-{
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
+	struct l4x_irq_desc_private *p = get_irq_chip_data(data->irq);
 	unsigned long flags;
 
-	dd_printk("%s: %u\n", __func__, irq);
+	dd_printk("%s: %u\n", __func__, data->irq);
 	local_irq_save(flags);
 	l4_irq_unmask(p->irq_cap);
 	local_irq_restore(flags);
@@ -307,11 +308,12 @@ void l4lx_irq_dev_eoi(unsigned int irq)
 #ifdef CONFIG_SMP
 static spinlock_t migrate_lock;
 
-int l4lx_irq_dev_set_affinity(unsigned int irq, const struct cpumask *dest)
+int l4lx_irq_dev_set_affinity(struct irq_data *data,
+                              const struct cpumask *dest, bool force)
 {
         unsigned target_cpu;
 	unsigned long flags;
-	struct irq_desc *desc = irq_to_desc(irq);
+	struct irq_desc *desc = irq_to_desc(data->irq);
 	struct l4x_irq_desc_private *p = desc->chip_data;
 
 	if (!p->irq_cap)

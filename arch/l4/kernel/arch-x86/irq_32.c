@@ -17,8 +17,12 @@
 #include <linux/delay.h>
 #include <linux/uaccess.h>
 #include <linux/percpu.h>
+#include <linux/mm.h>
 
 #include <asm/apic.h>
+
+#include <asm/generic/stack_id.h>
+#include <asm/generic/task.h>
 
 DEFINE_PER_CPU_SHARED_ALIGNED(irq_cpustat_t, irq_stat);
 EXPORT_PER_CPU_SYMBOL(irq_stat);
@@ -49,20 +53,16 @@ static inline int check_stack_overflow(void) { return 0; }
 static inline void print_stack_overflow(void) { }
 #endif
 
-#ifdef CONFIG_4KSTACKS_ALWAYS_DISABLED_FOR_L4LX
 /*
  * per-CPU IRQ handling contexts (thread information and stack)
  */
 union irq_ctx {
 	struct thread_info      tinfo;
 	u32                     stack[THREAD_SIZE/sizeof(u32)];
-} __attribute__((aligned(PAGE_SIZE)));
+} __attribute__((aligned(THREAD_SIZE)));
 
 static DEFINE_PER_CPU(union irq_ctx *, hardirq_ctx);
 static DEFINE_PER_CPU(union irq_ctx *, softirq_ctx);
-
-static DEFINE_PER_CPU_PAGE_ALIGNED(union irq_ctx, hardirq_stack);
-static DEFINE_PER_CPU_PAGE_ALIGNED(union irq_ctx, softirq_stack);
 
 static void call_on_stack(void *func, void *stack)
 {
@@ -129,31 +129,34 @@ void __cpuinit irq_ctx_init(int cpu)
 	if (per_cpu(hardirq_ctx, cpu))
 		return;
 
-	irqctx = &per_cpu(hardirq_stack, cpu);
+	irqctx = page_address(alloc_pages_node(cpu_to_node(cpu),
+					       THREAD_FLAGS,
+					       THREAD_ORDER));
 	irqctx->tinfo.task		= NULL;
 	irqctx->tinfo.exec_domain	= NULL;
 	irqctx->tinfo.cpu		= cpu;
 	irqctx->tinfo.preempt_count	= HARDIRQ_OFFSET;
 	irqctx->tinfo.addr_limit	= MAKE_MM_SEG(0);
 
+	l4x_stack_setup(&irqctx->tinfo, l4x_cpu_thread_get(cpu), cpu);
+
 	per_cpu(hardirq_ctx, cpu) = irqctx;
 
-	irqctx = &per_cpu(softirq_stack, cpu);
+	irqctx = page_address(alloc_pages_node(cpu_to_node(cpu),
+					       THREAD_FLAGS,
+					       THREAD_ORDER));
 	irqctx->tinfo.task		= NULL;
 	irqctx->tinfo.exec_domain	= NULL;
 	irqctx->tinfo.cpu		= cpu;
 	irqctx->tinfo.preempt_count	= 0;
 	irqctx->tinfo.addr_limit	= MAKE_MM_SEG(0);
 
+	l4x_stack_setup(&irqctx->tinfo, l4x_cpu_thread_get(cpu), cpu);
+
 	per_cpu(softirq_ctx, cpu) = irqctx;
 
 	printk(KERN_DEBUG "CPU %u irqstacks, hard=%p soft=%p\n",
 	       cpu, per_cpu(hardirq_ctx, cpu),  per_cpu(softirq_ctx, cpu));
-}
-
-void irq_ctx_exit(int cpu)
-{
-	per_cpu(hardirq_ctx, cpu) = NULL;
 }
 
 asmlinkage void do_softirq(void)
@@ -177,7 +180,18 @@ asmlinkage void do_softirq(void)
 		/* build the stack frame on the softirq stack */
 		isp = (u32 *) ((char *)irqctx + sizeof(*irqctx));
 
+		if (!l4x_is_vcpu()) {
+			l4x_stack_setup(&irqctx->tinfo, l4_utcb(), smp_processor_id());
+			per_cpu(l4x_current_ti, smp_processor_id()) = &irqctx->tinfo;
+		}
+
 		call_on_stack(__do_softirq, isp);
+
+		if (!l4x_is_vcpu()) {
+			per_cpu(l4x_current_ti, smp_processor_id()) = curctx;
+			l4x_stack_setup(curctx, l4_utcb(), smp_processor_id());
+		}
+
 		/*
 		 * Shouldnt happen, we returned above if in_interrupt():
 		 */
@@ -186,11 +200,6 @@ asmlinkage void do_softirq(void)
 
 	local_irq_restore(flags);
 }
-
-#else
-static inline int
-execute_on_irq_stack(int overflow, struct irq_desc *desc, int irq) { return 0; }
-#endif
 
 bool handle_irq(unsigned irq, struct pt_regs *regs)
 {
@@ -203,7 +212,8 @@ bool handle_irq(unsigned irq, struct pt_regs *regs)
 	if (unlikely(!desc))
 		return false;
 
-	if (!execute_on_irq_stack(overflow, desc, irq)) {
+	if (!l4x_is_vcpu() ||
+	    !execute_on_irq_stack(overflow, desc, irq)) {
 		if (unlikely(overflow))
 			print_stack_overflow();
 		desc->handle_irq(irq, desc);

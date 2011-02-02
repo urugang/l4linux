@@ -55,10 +55,7 @@ static void dump_mem(const char *, const char *, unsigned long, unsigned long);
 void dump_backtrace_entry(unsigned long where, unsigned long from, unsigned long frame)
 {
 #ifdef CONFIG_KALLSYMS
-	char sym1[KSYM_SYMBOL_LEN], sym2[KSYM_SYMBOL_LEN];
-	sprint_symbol(sym1, where);
-	sprint_symbol(sym2, from);
-	printk("[<%08lx>] (%s) from [<%08lx>] (%s)\n", where, sym1, from, sym2);
+	printk("[<%08lx>] (%pS) from [<%08lx>] (%pS)\n", where, (void *)where, from, (void *)from);
 #else
 	printk("Function entered at [<%08lx>] from [<%08lx>]\n", where, from);
 #endif
@@ -255,7 +252,6 @@ static int __die(const char *str, int err, struct thread_info *thread, struct pt
 		dump_backtrace(regs, tsk);
 		dump_instr(KERN_EMERG, regs);
 	}
-
 
 	return ret;
 }
@@ -527,10 +523,8 @@ asmlinkage int arm_syscall(int no, struct pt_regs *regs)
 #endif
 		if (tls_emu)
 			return 0;
-		if (1)
-			return 0;
 		if (has_tls_reg) {
-			asm ("mcr p15, 0, %0, c13, c0, 3"
+			asm ("mcr p15, 0, %0, c13, c0, 2"
 				: : "r" (regs->ARM_r0));
 		} else {
 			/*
@@ -539,7 +533,7 @@ asmlinkage int arm_syscall(int no, struct pt_regs *regs)
 			 * The user helper at 0xffff0fe0 must be used instead.
 			 * (see entry-armv.S for details)
 			 */
-			*((unsigned int *)0xffff0ff0) = regs->ARM_r0;
+			//l4/*((unsigned int *)0xffff0ff0) = regs->ARM_r0;
 		}
 		return 0;
 
