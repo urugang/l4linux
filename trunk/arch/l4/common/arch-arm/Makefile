@@ -19,3 +19,4 @@ obj-$(CONFIG_PCI_HOST_ITE8152)  += it8152.o
 obj-$(CONFIG_COMMON_CLKDEV)	+= clkdev.o
 
 clkdev-y  := ../../../arm/common/clkdev.o
+dmabounce-y  := ../../../arm/common/dmabounce.o

@@ -457,7 +457,7 @@ check_linux_config:
 	  if [ -n "$$failed" ]; then                       \
 	    echo; exit 1;                                  \
 	  fi
-	@if [ "$(CONFIG_X86)" = "y" -a "$(CONFIG_PAGE_OFFSET)" != "0" ]; then \
+	@if [ "$(CONFIG_X86_32)" = "y" -a "$(CONFIG_PAGE_OFFSET)" != "0" ]; then \
 	  echo "CONFIG_PAGE_OFFSET must be 0."; \
 	  exit 1; \
 	fi

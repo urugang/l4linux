@@ -30,6 +30,7 @@ choice
 
 	config L4_ARCH_ARM
 		select GENERIC_ALLOCATOR
+		select DMABOUNCE
 		bool "ARM architecture"
 endchoice
 
