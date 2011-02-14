@@ -28,7 +28,7 @@ stacktrace-y	:= ../../../arm/kernel/stacktrace.o
 return_address-y := ../../../arm/kernel/return_address.o
 sys_oabi-compat-y := ../../../arm/kernel/sys_oabi-compat.o
 compat-y        := ../../../arm/kernel/compat.o
-crash_dump-y    := ../../../arm/kernel/crash_dump.c
+crash_dump-y    := ../../../arm/kernel/crash_dump.o
 
 KBUILD_CPPFLAGS	+= -I$(srctree)/arch/arm/kernel
 

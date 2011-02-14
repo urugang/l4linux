@@ -88,9 +88,12 @@ l4ser_rx_chars(struct uart_port *port)
 	int ch;
 	L4XV_V(f);
 
-	L4XV_L(f);
-	while ((ch = l4ser_getchar(l4port)) != -1)  {
+	while (1)  {
+		L4XV_L(f);
+		ch = l4ser_getchar(l4port);
 		L4XV_U(f);
+		if (ch == -1)
+			break;
 		port->icount.rx++;
 
 		flg = TTY_NORMAL;
@@ -112,7 +115,6 @@ l4ser_rx_chars(struct uart_port *port)
 
 		tty_insert_flip_char(tty, ch, flg);
 	}
-	L4XV_U(f);
 	tty_flip_buffer_push(tty);
 	return;
 }
@@ -342,10 +344,13 @@ static void
 l4ser_console_write(struct console *co, const char *s, unsigned int count)
 {
 	do {
+		L4XV_V(f);
 		unsigned c = count;
 		if (c > L4_VCON_WRITE_SIZE)
 			c = L4_VCON_WRITE_SIZE;
+		L4XV_L(f);
 		l4_vcon_write(l4ser_port[co->index].vcon_cap, s, c);
+		L4XV_U(f);
 		count -= c;
 	} while (count);
 }

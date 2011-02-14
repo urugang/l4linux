@@ -134,6 +134,10 @@ void clk_disable(struct clk *clk)
 }
 EXPORT_SYMBOL(clk_disable);
 
+int dma_needs_bounce(struct device *d, dma_addr_t a, size_t s)
+{
+	return 1;
+}
 
 static irqreturn_t l4_timer_interrupt_handler(int irq, void *dev_id)
 {

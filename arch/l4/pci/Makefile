@@ -1,6 +1,7 @@
 
 ifneq ($(CONFIG_L4_VPCI),)
-  obj-y           += l4vpci.o i386.o
+  obj-y             += l4vpci.o
+  obj-$(CONFIG_X86) += i386.o
 else
   include $(srctree)/arch/x86/pci/Makefile
   KBUILD_CPPFLAGS += -I$(srctree)/arch/x86/pci

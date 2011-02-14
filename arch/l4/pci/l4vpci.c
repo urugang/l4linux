@@ -2,6 +2,7 @@
 #include <linux/init.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
+#include <linux/slab.h>
 #include <asm/pci.h>
 
 #include <l4/vbus/vbus.h>
@@ -146,7 +147,11 @@ static struct pci_ops l4vpci_ops = {
 static int __init l4vpci_init(void)
 {
 	struct pci_dev *dev = NULL;
+#ifdef CONFIG_ARM
+	struct pci_sys_data *sd;
+#else
 	struct pci_sysdata *sd;
+#endif
 	int err;
 	L4XV_V(f);
 
@@ -178,7 +183,9 @@ static int __init l4vpci_init(void)
 	for_each_pci_dev(dev)
 		l4vpci_irq_enable(dev);
 
+#ifdef CONFIG_X86
 	pcibios_resource_survey();
+#endif
 
 	return 0;
 }
@@ -193,10 +200,47 @@ int pcibios_enable_device(struct pci_dev *dev, int mask)
 	return l4vpci_irq_enable(dev);
 }
 
+#ifdef CONFIG_X86
 unsigned int pcibios_assign_all_busses(void)
 {
 	return 1;
 }
+#endif
+
+#ifdef CONFIG_ARM
+int pci_mmap_page_range(struct pci_dev *dev, struct vm_area_struct *vma,
+                        enum pci_mmap_state mmap_state, int write_combine)
+{
+	printk("%s %d\n", __func__, __LINE__);
+	return -ENOENT;
+}
+
+void
+pcibios_resource_to_bus(struct pci_dev *dev, struct pci_bus_region *region,
+                        struct resource *res)
+{
+	printk("%s %d\n", __func__, __LINE__);
+}
+
+void __devinit
+pcibios_bus_to_resource(struct pci_dev *dev, struct resource *res,
+                        struct pci_bus_region *region)
+{
+	printk("%s %d\n", __func__, __LINE__);
+}
+
+resource_size_t pcibios_align_resource(void *data, const struct resource *res,
+                                       resource_size_t size, resource_size_t align)
+{
+	printk("%s %d\n", __func__, __LINE__);
+	return 0;
+}
+
+void __devinit pcibios_update_irq(struct pci_dev *dev, int irq)
+{
+	printk("%s %d\n", __func__, __LINE__);
+}
+#endif
 
 int early_pci_allowed(void)
 {

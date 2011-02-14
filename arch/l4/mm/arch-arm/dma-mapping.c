@@ -96,7 +96,11 @@ static struct page *__dma_alloc_buffer(struct device *dev, size_t size, gfp_t gf
 	ptr = page_address(page);
 	memset(ptr, 0, size);
 	dmac_flush_range(ptr, ptr + size);
+#ifdef CONFIG_L4
+	outer_flush_range(virt_to_phys(ptr), virt_to_phys(ptr) + size);
+#else
 	outer_flush_range(__pa(ptr), __pa(ptr) + size);
+#endif
 
 	return page;
 }
@@ -386,12 +390,17 @@ static unsigned long l4x_dma_mem_alloc(size_t size, dma_addr_t *dma)
 	if (!phys)
 		return 0;
 
+	if (0)
+		printk("l4x-dma-alloc: virt=%lx phys=%x sz=%zd\n",
+		       va, phys, size);
 	*dma = phys;
 	return va;
 }
 
 static void l4x_dma_mem_free(unsigned long addr, size_t size)
 {
+	if (0)
+		printk("l4x-dma-free: addr=%lx size=%zd\n", addr, size);
 	gen_pool_free(l4x_dma_mem_pool, addr, size);
 }
 #endif /* L4 */
@@ -514,7 +523,11 @@ void ___dma_single_cpu_to_dev(const void *kaddr, size_t size,
 
 	dmac_map_area(kaddr, size, dir);
 
+#ifdef CONFIG_L4
+	paddr = virt_to_phys((void *)kaddr);
+#else
 	paddr = __pa(kaddr);
+#endif
 	if (dir == DMA_FROM_DEVICE) {
 		outer_inv_range(paddr, paddr + size);
 	} else {
@@ -532,7 +545,11 @@ void ___dma_single_dev_to_cpu(const void *kaddr, size_t size,
 	/* FIXME: non-speculating: not required */
 	/* don't bother invalidating if DMA to device */
 	if (dir != DMA_TO_DEVICE) {
+#ifdef CONFIG_L4
+		unsigned long paddr = virt_to_phys((void *)kaddr);
+#else
 		unsigned long paddr = __pa(kaddr);
+#endif
 		outer_inv_range(paddr, paddr + size);
 	}
 
