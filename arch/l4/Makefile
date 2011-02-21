@@ -278,8 +278,9 @@ libs-y				+= arch/l4/lib/arch-$(BASEARCH)/	\
 				   arch/l4/l4lxlib/generic/		\
 				   arch/l4/l4lxlib/$(BASEENV)/
 
-ifeq ($(BASEARCH),x86)
 drivers-$(CONFIG_PCI)		+= arch/l4/pci/
+
+ifeq ($(BASEARCH),x86)
 drivers-$(CONFIG_PM)		+= arch/l4/power/arch-x86/
 drivers-$(CONFIG_FB)		+= arch/x86/video/
 core-$(CONFIG_KVM)		+= arch/l4/kvm/arch-x86/
@@ -341,7 +342,11 @@ lImage: check_for_l4defs $(if $(CONFIG_L4_SERVER),server) vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $@
 
 check_for_l4defs:
-	test -e $(L4OBJ)/l4defs.mk.inc
+	$(Q)if [ ! -e $(L4OBJ)/l4defs.mk.inc ]; then \
+	  echo "No $(L4OBJ)/l4defs.mk.inc available."; \
+	  echo "Did you run 'make' in $(L4OBJ) to a successful end?"; \
+	  exit 1; \
+	fi
 
 server:
 	$(Q)$(MAKE) $(build)=arch/l4/server
