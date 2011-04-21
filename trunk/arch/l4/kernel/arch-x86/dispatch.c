@@ -4,6 +4,7 @@
 #include <linux/interrupt.h>
 #include <linux/ptrace.h>
 #include <linux/tick.h>
+#include <linux/kprobes.h>
 
 #include <asm/processor.h>
 #include <asm/mmu_context.h>
@@ -119,7 +120,9 @@ static inline unsigned long regs_sp(struct thread_struct *t)
 
 static inline void l4x_arch_task_setup(struct thread_struct *t)
 {
+#ifdef CONFIG_X86_32
 	load_TLS(t, 0);
+#endif
 }
 
 static inline void l4x_arch_do_syscall_trace(struct task_struct *p,
@@ -163,6 +166,7 @@ static inline void l4x_arch_task_start_setup(struct task_struct *p)
 	//   this task, otherwise gs will have the glibc-gs
 	// - ensure this by checking if the segment is one of the user ones or
 	//   another one (then it's the utcb one)
+#ifdef CONFIG_X86_32
 #ifdef CONFIG_L4_VCPU
 	unsigned int gs = l4x_vcpu_state(smp_processor_id())->r.gs;
 #else
@@ -197,6 +201,7 @@ static inline void l4x_arch_task_start_setup(struct task_struct *p)
 		}
 		L4XV_U(f);
 	}
+#endif
 }
 
 static inline l4_umword_t l4x_l4pfa(struct thread_struct *t)
@@ -215,8 +220,13 @@ static inline void l4x_print_regs(struct thread_struct *t, struct pt_regs *r)
 	       r->ip, r->sp, t->error_code, t->trap_no);
 	printk("ax: %08lx bx: %08lx  cx: %08lx  dx: %08lx\n",
 	       r->ax, r->bx, r->cx, r->dx);
+#ifdef CONFIG_X86_32
 	printk("di: %08lx si: %08lx  bp: %08lx  gs: %08lx fs: %08lx\n",
 	       r->di, r->si, r->bp, r->gs, r->fs);
+#else
+	printk("di: %08lx si: %08lx  bp: %08lx\n",
+	       r->di, r->si, r->bp);
+#endif
 }
 
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
@@ -226,9 +236,14 @@ asm(
 ".global ret_from_fork          \n"
 #endif
 "ret_from_fork:			\n"
+// why do we need the push/pop?
+#ifdef CONFIG_X86_32
 "pushl	%ebx			\n"
+#endif
 "call	schedule_tail		\n"
+#ifdef CONFIG_X86_32
 "popl	%ebx			\n"
+#endif
 #ifdef CONFIG_L4_VCPU
 "jmp	l4x_vcpu_ret_from_fork  \n"
 #else
@@ -317,29 +332,33 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 		vcpu->user_task = next->mm->context.task;
 #endif
 
+#ifdef CONFIG_X86_32
 #ifdef CONFIG_L4_VCPU
 	if (next->mm)
 #else
 	if (next->mm && !l4_is_invalid_cap(next->mm->context.task))
 #endif
 		load_TLS(&next->thread, 0);
+#endif
 }
 
 static inline void l4x_pte_add_access_and_mapped(pte_t *ptep)
 {
-	ptep->pte_low |= (_PAGE_ACCESSED + _PAGE_MAPPED);
+	ptep->pte |= (_PAGE_ACCESSED + _PAGE_MAPPED);
 }
 
 static inline void l4x_pte_add_access_mapped_and_dirty(pte_t *ptep)
 {
-	ptep->pte_low |= (_PAGE_ACCESSED + _PAGE_DIRTY + _PAGE_MAPPED);
+	ptep->pte |= (_PAGE_ACCESSED + _PAGE_DIRTY + _PAGE_MAPPED);
 }
 
 #ifdef CONFIG_L4_VCPU
 static inline void vcpu_to_thread_struct(l4_vcpu_state_t *v,
                                          struct thread_struct *t)
 {
+#ifdef CONFIG_X86_32
 	t->gs         = v->r.gs;
+#endif
 	t->trap_no    = v->r.trapno;
 	t->error_code = v->r.err;
 	t->pfa        = v->r.pfa;
@@ -348,7 +367,9 @@ static inline void vcpu_to_thread_struct(l4_vcpu_state_t *v,
 static inline void thread_struct_to_vcpu(l4_vcpu_state_t *v,
                                          struct thread_struct *t)
 {
+#ifdef CONFIG_X86_32
 	v->r.gs = t->gs;
+#endif
 }
 
 #else
@@ -406,9 +427,9 @@ static inline void dispatch_system_call(struct task_struct *p,
 #endif
 
 #if 0
-	printk("Syscall %3d for %s(%d at %p): arg1 = %lx\n",
+	printk("Syscall %3d for %s(%d at %p): args: %lx,%lx,%lx\n",
 	           syscall, p->comm, p->pid, (void *)regsp->ip,
-	           regsp->bx);
+		   regsp->bx, regsp->cx, regsp->dx);
 #endif
 #if 0
 	if (syscall == 11) {
@@ -437,9 +458,8 @@ static inline void dispatch_system_call(struct task_struct *p,
 #if 0
 	if (syscall == 5) {
 		char *filename = getname((char *)regsp->bx);
-		printk("open: pid: %d(%s), " PRINTF_L4TASK_FORM ": %s (%lx)\n",
+		printk("open: pid: %d(%s): %s (%lx)\n",
 		       current->pid, current->comm,
-		       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 		       IS_ERR(filename) ? "UNKNOWN" : filename, regsp->bx);
 		putname(filename);
 	}
@@ -744,6 +764,7 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
 #ifdef CONFIG_L4_VCPU
 static inline void l4x_vcpu_entry_user_arch(void)
 {
+#ifdef CONFIG_X86_32
 	asm ("cld          \n"
 	     "mov %0, %%gs \n"
 	     "mov %1, %%fs \n"
@@ -754,6 +775,9 @@ static inline void l4x_vcpu_entry_user_arch(void)
 	     "r" (l4x_x86_utcb_get_orig_segment())
 #endif
 	     : "memory");
+#else
+	asm ("cld" : : : "memory");
+#endif
 }
 
 static inline bool l4x_vcpu_is_wr_pf(l4_vcpu_state_t *v)

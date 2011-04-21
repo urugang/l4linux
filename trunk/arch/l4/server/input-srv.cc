@@ -12,7 +12,7 @@ class Input : public L4Re::Util::Event_svr<Input>,
               public l4x_srv_object
 {
 public:
-	l4_input_srv_ops *ops;
+	l4x_input_srv_ops *ops;
 	Input();
 
 	int get_num_streams();
@@ -22,7 +22,7 @@ public:
 	                  L4Re::Event_absinfo *i);
 
 	int dispatch(l4_umword_t obj, L4::Ipc_iostream &ios);
-	void add(struct l4_input_event *);
+	void add(struct l4x_input_event const *);
 	void trigger() const { _irq.trigger(); }
 	L4::Cap<L4::Kobject> rcv_cap() { return l4x_srv_rcv_cap(); }
 
@@ -52,7 +52,7 @@ Input::Input()
 }
 
 void
-Input::add(struct l4_input_event *e)
+Input::add(struct l4x_input_event const *e)
 {
 	_evbuf.put(*reinterpret_cast<L4Re::Event_buffer::Event const *>(e));
 }
@@ -106,7 +106,7 @@ static Input *input_obj()
 }
 
 extern "C" void
-l4x_srv_input_init(l4_cap_idx_t thread, struct l4_input_srv_ops *ops)
+l4x_srv_input_init(l4_cap_idx_t thread, struct l4x_input_srv_ops *ops)
 {
 	L4::Cap<void> c;
 	input_obj()->ops = ops;
@@ -117,7 +117,7 @@ l4x_srv_input_init(l4_cap_idx_t thread, struct l4_input_srv_ops *ops)
 }
 
 extern "C" void
-l4x_srv_input_add_event(struct l4_input_event *e)
+l4x_srv_input_add_event(struct l4x_input_event *e)
 {
 	input_obj()->add(e);
 }

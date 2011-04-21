@@ -28,6 +28,7 @@
 #include <l4/sys/scheduler.h>
 #include <l4/sys/task.h>
 #include <l4/sys/debugger.h>
+#include <l4/sys/irq.h>
 #include <l4/re/c/mem_alloc.h>
 #include <l4/re/c/rm.h>
 #include <l4/re/c/debug.h>
@@ -39,6 +40,7 @@
 #include <l4/util/cpu.h>
 #include <l4/util/l4_macros.h>
 #include <l4/util/kip.h>
+#include <l4/util/atomic.h>
 #include <l4/io/io.h>
 
 #include <asm/api/config.h>
@@ -71,7 +73,7 @@
 #include <asm/l4x/utcb.h>
 #include <asm/l4x/upage.h>
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 #include <asm/io.h>
 #include <asm/i8259.h>
 #ifdef CONFIG_L4_EXTERNAL_RTC
@@ -87,7 +89,7 @@ L4_CV void l4x_external_exit(int);
   #if defined(CONFIG_SERIO_I8042) || defined(CONFIG_SERIO_LIBPS2) \
       || defined(CONFIG_VGA_CONSOLE)
    #warning WARNING: L4FB enabled and also CONFIG_SERIO_I8042 or CONFIG_SERIO_LIBPS2 or CONFIG_VGA_CONSOLE
-   #error WARNING: This is usually not wanted.
+   //#error WARNING: This is usually not wanted.
   #endif
 
   #ifndef CONFIG_INPUT_EVDEV
@@ -156,6 +158,7 @@ L4_EXTERNAL_FUNC(l4io_search_iomem_region);
 L4_EXTERNAL_FUNC(l4io_lookup_device);
 L4_EXTERNAL_FUNC(l4io_lookup_resource);
 L4_EXTERNAL_FUNC(l4io_iterate_devices);
+L4_EXTERNAL_FUNC(l4io_has_resource);
 
 #ifdef CONFIG_L4_USE_L4SHMC
 L4_EXTERNAL_FUNC(l4shmc_create);
@@ -174,7 +177,7 @@ L4_EXTERNAL_FUNC(l4x_srv_init);
 L4_EXTERNAL_FUNC(l4x_srv_setup_recv);
 #endif
 
-#if defined(ARCH_x86) && defined(CONFIG_L4_EXTERNAL_RTC)
+#if defined(CONFIG_X86) && defined(CONFIG_L4_EXTERNAL_RTC)
 L4_EXTERNAL_FUNC(l4rtc_get_seconds_since_1970);
 #endif
 
@@ -182,10 +185,12 @@ unsigned long upage_addr;
 l4_vcpu_state_t *l4x_vcpu_states[NR_CPUS];
 EXPORT_SYMBOL(l4x_vcpu_states);
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 struct desc_struct cpu_gdt_table[GDT_ENTRIES];
+#ifdef CONFIG_X86_32
 struct desc_ptr early_gdt_descr;
 struct desc_ptr idt_descr = { .size = IDT_ENTRIES*8-1, .address = (unsigned long)idt_table };
+#endif
 
 unsigned l4x_fiasco_gdt_entry_offset;
 struct desc_struct boot_gdt;
@@ -483,9 +488,9 @@ static inline void l4x_x86_utcb_save_orig_segment(void) {}
 
 L4_CV l4_utcb_t *l4_utcb_wrap(void)
 {
-#ifdef ARCH_arm
+#if defined(CONFIG_ARM) || defined(CONFIG_X86_64)
 	return l4_utcb_direct();
-#elif defined(ARCH_x86)
+#elif defined(CONFIG_X86_32)
 	unsigned long v;
 	asm volatile ("mov %%gs, %0": "=r" (v));
 	if (v == 0x43 || v == 7) {
@@ -884,7 +889,7 @@ static void l4x_mbm_request_ghost(l4re_ds_t *ghost_ds)
 	/* Write a certain value in to the page so that we can
 	 * easily recognize it */
 	for (i = 0; i < L4_PAGESIZE; i += sizeof(i))
-		*(unsigned long *)((unsigned long)addr + i) = 0xcafeface;
+		*(unsigned int *)((unsigned long)addr + i) = 0xcafeface;
 
 	/* Detach it again */
 	if (l4re_rm_detach(addr)) {
@@ -948,6 +953,7 @@ static void l4x_map_below_mainmem(void)
 		}
 
 		if (!map_count) {
+			LOG_printf("blah\n");
 			/* Get new ghost page every 1024 mappings
 			 * to overcome a Fiasco mapping db
 			 * limitation. */
@@ -1010,7 +1016,7 @@ static void l4x_register_region(const l4re_ds_t ds, void *start,
 
 	ds_size = l4re_ds_size(ds);
 
-	LOG_printf("%15s: virt: %p to %p [%u KiB]\n",
+	LOG_printf("%15s: virt: %p to %p [%zu KiB]\n",
 	           tag, start, start + ds_size - 1, ds_size >> 10);
 
 	while (offset < ds_size) {
@@ -1025,7 +1031,7 @@ static void l4x_register_region(const l4re_ds_t ds, void *start,
 
 		l4x_v2p_add_item(phys_addr, start + offset, phys_size);
 
-		LOG_printf("%15s: Phys: 0x%08lx to 0x%08lx, Size: %8u\n",
+		LOG_printf("%15s: Phys: 0x%08lx to 0x%08lx, Size: %8zu\n",
 		           tag, phys_addr,
 		           phys_addr + phys_size, phys_size);
 
@@ -1097,6 +1103,7 @@ void __init l4x_setup_memory(char *cmdl,
 		LOG_printf("%s: Out of caps\n", __func__);
 		l4x_exit_l4linux();
 	}
+	LOG_printf("l4re_global_env: %p\n", l4re_global_env);
 	if (l4re_ma_alloc(l4x_mainmem_size, l4x_ds_mainmem, dm_flags)) {
 		LOG_printf("%s: Can't get main memory of %ldMB!\n",
 		           __func__, l4x_mainmem_size >> 20);
@@ -1227,8 +1234,10 @@ void __init l4x_setup_memory(char *cmdl,
 	/* Reserve some part of the virtual address space for vmalloc */
 	l4x_vmalloc_memory_start = (unsigned long)l4x_main_memory_start;
 	if (l4re_rm_reserve_area(&l4x_vmalloc_memory_start,
-#ifdef ARCH_x86
+#ifdef CONFIG_X86_32
 	                          __VMALLOC_RESERVE,
+#elif defined(CONFIG_X86_64)
+				  VMALLOC_END - VMALLOC_START + 1,
 #else
 	                          VMALLOC_SIZE << 20,
 #endif
@@ -1256,7 +1265,9 @@ void __init l4x_setup_memory(char *cmdl,
 	__FIXADDR_TOP = l4x_fixmap_space_start
 	                 + __end_of_permanent_fixed_addresses * PAGE_SIZE;
 #endif
+#ifndef CONFIG_X86_64
 	l4x_map_below_mainmem();
+#endif
 
 	// that happened with some version of ld...
 	if ((unsigned long)&_end < 0x100000)
@@ -1265,11 +1276,12 @@ void __init l4x_setup_memory(char *cmdl,
 	l4x_register_pointer_section((void *)((unsigned long)&_end - 1), 0, "end");
 }
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 #include <asm/l4lxapi/memory.h>
 
 void l4x_update_mapping(unsigned long addr)
 {
+#ifdef CONFIG_X86_32
 	pte_t *ptep;
 
 	/* currently only used for fixmaps */
@@ -1284,6 +1296,9 @@ void l4x_update_mapping(unsigned long addr)
 		                             1);
 	else
 		l4lx_memory_unmap_virtual_page(addr);
+#else
+	printk("%s %d\n", __func__, __LINE__); 
+#endif
 }
 #endif
 
@@ -1440,9 +1455,7 @@ struct task_struct *l4x_cpu_idle_get(int cpu)
 static l4lx_thread_t l4x_cpu_ipi_threads[NR_CPUS];
 #endif
 static l4_cap_idx_t  l4x_cpu_ipi_irqs[NR_CPUS];
-#ifdef ARCH_x86
-static atomic_t      l4x_cpu_ipi_vector_mask[NR_CPUS];
-#endif
+static l4_umword_t   l4x_cpu_ipi_vector_mask[NR_CPUS];
 
 #ifndef CONFIG_L4_VCPU
 #include <asm/generic/sched.h>
@@ -1450,39 +1463,36 @@ static atomic_t      l4x_cpu_ipi_vector_mask[NR_CPUS];
 #include <l4/sys/irq.h>
 static __noreturn L4_CV void l4x_cpu_ipi_thread(void *x)
 {
-	unsigned _cpu = *(unsigned *)x;
-	l4_umword_t label;
+	unsigned cpu = *(unsigned *)x;
 	l4_msgtag_t tag;
 	l4_cap_idx_t cap;
 	int err;
 	l4_utcb_t *utcb = l4_utcb();
 
-	l4x_prepare_irq_thread(current_thread_info(), _cpu);
+	l4x_prepare_irq_thread(current_thread_info(), cpu);
 
 	// wait until parent has setup our cap and attached us
-	while (l4_is_invalid_cap(l4x_cpu_ipi_irqs[_cpu])) {
+	while (l4_is_invalid_cap(l4x_cpu_ipi_irqs[cpu])) {
 		mb();
 		l4_sleep(2);
 	}
 
-	cap = l4x_cpu_ipi_irqs[_cpu];
+	cap = l4x_cpu_ipi_irqs[cpu];
 
 	while (1) {
-		tag = l4_irq_wait(cap, &label, L4_IPC_NEVER);
+		tag = l4_irq_receive(cap, L4_IPC_NEVER);
 		if (unlikely(err = l4_ipc_error(tag, utcb)))
-			LOG_printf("ipi%d: ipc error %d (cap: %lx)\n", _cpu,
-					err, cap);
+			LOG_printf("ipi%d: ipc error %d (cap: %lx)\n",
+			           cpu, err, cap);
 
-		// ARM doesn't care about the vector, so just do not do the
-		// whole stuff
-#ifdef ARCH_x86
 		while (1) {
-			int mask, old, vector;
+			l4_umword_t ret, mask;
+			unsigned vector;
 			do {
-				old = atomic_read(&l4x_cpu_ipi_vector_mask[_cpu]);
-				mask = atomic_cmpxchg(&l4x_cpu_ipi_vector_mask[_cpu],
-				                      old, 0);
-			} while (unlikely(old != mask));
+				mask = l4x_cpu_ipi_vector_mask[cpu];
+				ret = l4util_cmpxchg(&l4x_cpu_ipi_vector_mask[cpu],
+				                     mask, 0);
+			} while (unlikely(!ret));
 
 			if (!mask)
 				break;
@@ -1493,57 +1503,43 @@ static __noreturn L4_CV void l4x_cpu_ipi_thread(void *x)
 				mask &= ~(1 << vector);
 			}
 		}
-#else
-		l4x_do_IPI(0, current_thread_info());
-#endif
-
 	}
 }
-#endif /* vcpu */
-
-#ifdef CONFIG_L4_VCPU
+#else /* vcpu */
 void l4x_vcpu_handle_ipi(struct pt_regs *regs)
 {
-	// ARM doesn't care about the vector, so just do not do the
-	// whole stuff
-#ifdef ARCH_x86
-	unsigned _cpu = smp_processor_id();
+	unsigned cpu = smp_processor_id();
 
 	while (1) {
-		int mask, old, vector;
+		l4_umword_t ret, mask;
+		unsigned vector;
 		do {
-			old = atomic_read(&l4x_cpu_ipi_vector_mask[_cpu]);
-			mask = atomic_cmpxchg(&l4x_cpu_ipi_vector_mask[_cpu],
-			                      old, 0);
-		} while (unlikely(old != mask));
+			mask = l4x_cpu_ipi_vector_mask[cpu];
+			ret = l4util_cmpxchg(&l4x_cpu_ipi_vector_mask[cpu],
+			                     mask, 0);
+		} while (unlikely(!ret));
 
 		if (!mask)
 			break;
 
 		while (mask) {
 			vector = ffs(mask) - 1;
-			do_l4x_smp_process_IPI(vector, regs);
+			l4x_smp_process_IPI(vector, regs);
 			mask &= ~(1 << vector);
 		}
 	}
-#else
-	do_l4x_smp_process_IPI(0, regs);
-#endif
-
 }
 #endif
 
 
-#include <l4/sys/irq.h>
-
-void l4x_cpu_ipi_thread_start(unsigned cpu)
+void l4x_cpu_ipi_setup(unsigned cpu)
 {
 	l4_msgtag_t t;
 	l4_cap_idx_t c;
-	char s[8];
+	char s[14];
 	L4XV_V(f);
 
-	snprintf(s, sizeof(s), "ipi%d", cpu);
+	snprintf(s, sizeof(s), "l4lx.ipi%d", cpu);
 	s[sizeof(s)-1] = 0;
 
 	l4x_cpu_ipi_irqs[cpu] = L4_INVALID_CAP;
@@ -1597,7 +1593,7 @@ void l4x_cpu_ipi_thread_start(unsigned cpu)
 	l4x_cpu_ipi_irqs[cpu] = c;
 }
 
-void l4x_cpu_ipi_thread_stop(unsigned cpu)
+void l4x_cpu_ipi_stop(unsigned cpu)
 {
 	l4_msgtag_t t;
 	L4XV_V(f);
@@ -1650,7 +1646,7 @@ static L4_CV void __cpu_starter(void *x)
 
 #ifdef ARCH_x86
 	l4x_load_percpu_gdt_descriptor(get_cpu_gdt_table(cpu));
-	l4x_stack_setup((struct thread_info *)((unsigned long)stack_start.sp & ~(THREAD_SIZE - 1)),
+	l4x_stack_setup((struct thread_info *)(stack_start & ~(THREAD_SIZE - 1)),
 	                u, cpu);
 	asm volatile ("movl (stack_start), %esp; jmp *(initial_code)");
 #endif
@@ -1718,30 +1714,35 @@ void l4x_cpu_ipi_trigger(unsigned cpu)
 	L4XV_U(f);
 }
 
+void l4x_cpu_ipi_enqueue_vector(unsigned cpu, unsigned vector)
+{
+	l4_umword_t old, ret;
+	do {
+		old = l4x_cpu_ipi_vector_mask[cpu];
+		ret = l4util_cmpxchg(&l4x_cpu_ipi_vector_mask[cpu],
+		                     old, old | (1 << vector));
+	} while (!ret);
+}
+
 #ifdef ARCH_x86
 void l4x_send_IPI_mask_bitmask(unsigned long mask, int vector)
 {
-	int cpu, old, ret;
+	int cpu;
 
 	if (unlikely(vector > 31))
 		LOG_printf("BIG vector %d (caller %lx)\n", vector, _RET_IP_);
 
-	BUILD_BUG_ON(NR_CPUS > 32);
+	BUILD_BUG_ON(NR_CPUS > sizeof(l4x_cpu_ipi_vector_mask[cpu]) * 8);
 	for (cpu = 0; cpu < NR_CPUS; cpu++) {
 		if (!(mask & (1 << cpu)))
 			continue;
 
-		do {
-			old = atomic_read(&l4x_cpu_ipi_vector_mask[cpu]);
-			ret = atomic_cmpxchg(&l4x_cpu_ipi_vector_mask[cpu],
-			                     old, old | (1 << vector));
-		} while (old != ret);
-
+		l4x_cpu_ipi_enqueue_vector(cpu, vector);
 		l4x_cpu_ipi_trigger(cpu);
 	}
 }
 
-void do_l4x_smp_process_IPI(int vector, struct pt_regs *regs)
+void l4x_smp_process_IPI(int vector, struct pt_regs *regs)
 {
 	if (vector == RESCHEDULE_VECTOR) {
 		extern void smp_reschedule_interrupt(struct pt_regs *regs);
@@ -1847,11 +1848,12 @@ static inline void l4x_repnop_init(void) {}
 
 static int l4x_cpu_virt_phys_map_init(const char *boot_command_line)
 {
-	l4_umword_t max_cpus;
+	l4_umword_t max_cpus = 1;
 	l4_sched_cpu_set_t cs = l4_sched_cpu_set(0, 0, 0);
 	unsigned i;
 
 #ifdef CONFIG_SMP
+	char overbooking = 0;
 	char *p;
 
 	if ((p = strstr(boot_command_line, "l4x_cpus="))) {
@@ -1892,6 +1894,9 @@ static int l4x_cpu_virt_phys_map_init(const char *boot_command_line)
 					return 1;
 				}
 				l4x_cpu_physmap[l4x_nr_cpus].phys_id = pcpu;
+				for (i = 0; i < l4x_nr_cpus; ++i)
+					overbooking |=
+					   l4x_cpu_physmap[i].phys_id == pcpu;
 				l4x_nr_cpus++;
 				if (*q != ',')
 					break;
@@ -1931,6 +1936,24 @@ static int l4x_cpu_virt_phys_map_init(const char *boot_command_line)
 	for (i = 0; i < l4x_nr_cpus; i++)
 		LOG_printf("%u:%u%s", i, l4x_cpu_physmap[i].phys_id,
 		           i == l4x_nr_cpus - 1 ? "\n" : ", ");
+
+#if defined(CONFIG_SMP) && defined(ARCH_arm) && defined(CONFIG_L4_VCPU)
+	if (overbooking) {
+		LOG_printf("  On ARM it is not possible to place multiple\n"
+		           "  logical CPUs on a single physical CPU as the TLS\n"
+			   "  register handling cannot be virtualized.\n");
+		// On a longer thought we'd need to find out on which vCPU
+		// we're running. The utcb address should be available via
+		// tls-reg-3 and then we'd need to find out the current tls
+		// value for that vCPU, maybe by putting a page at the same
+		// place as the utcb is in the linux server address space.
+		// Or: We just do a system call.
+		// But: Userspace also likes to do NOT use the kernel
+		// provided tls code (e.g. Android) so this would not work
+		// at all.
+		enter_kdebug("Please read the message");
+	}
+#endif
 
 	return 0;
 }
@@ -1988,7 +2011,11 @@ static L4_CV void __init l4x_linux_startup(void *data)
 	ti->task->stack = ti;
 
 #ifdef CONFIG_L4_VCPU
+#ifdef CONFIG_X86_32
 	ti->task->thread.regsp = task_pt_regs_v(ti->task);
+#else
+	ti->task->thread.regsp = task_pt_regs(ti->task);
+#endif
 #endif
 
 	panic_blink = l4x_blink;
@@ -1999,8 +2026,10 @@ static L4_CV void __init l4x_linux_startup(void *data)
 #endif
 
 	local_irq_disable();
-#ifdef ARCH_x86
+#ifdef CONFIG_X86_32
 	i386_start_kernel();
+#elif defined(CONFIG_X86_64)
+	x86_64_start_kernel(NULL);
 #else
 	start_kernel();
 #endif
@@ -2121,14 +2150,14 @@ void l4x_load_initrd(char *command_line)
 
 static void get_initial_cpu_capabilities(void)
 {
-#ifdef ARCH_x86
+#ifdef CONFIG_X86_32
 	/* new_cpu_data is filled into boot_cpu_data in setup_arch */
 	extern struct cpuinfo_x86 new_cpu_data;
 	new_cpu_data.x86_capability[0] = l4util_cpu_capabilities();
 #endif
 }
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 
 #include <asm/l4x/ioport.h>
 
@@ -2217,7 +2246,7 @@ static void l4x_scan_hw_resources(void)
 			LOG_printf("    %s: %08lx - %08lx\n",
 			           t, res.start, res.end);
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 			l4x_x86_register_ports(&res);
 			l4io_request_ioport(res.start,
 			                    res.end - res.start + 1);
@@ -2353,7 +2382,7 @@ int __init_refok L4_CV main(int argc, char **argv)
 
 	l4x_scan_hw_resources();
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 	if (l4util_kip_kernel_has_feature(l4lx_kinfo, "io_prot")) {
 #ifndef CONFIG_L4_TAMED
 		enter_kdebug("ioprot-microkernel -> enable TAMED mode!");
@@ -2361,8 +2390,10 @@ int __init_refok L4_CV main(int argc, char **argv)
 	}
 
 	/* Initialize GDT entry offset */
+#ifdef CONFIG_X86_32
 	l4x_fiasco_gdt_entry_offset = fiasco_gdt_get_entry_offset(l4re_env()->main_thread, l4_utcb());
 	LOG_printf("l4x_fiasco_gdt_entry_offset = %x\n", l4x_fiasco_gdt_entry_offset);
+#endif
 
 	l4x_v2p_add_item(0xa0000, (void *)0xa0000, 0xfffff - 0xa0000);
 
@@ -2378,7 +2409,7 @@ int __init_refok L4_CV main(int argc, char **argv)
 			LOG_printf("WARNING: RTC server does not seem there!\n");
 	}
 #endif
-#endif /* ARCH_x86 */
+#endif /* CONFIG_X86 */
 
 	l4x_setup_upage();
 
@@ -2435,7 +2466,7 @@ int __init_refok L4_CV main(int argc, char **argv)
 	return 0;
 }
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 
 #if 0
 /*
@@ -2491,6 +2522,7 @@ long ptregs_##name(void)                                        \
 }
 
 
+#ifdef CONFIG_X86_32
 PTREGSCALL1(iopl, unsigned int)
 PTREGSCALL0(fork)
 PTREGSCALL0(vfork)
@@ -2507,6 +2539,13 @@ long ptregs_clone(void)
 	return sys_clone(r->bx, r->cx, (void __user *)r->dx,
 	                 (void __user *)r->di, r);
 }
+#endif
+
+#ifdef CONFIG_X86_32
+#define RN(n) e##n
+#else
+#define RN(n) r##n
+#endif
 
 static void l4x_setup_die_utcb(l4_exc_regs_t *exc)
 {
@@ -2531,9 +2570,9 @@ static void l4x_setup_die_utcb(l4_exc_regs_t *exc)
 	regs_addr = exc->sp;
 
 	/* Fill arguments in regs for die params */
-	exc->ecx = exc->err;
-	exc->edx = regs_addr;
-	exc->eax = (unsigned long)message;
+	exc->RN(cx) = exc->err;
+	exc->RN(dx) = regs_addr;
+	exc->RN(ax) = (unsigned long)message;
 
 	exc->sp -= sizeof(unsigned long);
 	*(unsigned long *)exc->sp = 0;
@@ -2547,6 +2586,7 @@ static void l4x_setup_die_utcb(l4_exc_regs_t *exc)
 
 asmlinkage static void l4x_do_intra_iret(struct pt_regs regs)
 {
+#ifdef CONFIG_X86_32
 	asm volatile ("mov %%cs, %0" : "=r" (regs.cs));
 	asm volatile
 	("movl %0, %%esp	\t\n"
@@ -2563,6 +2603,7 @@ asmlinkage static void l4x_do_intra_iret(struct pt_regs regs)
 	 "addl $4, %%esp	\t\n" /* keep orig_eax */
 	 "iret			\t\n"
 	 : : "r" (&regs));
+#endif
 
 	panic("Intra game zombie walking!");
 }
@@ -2581,8 +2622,8 @@ static void l4x_setup_stack_for_traps(l4_exc_regs_t *exc, struct pt_regs *regs,
 	memcpy((void *)exc->sp, regs, l4x_intra_regs_size);
 
 	/* do_<exception> functions are regparm(3), arguments go in regs */
-	exc->eax = exc->sp;
-	exc->edx = exc->err;
+	exc->RN(ax) = exc->sp;
+	exc->RN(dx) = exc->err;
 
 	/* clear TF */
 	exc->flags &= ~256;
@@ -2688,11 +2729,19 @@ void in_kernel_int80_set_user(void)
 
 asm(
 "in_kernel_int80_helper: \n\t"
+#ifdef CONFIG_X86_32
 "	pushl %eax	\n\t"	/* store eax */
 "	call in_kernel_int80_set_kernel \n\t"
 "	popl  %eax	\n\t"	/* restore eax */
 "	call *%eax	\n\t"	/* eax has the sys_foo function we are calling */
 "	movl %eax,24(%esp) \n\t"	/* store return value from sys_foo */
+#else
+"	push %rax	\n\t"	/* store eax */
+"	call in_kernel_int80_set_kernel \n\t"
+"	pop  %rax	\n\t"	/* restore eax */
+"	call *%rax	\n\t"	/* eax has the sys_foo function we are calling */
+"	mov %rax,24(%rsp) \n\t"	/* store return value from sys_foo */
+#endif
 "	call in_kernel_int80_set_user\n\t"
 "	call l4x_do_intra_iret\n\t"		/* return */
 );
@@ -2716,7 +2765,7 @@ static int l4x_handle_lxsyscall(l4_exc_regs_t *exc)
 	if (*(unsigned short *)pc != 0x80cd)
 		return 1; /* No int80 instructions */
 
-	syscall = exc->eax;
+	syscall = exc->RN(ax);
 
 	if (!is_lx_syscall(syscall))
 		return 1; /* Not a valid system call number */
@@ -2739,10 +2788,10 @@ static int l4x_handle_lxsyscall(l4_exc_regs_t *exc)
 #else
 	/* eax has the function, see in_kernel_int80_helper */
 	if (syscall == __NR_execve)
-		exc->eax = (unsigned long)l4_kernelinternal_execve;
+		exc->RN(ax) = (unsigned long)l4_kernelinternal_execve;
 	else
 #endif
-		exc->eax = (unsigned long)sys_call_table[syscall];
+		exc->RN(ax) = (unsigned long)sys_call_table[syscall];
 
 	/* Set PC to helper */
 	exc->ip = (unsigned long)in_kernel_int80_helper;
@@ -2753,7 +2802,7 @@ static int l4x_handle_lxsyscall(l4_exc_regs_t *exc)
 static int l4x_handle_msr(l4_exc_regs_t *exc)
 {
 	void *pc = (void *)l4_utcb_exc_pc(exc);
-	unsigned long reg = exc->ecx;
+	unsigned long reg = exc->RN(cx);
 
 	/* wrmsr */
 	if (*(unsigned short *)pc == 0x300f) {
@@ -2770,9 +2819,9 @@ static int l4x_handle_msr(l4_exc_regs_t *exc)
 	if (*(unsigned short *)pc == 0x320f) {
 
 		if (reg == MSR_IA32_MISC_ENABLE) {
-			exc->eax = exc->edx = 0;
+			exc->RN(ax) = exc->RN(dx) = 0;
 		} else if (reg == MSR_K7_CLK_CTL) {
-			exc->eax = 0x20000000;
+			exc->RN(ax) = 0x20000000;
 		} else
 			LOG_printf("WARNING: Unknown rdmsr: %08lx at %p\n", reg, pc);
 
@@ -2814,17 +2863,32 @@ static inline void l4x_print_exception(l4_cap_idx_t t, l4_exc_regs_t *exc)
 #ifdef CONFIG_L4_VCPU
 static inline l4_exc_regs_t *cast_to_utcb_exc(l4_vcpu_regs_t *vcpu_regs)
 {
+#ifdef CONFIG_X86_32
 	enum { OFF = offsetof(l4_vcpu_regs_t, gs), };
+#else
+	enum { OFF = offsetof(l4_vcpu_regs_t, r15), };
+#endif
+#ifdef CONFIG_X86_32
 	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, gs)     - OFF != offsetof(l4_exc_regs_t, gs));
 	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, fs)     - OFF != offsetof(l4_exc_regs_t, fs));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, di)     - OFF != offsetof(l4_exc_regs_t, edi));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, si)     - OFF != offsetof(l4_exc_regs_t, esi));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, bp)     - OFF != offsetof(l4_exc_regs_t, ebp));
+#else
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r15)    - OFF != offsetof(l4_exc_regs_t, r15));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r14)    - OFF != offsetof(l4_exc_regs_t, r14));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r13)    - OFF != offsetof(l4_exc_regs_t, r13));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r12)    - OFF != offsetof(l4_exc_regs_t, r12));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r11)    - OFF != offsetof(l4_exc_regs_t, r11));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r10)    - OFF != offsetof(l4_exc_regs_t, r10));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r9)     - OFF != offsetof(l4_exc_regs_t, r9));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r8)     - OFF != offsetof(l4_exc_regs_t, r8));
+#endif
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, di)     - OFF != offsetof(l4_exc_regs_t, RN(di)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, si)     - OFF != offsetof(l4_exc_regs_t, RN(si)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, bp)     - OFF != offsetof(l4_exc_regs_t, RN(bp)));
 	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, pfa)    - OFF != offsetof(l4_exc_regs_t, pfa));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, bx)     - OFF != offsetof(l4_exc_regs_t, ebx));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, dx)     - OFF != offsetof(l4_exc_regs_t, edx));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, cx)     - OFF != offsetof(l4_exc_regs_t, ecx));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, ax)     - OFF != offsetof(l4_exc_regs_t, eax));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, bx)     - OFF != offsetof(l4_exc_regs_t, RN(bx)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, dx)     - OFF != offsetof(l4_exc_regs_t, RN(dx)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, cx)     - OFF != offsetof(l4_exc_regs_t, RN(cx)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, ax)     - OFF != offsetof(l4_exc_regs_t, RN(ax)));
 	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, trapno) - OFF != offsetof(l4_exc_regs_t, trapno));
 	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, err)    - OFF != offsetof(l4_exc_regs_t, err));
 	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, ip)     - OFF != offsetof(l4_exc_regs_t, ip));
@@ -3016,7 +3080,7 @@ struct l4x_exception_func_struct {
 	int           for_vcpu;
 };
 static struct l4x_exception_func_struct l4x_exception_func_list[] = {
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_hlt_for_bugs_test }, // before kprobes!
 #ifdef CONFIG_KPROBES
 	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_kprobes },
@@ -3139,7 +3203,7 @@ static int l4x_default(l4_cap_idx_t *src_id, l4_msgtag_t *tag)
 		memcpy(l4_utcb_exc(), &exc, sizeof(exc));
 		return 0; // reply
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 	} else if (l4_msgtag_is_io_page_fault(*tag)) {
 		LOG_printf("Invalid IO-Port access at pc = "l4_addr_fmt
 		           " port=0x%lx\n", pc, pfa >> 12);
@@ -3510,7 +3574,7 @@ void l4x_prepare_irq_thread(struct thread_info *ti, unsigned _cpu)
 void l4x_show_process(struct task_struct *t)
 {
 #ifdef CONFIG_L4_VCPU
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 	printk("%2d: %s tsk st: %lx thrd flgs: %x esp: %08lx\n",
 	       t->pid, t->comm, t->state, task_thread_info(t)->flags,
 	       t->thread.sp);
@@ -3521,7 +3585,7 @@ void l4x_show_process(struct task_struct *t)
 	       task_thread_info(t)->cpu_context.sp);
 #endif
 #else
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 	printk("%2d: %s tsk st: %lx thrd flgs: %x " PRINTF_L4TASK_FORM " esp: %08lx\n",
 	       t->pid, t->comm, t->state, task_thread_info(t)->flags,
 	       PRINTF_L4TASK_ARG(t->thread.user_thread_id),
@@ -3567,7 +3631,7 @@ void kdb_ke(void)
 
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
 #include <linux/fs.h>
-void l4x_print_vm_area_maps(struct task_struct *p)
+void l4x_print_vm_area_maps(struct task_struct *p, unsigned long highlight)
 {
 	struct vm_area_struct *vma = p->mm->mmap;
 	L4XV_V(f);
@@ -3616,6 +3680,9 @@ void l4x_print_vm_area_maps(struct task_struct *p)
 			LOG_printf(" %s", count ? buf : "Unknown");
 		}
 
+		if (   highlight >= vma->vm_start
+		    && highlight < vma->vm_end)
+			LOG_printf(" <====");
 		LOG_printf("\n");
 		vma = vma->vm_next;
 	}
@@ -3623,7 +3690,7 @@ void l4x_print_vm_area_maps(struct task_struct *p)
 }
 #endif
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 
 #include <linux/clockchips.h>
 
@@ -3660,7 +3727,7 @@ void setup_pit_timer(void)
 /* ----------------------------------------------------------------------- */
 /* Export list, we could also put these in a separate file (like l4_ksyms.c) */
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 
@@ -3670,16 +3737,26 @@ void setup_pit_timer(void)
 #include <asm/dma-mapping.h>
 #include <asm/io.h>
 
+#ifdef CONFIG_X86_32
 EXPORT_SYMBOL(__VMALLOC_RESERVE);
+#endif
 
 EXPORT_SYMBOL(swapper_pg_dir);
 EXPORT_SYMBOL(init_thread_union);
 
+#ifdef CONFIG_X86_32
 EXPORT_SYMBOL(strstr);
+#endif
 
 EXPORT_SYMBOL(csum_partial);
+#ifdef CONFIG_X86_32
 EXPORT_SYMBOL(csum_partial_copy);
+#endif
 EXPORT_SYMBOL(empty_zero_page);
+
+#ifdef CONFIG_X86_64
+EXPORT_SYMBOL(memcpy);
+#endif
 
 /*
  * Note, this is a prototype to get at the symbol for

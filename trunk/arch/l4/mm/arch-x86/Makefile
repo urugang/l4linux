@@ -3,13 +3,15 @@
 #
 
 
-obj-y	:= fault.o extable.o init.o init_32.o ioremap.o pageattr.o pgtable_32.o pgtable.o mmap.o \
-           pat.o setup_nx.o physaddr.o
+obj-y	:= fault.o extable.o init.o init_$(BITS).o ioremap.o pageattr.o \
+           pgtable.o mmap.o pat.o setup_nx.o physaddr.o
 
 # Make sure __phys_addr has no stackprotector
 nostackp := $(call cc-option, -fno-stack-protector)
 CFLAGS_physaddr.o               := $(nostackp)
 CFLAGS_setup_nx.o               := $(nostackp)
+
+obj-$(CONFIG_X86_32)            += pgtable_32.o
 
 obj-$(CONFIG_X86_PAT)		+= pat_rbtree.o
 obj-$(CONFIG_SMP)		+= tlb.o

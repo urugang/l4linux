@@ -32,6 +32,9 @@ static inline unsigned long l4x_get_cpu_mode(struct pt_regs *r)
 
 static inline void l4x_make_up_kernel_regs(struct pt_regs *r)
 {
+#ifdef CONFIG_X86_64
+	register unsigned long current_stack_pointer asm("rsp");
+#endif
 	l4x_set_cpu_mode(r, L4X_MODE_KERNEL);
 	r->ip = (unsigned long)__builtin_return_address(0);
 	r->sp = current_stack_pointer;
@@ -54,7 +57,9 @@ static inline void vcpu_to_ptregs(l4_vcpu_state_t *v,
 	V2P(regs, ip,    &v->r, ip);
 	V2P(regs, flags, &v->r, flags);
 	V2P(regs, sp,    &v->r, sp);
+#ifdef CONFIG_X86_32
 	V2P(regs, fs,    &v->r, fs);
+#endif
 	if (v->saved_state & L4_VCPU_F_IRQ)
 	        regs->flags |= X86_EFLAGS_IF;
 	else
@@ -77,7 +82,9 @@ static inline void ptregs_to_vcpu(l4_vcpu_state_t *v,
 	P2V(regs, ip,    &v->r, ip);
 	P2V(regs, flags, &v->r, flags);
 	P2V(regs, sp,    &v->r, sp);
+#ifdef CONFIG_X86_32
 	P2V(regs, fs,    &v->r, fs);
+#endif
 	v->saved_state &= ~(L4_VCPU_F_IRQ | L4_VCPU_F_USER_MODE);
 	if (regs->flags & X86_EFLAGS_IF)
 	        v->saved_state |= L4_VCPU_F_IRQ;
@@ -88,37 +95,47 @@ static inline void ptregs_to_vcpu(l4_vcpu_state_t *v,
 
 #endif
 
+#ifdef CONFIG_X86_32
+#define RN(n) e##n
+#else
+#define RN(n) r##n
+#endif
+
 #define UE2P(p, pr, e, er)   do { p->pr = e->er; } while (0)
 static inline void utcb_exc_to_ptregs(l4_exc_regs_t *exc, struct pt_regs *ptregs)
 {
-	UE2P(ptregs, ax,    exc, eax);
-	UE2P(ptregs, bx,    exc, ebx);
-	UE2P(ptregs, cx,    exc, ecx);
-	UE2P(ptregs, dx,    exc, edx);
-	UE2P(ptregs, di,    exc, edi);
-	UE2P(ptregs, si,    exc, esi);
-	UE2P(ptregs, bp,    exc, ebp);
+	UE2P(ptregs, ax,    exc, RN(ax));
+	UE2P(ptregs, bx,    exc, RN(bx));
+	UE2P(ptregs, cx,    exc, RN(cx));
+	UE2P(ptregs, dx,    exc, RN(dx));
+	UE2P(ptregs, di,    exc, RN(di));
+	UE2P(ptregs, si,    exc, RN(si));
+	UE2P(ptregs, bp,    exc, RN(bp));
 	UE2P(ptregs, ip,    exc, ip);
 	UE2P(ptregs, flags, exc, flags);
 	UE2P(ptregs, sp,    exc, sp);
+#ifdef CONFIG_X86_32
 	ptregs->fs = exc->fs;
+#endif
 }
 #undef UE2P
 
 #define P2UE(e, er, p, pr) do { e->er = p->pr; } while (0)
 static inline void ptregs_to_utcb_exc(struct pt_regs *ptregs, l4_exc_regs_t *exc)
 {
-	P2UE(exc, eax,    ptregs, ax);
-	P2UE(exc, ebx,    ptregs, bx);
-	P2UE(exc, ecx,    ptregs, cx);
-	P2UE(exc, edx,    ptregs, dx);
-	P2UE(exc, edi,    ptregs, di);
-	P2UE(exc, esi,    ptregs, si);
-	P2UE(exc, ebp,    ptregs, bp);
-	P2UE(exc, ip,     ptregs, ip);
-	P2UE(exc, flags,  ptregs, flags);
-	P2UE(exc, sp,     ptregs, sp);
+	P2UE(exc, RN(ax),    ptregs, ax);
+	P2UE(exc, RN(bx),    ptregs, bx);
+	P2UE(exc, RN(cx),    ptregs, cx);
+	P2UE(exc, RN(dx),    ptregs, dx);
+	P2UE(exc, RN(di),    ptregs, di);
+	P2UE(exc, RN(si),    ptregs, si);
+	P2UE(exc, RN(bp),    ptregs, bp);
+	P2UE(exc, ip,        ptregs, ip);
+	P2UE(exc, flags,     ptregs, flags);
+	P2UE(exc, sp,        ptregs, sp);
+#ifdef CONFIG_X86_32
 	exc->fs = ptregs->fs;
+#endif
 }
 #undef P2UE
 

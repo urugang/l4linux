@@ -24,7 +24,7 @@ struct evdev {
 
 static struct evdev *first_evdev;
 
-static void l4_input_fill_info(struct evdev *d, l4re_event_stream_info_t *info)
+static void l4x_input_fill_info(struct evdev *d, l4re_event_stream_info_t *info)
 {
 	struct input_dev *dev = d->handle.dev;
 	info->stream_id = (l4_umword_t)dev;
@@ -42,7 +42,7 @@ static void l4_input_fill_info(struct evdev *d, l4re_event_stream_info_t *info)
 #undef COPY_BITS
 }
 
-static L4_CV int l4_input_num_streams(void)
+static L4_CV int l4x_input_num_streams(void)
 {
 	int i = 0;
 	struct evdev *d = first_evdev;
@@ -51,7 +51,7 @@ static L4_CV int l4_input_num_streams(void)
 	return i;
 }
 
-static L4_CV int l4_input_stream_info(int idx, l4re_event_stream_info_t *si)
+static L4_CV int l4x_input_stream_info(int idx, l4re_event_stream_info_t *si)
 {
 	int i = 0;
 	struct evdev *d = first_evdev;
@@ -61,12 +61,12 @@ static L4_CV int l4_input_stream_info(int idx, l4re_event_stream_info_t *si)
 	if (!d)
 		return -EINVAL;
 
-	l4_input_fill_info(d, si);
+	l4x_input_fill_info(d, si);
 
 	return 0;
 }
 
-static L4_CV int l4_input_stream_info_for_id(l4_umword_t id, l4re_event_stream_info_t *si)
+static L4_CV int l4x_input_stream_info_for_id(l4_umword_t id, l4re_event_stream_info_t *si)
 {
 	struct evdev *d = first_evdev;
 	for (; d && (l4_umword_t)(d->handle.dev) != id; d = d->next)
@@ -75,13 +75,13 @@ static L4_CV int l4_input_stream_info_for_id(l4_umword_t id, l4re_event_stream_i
 	if (!d)
 		return -EINVAL;
 
-	l4_input_fill_info(d, si);
+	l4x_input_fill_info(d, si);
 
 	return 0;
 }
 
-static L4_CV int l4_input_axis_info(l4_umword_t id, unsigned naxes,
-                                    unsigned *axis, l4re_event_absinfo_t *info)
+static L4_CV int l4x_input_axis_info(l4_umword_t id, unsigned naxes,
+                                     unsigned *axis, l4re_event_absinfo_t *info)
 {
 	struct evdev *d = first_evdev;
 	struct input_dev *dev;
@@ -115,11 +115,11 @@ static L4_CV int l4_input_axis_info(l4_umword_t id, unsigned naxes,
 	return 0;
 }
 
-static struct l4_input_srv_ops l4_input_ops = {
-	.num_streams        = &l4_input_num_streams,
-	.stream_info        = &l4_input_stream_info,
-	.stream_info_for_id = &l4_input_stream_info_for_id,
-	.axis_info          = &l4_input_axis_info,
+static struct l4x_input_srv_ops l4x_input_ops = {
+	.num_streams        = &l4x_input_num_streams,
+	.stream_info        = &l4x_input_stream_info,
+	.stream_info_for_id = &l4x_input_stream_info_for_id,
+	.axis_info          = &l4x_input_axis_info,
 };
 
 /*
@@ -128,7 +128,7 @@ static struct l4_input_srv_ops l4_input_ops = {
 static void evdev_event(struct input_handle *handle,
 			unsigned int type, unsigned int code, int value)
 {
-	struct l4_input_event e;
+	struct l4x_input_event e;
 	L4XV_V(flags);
 
 	e.time      = l4lx_kinfo->clock;
@@ -243,7 +243,7 @@ static int __init l4evsrv_init(void)
 	printk("L4Re::Event Service\n");
 
 	L4XV_L(flags);
-	l4x_srv_input_init(l4x_cpu_thread_get_cap(0), &l4_input_ops);
+	l4x_srv_input_init(l4x_cpu_thread_get_cap(0), &l4x_input_ops);
 	L4XV_U(flags);
 
 	return input_register_handler(&evdev_handler);

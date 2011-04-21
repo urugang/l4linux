@@ -1,6 +1,6 @@
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 #include "../../x86/kernel/asm-offsets.c"
 #endif
-#ifdef ARCH_arm
+#ifdef CONFIG_ARM
 #include "../../arm/kernel/asm-offsets.c"
 #endif

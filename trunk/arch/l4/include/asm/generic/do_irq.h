@@ -12,11 +12,6 @@
 #include <asm/l4x/exception.h>
 
 #ifndef CONFIG_L4_VCPU
-
-#ifdef ARCH_arm
-unsigned int do_IRQ(int irq, struct pt_regs *regs);
-#endif
-
 static inline void l4x_do_IRQ(int irq, struct thread_info *ctx)
 {
 	unsigned long flags, old_cpu_state;
@@ -29,7 +24,11 @@ static inline void l4x_do_IRQ(int irq, struct thread_info *ctx)
 	r = &per_cpu(l4x_current_ti, cpu)->task->thread.regs;
 	old_cpu_state = l4x_get_cpu_mode(r);
 	l4x_set_cpu_mode(r, l4x_in_kernel() ? L4X_MODE_KERNEL : L4X_MODE_USER);
+#ifdef CONFIG_X86
 	do_IRQ(irq, &per_cpu(l4x_current_ti, cpu)->task->thread.regs);
+#else
+	asm_do_IRQ(irq, &per_cpu(l4x_current_ti, cpu)->task->thread.regs);
+#endif
 	l4x_set_cpu_mode(r, old_cpu_state);
 	local_irq_restore(flags);
 
@@ -51,7 +50,7 @@ static inline void l4x_do_IPI(int vector, struct thread_info *ctx)
 	r = &per_cpu(l4x_current_ti, cpu)->task->thread.regs;
 	old_cpu_state = l4x_get_cpu_mode(r);
 	l4x_set_cpu_mode(r, l4x_in_kernel() ? L4X_MODE_KERNEL : L4X_MODE_USER);
-	do_l4x_smp_process_IPI(vector, &per_cpu(l4x_current_ti, cpu)->task->thread.regs);
+	l4x_smp_process_IPI(vector, &per_cpu(l4x_current_ti, cpu)->task->thread.regs);
 	l4x_set_cpu_mode(r, old_cpu_state);
 	local_irq_restore(flags);
 

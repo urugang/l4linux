@@ -2,8 +2,6 @@
 #define __ASM_L4__ARCH_I386__CACHEFLUSH_H__
 
 /* Avoid copying the whole file, we just redefine some macros */
-#define flush_cache_vmap flush_cache_vmap__orig
-#define flush_cache_vunmap flush_cache_vunmap__orig
 #include <asm-x86/cacheflush.h>
 #undef flush_cache_vmap
 #undef flush_cache_vunmap

@@ -69,6 +69,7 @@ extern unsigned long pci_mem_start;
 
 #define PCIBIOS_MIN_CARDBUS_IO	0x4000
 
+extern int pcibios_enabled;
 void pcibios_config_init(void);
 struct pci_bus *pcibios_scan_root(int bus);
 
@@ -135,7 +136,11 @@ void default_teardown_msi_irqs(struct pci_dev *dev);
 #endif  /* __KERNEL__ */
 
 #ifdef CONFIG_X86_64
+#ifdef CONFIG_L4
+#include <asm/pci_64.h>
+#else
 #include "pci_64.h"
+#endif
 #endif
 
 void dma32_reserve_bootmem(void);

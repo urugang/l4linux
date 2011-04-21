@@ -14,11 +14,11 @@
  * put it inside the section definition.
  */
 
-#ifdef CONFIG_X86_32
+/*#ifdef CONFIG_X86_32 */
 #define LOAD_OFFSET __PAGE_OFFSET
-#else
+/*#else
 #define LOAD_OFFSET __START_KERNEL_map
-#endif
+#endif*/
 
 #include <asm-generic/vmlinux.lds.h>
 #include <asm/asm-offsets.h>
@@ -69,7 +69,7 @@ jiffies_64 = jiffies;
 
 PHDRS {
 	text PT_LOAD FLAGS(5);          /* R_E */
-	data PT_LOAD FLAGS(7);          /* RWE */
+	data PT_LOAD FLAGS(6);          /* RW_ */
 #ifdef CONFIG_X86_64
 	user PT_LOAD FLAGS(5);          /* R_E */
 #ifdef CONFIG_SMP
@@ -93,7 +93,8 @@ SECTIONS
 	/* Text and read-only data */
 
 	startup_32 = .;
-	_stext = .;
+	startup_64 = .;
+	/*_stext = .;*/
 	.text :  AT(ADDR(.text) - LOAD_OFFSET) {
 		_text = .;
 		/* bootstrapping code */
@@ -119,6 +120,10 @@ SECTIONS
 
 	EXCEPTION_TABLE(16) :text = 0x9090
 
+#if defined(CONFIG_DEBUG_RODATA)
+	/* .text should occupy whole number of pages */
+	. = ALIGN(PAGE_SIZE);
+#endif
 	X64_ALIGN_DEBUG_RODATA_BEGIN
 	RO_DATA(PAGE_SIZE)
 	X64_ALIGN_DEBUG_RODATA_END
@@ -152,7 +157,11 @@ SECTIONS
 
 #ifdef CONFIG_X86_64
 
+#ifdef CONFIG_L4
+#define VSYSCALL_ADDR 0x800000
+#else
 #define VSYSCALL_ADDR (-10*1024*1024)
+#endif
 
 #define VLOAD_OFFSET (VSYSCALL_ADDR - __vsyscall_0 + LOAD_OFFSET)
 #define VLOAD(x) (ADDR(x) - VLOAD_OFFSET)
@@ -338,7 +347,7 @@ SECTIONS
 		__bss_start = .;
 		*(.bss..page_aligned)
 		*(.bss)
-		. = ALIGN(4);
+		. = ALIGN(PAGE_SIZE);
 		__bss_stop = .;
 	}
 

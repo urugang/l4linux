@@ -24,7 +24,6 @@ LINSRCARCH      := arm
 CHECKFLAGS	:= -D__arm__
 
 L4_MK_ARCH	:= arm
-L4_MK_ARCH_CAP	:= ARM
 OBJCOPYARCH	:= elf32-littlearm
 
 else
@@ -34,47 +33,45 @@ L4API		:= f
 BASEARCH	:= x86
 LINSRCARCH      := x86
 
+ifneq ($(CONFIG_X86_32),)
 L4_MK_ARCH	:= x86
-L4_MK_ARCH_CAP	:= X86
-
 OBJCOPYARCH	:= elf32-i386
+else
+L4_MK_ARCH	:= amd64
+OBJCOPYARCH	:= elf64-x86-64
 endif
 
-export BASEARCH L4_MK_ARCH L4_MK_API L4_MK_CPU OBJCOPYARCH
+endif
 
-KBUILD_DEFCONFIG := x86-native_defconfig
+ifeq ($(ARCH),x86)
+	KBUILD_DEFCONFIG := x86-native_defconfig
+else
+	KBUILD_DEFCONFIG := $(ARCH)_defconfig
+endif
+
+export BASEARCH L4_MK_ARCH L4_MK_API OBJCOPYARCH
 
 # crude hack
 TRASH := $(shell cd $(srctree)/arch/l4 \
                  && ln -fs Kconfig.$(LINSRCARCH) Kconfig.arch)
 
-HAS_BIARCH	:= $(call cc-option-yn, -m32)
-ifeq ($(HAS_BIARCH),y)
-AS		:= $(AS) --32
-LD		:= $(LD) -m elf_i386
-CC		:= $(CC) -m32
-endif
+#HAS_BIARCH	:= $(call cc-option-yn, -m32)
+#ifeq ($(HAS_BIARCH),y)
+#AS		:= $(AS) --32
+#LD		:= $(LD) -m elf_i386
+#CC		:= $(CC) -m32
+#endif
 
 BASEENV		:= l4env
 
-ifdef CONFIG_RELOCATABLE
-LDFLAGS_vmlinux_x86  := --emit-relocs
-endif
-LDFLAGS_vmlinux_arm  := --no-warn-mismatch
-ifeq ($(CONFIG_CPU_ENDIAN_BE8),y)
-LDFLAGS_vmlinux_arm += --be8
-endif
-LDFLAGS_vmlinux	:= $(LDFLAGS_vmlinux_$(BASEARCH))
-
-OBJCOPYFLAGS    := -O $(OBJCOPYARCH) -R .note -R .note.gnu.build-id -R .comment -S
+OBJCOPYFLAGS    := -O $(OBJCOPYARCH) -R .comment -S
 
 L4_MK_API	:= l4$(L4API)
-L4_MK_CPU	:= $(patsubst "%",%,$(CONFIG_L4_MK_CPU_$(L4_MK_ARCH_CAP)))
 
 # overwrite UTS_MACHINE to get proper architecture in user land
 UTS_MACHINE	:= $(BASEARCH)
 
-KBUILD_CFLAGS   += -gstabs+ -pipe -msoft-float -DARCH_$(L4_MK_ARCH)
+KBUILD_CFLAGS   += -pipe -msoft-float -DARCH_$(L4_MK_ARCH)
 
 ifeq ($(BASEARCH),x86)
 ifeq ($(CONFIG_X86_32),y)
@@ -174,6 +171,9 @@ KBUILD_CFLAGS += $(call cc-option,-mno-sse -mno-mmx -mno-sse2 -mno-3dnow,)
 endif
 
 ifeq ($(BASEARCH),arm)
+ifeq ($(CONFIG_CPU_ENDIAN_BE8),y)
+LDFLAGS_vmlinux += --be8
+endif
 # This selects which instruction set is used.
 # Note that GCC does not numerically define an architecture version
 # macro, but instead defines a whole series of macros which makes
@@ -398,25 +398,27 @@ include/generated/mach-types.h: $(srctree)/arch/arm/tools/gen-mach-types $(srctr
 	$(Q)$(AWK) -f $< arch/l4/include/asm/mach-types.list > $@ || { rm -f $@; /bin/false; }
 	$(Q)rm -f arch/l4/include/asm/mach-types.list
 
-symlinks_arm  = include/generated/mach-types.h \
-		arch/l4/include/asm/$(LINSRCARCH)-arch/mach
+symlink_files_arm  = include/generated/mach-types.h \
+		     arch/l4/include/asm/$(LINSRCARCH)-arch/mach
 
-symlinks      = arch/l4/include/asm/api \
-                arch/l4/include/asm/l4lxapi/impl \
-		arch/l4/include/asm/l4x \
-		arch/l4/include/asm/l4-arch/asm \
-		arch/l4/include/asm/orig-arch \
-                $(symlinks_$(BASEARCH))
+symlink_files      = arch/l4/include/asm/api \
+                     arch/l4/include/asm/l4lxapi/impl \
+		     arch/l4/include/asm/l4x \
+		     arch/l4/include/asm/l4-arch/asm \
+                     $(symlink_files_$(BASEARCH))
 
-MRPROPER_FILES	+= $(symlinks)
-CLEAN_FILES	+= Makeconf.l4conf
+symlink_dirs       = arch/l4/include/asm/orig-arch
+
+MRPROPER_FILES	  += $(symlink_files)
+MRPROPER_DIRS     += $(symlink_dirs)
+CLEAN_FILES	  += Makeconf.l4conf
 
 ifeq ($(config-targets),0)
 ifneq ($(wildcard .config),)
 $(objtree)/Makeconf.l4conf: $(srctree)/arch/l4/Makefile.l4conf $(srctree)/arch/l4/Makefile
 	$(Q)$(if $(L4DIR),PWD=$(L4DIR),) $(MAKE) $(if $(L4DIR),-C $(L4DIR),) -f $< O=$(L4OBJ) OUTPUT=$@
 
-archprepare: check_linux_config $(symlinks) $(objtree)/Makeconf.l4conf
+archprepare: check_linux_config $(symlink_files) $(symlink_dirs) $(objtree)/Makeconf.l4conf
 	$(Q)mkdir -p arch/$(BASEARCH)/lib
 
 endif # .config available
@@ -439,9 +441,12 @@ chkl4conf:
 # regparm: gcc may call memset from our libs, so obey calling convention
 #          this should probably be fixed
 
-DIS_OPTS := HIGHMEM4G HIGHMEM64G PCI_GOANY PCI_GOBIOS HPET_TIMER \
+DIS_OPTS-x86-32 := HPET_TIMER
+DIS_OPTS := HIGHMEM4G HIGHMEM64G PCI_GOANY PCI_GOBIOS \
             X86_MCE X86_MCE MTRR PARAVIRT KEXEC MCA SOFTWARE_SUSPEND APM \
-	    CPU_FREQ VM86 X86_DS X86_PTRACE_BTS HT_IRQ DMI
+	    CPU_FREQ VM86 X86_DS X86_PTRACE_BTS HT_IRQ DMI \
+	    TRANSPARENT_HUGEPAGE COMPACTION \
+	    $(DIS_OPTS-$(BASEARCH)-$(BITS))
 ENA_OPTS-x86 := X86_CMPXCHG64
 ENA_OPTS := $(ENA_OPTS-$(BASEARCH))
 

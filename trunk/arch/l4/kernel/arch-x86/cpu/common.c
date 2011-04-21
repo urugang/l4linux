@@ -657,7 +657,9 @@ static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 	c->extended_cpuid_level = 0;
 
 	/* L4Linux always has math */
+#ifdef CONFIG_X86_32
 	c->hard_math = 1;
+#endif
 
 	if (!have_cpuid_p())
 		identify_cpu_without_cpuid(c);
@@ -906,9 +908,6 @@ void __init identify_boot_cpu(void)
 	enable_sep_cpu();
 #else
 	vgetcpu_set_mode();
-#endif
-#ifdef NOT_FOR_L4
-	init_hw_perf_events();
 #endif
 }
 

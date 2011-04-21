@@ -56,8 +56,8 @@ static inline void l4x_svm_vmcb_dump(struct kvm_vcpu *vcpu)
 	vcpu_printf(vcpu, "br_from = %016llx br_to = %016llx\n", s.br_from, s.br_to);
 	vcpu_printf(vcpu, "last_ex_from = %016llx last_ex_to = %016llx\n", s.last_excp_from, s.last_excp_to);
 	vcpu_printf(vcpu, "**** control ***\n");
-	vcpu_printf(vcpu, "inter_cr_r = %04x inter_cr_w = %04x\n", c.intercept_cr_read, c.intercept_cr_write);
-	vcpu_printf(vcpu, "inter_dr_r = %04x inter_dr_w = %04x\n", c.intercept_dr_read, c.intercept_dr_write);
+	vcpu_printf(vcpu, "inter_cr = %08x\n", c.intercept_cr);
+	vcpu_printf(vcpu, "inter_dr = %08x\n", c.intercept_dr);
 	vcpu_printf(vcpu, "inter_ex = %08x\n", c.intercept_exceptions);
 	vcpu_printf(vcpu, "inter = %016llx\n", c.intercept);
 	vcpu_printf(vcpu, "iopm_base_pa = %016llx msrpm_base_pa = %016llx\n", c.iopm_base_pa, c.msrpm_base_pa);

@@ -396,6 +396,7 @@ static void __init reserve_initrd(void)
 #ifdef CONFIG_L4
 	l4x_load_initrd(boot_command_line);
 #else
+	/* Assume only end is not page aligned */
 	u64 ramdisk_image = boot_params.hdr.ramdisk_image;
 	u64 ramdisk_size  = boot_params.hdr.ramdisk_size;
 	u64 ramdisk_end   = PAGE_ALIGN(ramdisk_image + ramdisk_size);
@@ -725,7 +726,7 @@ static u64 __init get_max_mapped(void)
 void __init setup_arch(char **cmdline_p)
 {
 	int acpi = 0;
-	int k8 = 0;
+	int amd = 0;
 	unsigned long flags;
 
 #ifdef CONFIG_X86_32
@@ -1014,12 +1015,12 @@ void __init setup_arch(char **cmdline_p)
 	acpi = acpi_numa_init();
 #endif
 
-#ifdef CONFIG_K8_NUMA
+#ifdef CONFIG_AMD_NUMA
 	if (!acpi)
-		k8 = !k8_numa_init(0, max_pfn);
+		amd = !amd_numa_init(0, max_pfn);
 #endif
 
-	initmem_init(0, max_pfn, acpi, k8);
+	initmem_init(0, max_pfn, acpi, amd);
 	memblock_find_dma_reserve();
 	dma32_reserve_bootmem();
 
@@ -1067,11 +1068,10 @@ void __init setup_arch(char **cmdline_p)
 	init_cpu_to_node();
 #endif
 
-	//l4/init_apic_mappings();
-	//l4/ioapic_init_mappings();
-
-	/* need to wait for io_apic is mapped */
-	probe_nr_irqs_gsi();
+#ifndef CONFIG_L4
+	init_apic_mappings();
+	ioapic_and_gsi_init();
+#endif
 
 	kvm_guest_init();
 

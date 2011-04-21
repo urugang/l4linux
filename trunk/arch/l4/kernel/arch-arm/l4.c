@@ -151,13 +151,6 @@ static struct irqaction timer_irq = {
 	.handler	= l4_timer_interrupt_handler,
 };
 
-unsigned int do_IRQ(int irq, struct pt_regs *regs)
-{
-	extern asmlinkage void asm_do_IRQ(unsigned int irq, struct pt_regs *regs);
-	asm_do_IRQ(irq, regs);
-	return 0;
-}
-
 static cycle_t kip_read(struct clocksource *cs)
 {
 	return l4lx_kinfo->clock;

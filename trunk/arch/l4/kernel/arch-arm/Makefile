@@ -9,13 +9,16 @@ obj-y		:= process.o sys_arm.o time.o traps.o stacktrace.o \
 
 obj-$(CONFIG_DEPRECATED_PARAM_STRUCT) += compat.o
 
-obj-$(CONFIG_SMP)				+= smp.o platsmp.o
+obj-$(CONFIG_SMP)				+= smp.o smp_tlb.o platsmp.o
+obj-$(CONFIG_HAVE_SCHED_CLOCK)			+= sched_clock.o
 obj-$(CONFIG_MODULES)				+= armksyms.o module.o
 obj-$(CONFIG_ISA_DMA_API)			+= dma.o
 obj-$(CONFIG_HOTPLUG_CPU)			+= hotplug.o
 obj-$(CONFIG_ARM_UNWIND)			+= unwind.o
 obj-$(CONFIG_OABI_COMPAT)                       += sys_oabi-compat.o
 obj-$(CONFIG_CRASH_DUMP)			+= crash_dump.o
+obj-$(CONFIG_SWP_EMULATE)			+= swp_emulate.o
+CFLAGS_swp_emulate.o				:= -Wa,-march=armv7-a
 
 dma-y		:= ../../../arm/kernel/dma.o
 irq-y		:= ../../../arm/kernel/irq.o
@@ -29,6 +32,8 @@ return_address-y := ../../../arm/kernel/return_address.o
 sys_oabi-compat-y := ../../../arm/kernel/sys_oabi-compat.o
 compat-y        := ../../../arm/kernel/compat.o
 crash_dump-y    := ../../../arm/kernel/crash_dump.o
+smp_tlb-y       := ../../../arm/kernel/smp_tlb.o
+sched_clock-y   := ../../../arm/kernel/sched_clock.o
 
 KBUILD_CPPFLAGS	+= -I$(srctree)/arch/arm/kernel
 

@@ -314,7 +314,7 @@ static int set_segment_reg(struct task_struct *task,
 			break;
 		task->thread.gsindex = value;
 		if (task == current)
-			load_gs_index(task->thread.gsindex);
+			{}//tmp-l4/load_gs_index(task->thread.gsindex);
 		break;
 	case offsetof(struct user_regs_struct,ds):
 		task->thread.ds = value;

@@ -57,6 +57,7 @@ nexgen-y	       := $(b)/nexgen.o
 umc-y		       := $(b)/umc.o
 proc-y		       := $(b)/proc.o
 bugs-y		       := $(b)/bugs.o
+bugs_64-y	       := $(b)/bugs_64.o
 perfctr-watchdog-y     := $(b)/perfctr-watchdog.o
 feature_names-y        := $(b)/feature_names.o
 powerflags-y           := $(b)/powerflags.o

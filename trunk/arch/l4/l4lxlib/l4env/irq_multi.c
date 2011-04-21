@@ -162,7 +162,7 @@ wait_for_irq_message(unsigned cpu, unsigned int irq_to_ack)
 			return 0; // timer-irq
 		} else if (unlikely(err)) {
 			LOG_printf("%s: IPC error (0x%x)\n", __func__, err);
-		} else if (likely(l4_msgtag_is_irq(tag))) {
+		} else if (likely(label)) {
 			int irq = label >> 2;
 			if (likely(irq_state[irq]))
 				return irq;

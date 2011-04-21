@@ -25,14 +25,13 @@ objects-y := ldr.o res.o image.o
 
 include $(L4OBJ)/l4defs.mk.inc
 
-KBUILD_CFLAGS_i386 = -m32
-KBUILD_CFLAGS	:= $(KBUILD_CFLAGS_$(BASEARCH)) \
+KBUILD_CFLAGS	:= $(filter-out -mregparm=3,$(KBUILD_CFLAGS)) \
                    $(L4INC) -I$(L4OBJ)/include/uclibc \
 		   -Wall -fno-strict-aliasing -O2 -pipe \
 		   -DARCH_$(L4_MK_ARCH) -g \
 		   -I$(obj) -DL4SYS_USE_UTCB_WRAP=1
 
-KBUILD_AFLAGS   := -DVMLINUX_IMAGE=\"$(obj)/Image\"
+KBUILD_AFLAGS   += -DVMLINUX_IMAGE=\"$(obj)/Image\"
 
 $(obj)/res.o: $(obj)/func_list.h
 
@@ -53,18 +52,22 @@ $(info  L4_REQUIRED_MODS: $(L4_REQUIRED_MODS))
 $(error Aborting.)
 endif
 
-L4LIBS := $(shell $(CC) -print-file-name=libgcc_eh.a) $(L4_EXT_LIBS)
+L4LIBS := $(shell $(CC) $(KBUILD_CFLAGS) \
+          -print-file-name=libgcc_eh.a) $(L4_EXT_LIBS)
 
 servers-y := $(if $(CONFIG_L4_SERVER),arch/l4/server/lib.a)
 
+LINKADDR-32 = 0xa8000000
+LINKADDR-64 = 0x68000000
+
 ldrImage: $(OBJS)
 	@echo "  LD      $@"
-	$(Q)$(LD) -Bstatic -o $@ \
+	$(Q)$(LD) $(LDFLAGS) -Bstatic -o $@ \
 	  $(L4_LIBDIRS) \
 	  $(L4_CRT0_STATIC) $(OBJS) $(servers-y) \
 	  --start-group $(L4LIBS) $(L4_GCCLIB) --end-group \
 	  $(L4_CRTN_STATIC) \
-	  -Ttext=0xa8000000 \
+	  -Ttext=$(LINKADDR-$(BITS)) \
 	  --defsym __L4_STACK_ADDR__=$(L4_BID_STACK_ADDR) \
 	  --defsym __L4_KIP_ADDR__=$(L4_BID_KIP_ADDR) \
           --defsym __l4sys_invoke_direct=$(L4_BID_KIP_ADDR)+$(L4_BID_KIP_OFFS_SYS_INVOKE) \

@@ -129,6 +129,43 @@ long __get_user_4(unsigned int *val, const void __user *address)
 }
 EXPORT_SYMBOL(__get_user_4);
 
+long __get_user_8(unsigned long long *val, const void __user *address)
+{
+	unsigned long page, offset;
+
+#ifdef DEBUG_GET_USER
+	printk("%d (%s): get_user_8 %p, tid=" PRINTF_L4TASK_FORM
+	       " frm: %p\n",
+	       current->pid, current->comm, address,
+	       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
+	       __builtin_return_address(0));
+#endif
+
+	if (segment_eq(get_fs(), KERNEL_DS)) {
+		*val = *(unsigned long*)address;
+		return 0;
+	}
+
+	if (((unsigned long)address & ~PAGE_MASK)
+			<= (PAGE_SIZE - sizeof(*val))) {
+		page = parse_ptabs_read((unsigned long)address, &offset);
+		if (page != -EFAULT) {
+			*val = *(unsigned long *)(page + offset);
+			return 0;
+		}
+	} else {
+		unsigned first, second;
+		if ((__get_user_4(&first,  address)     != -EFAULT) &&
+		    (__get_user_4(&second, address + 4) != -EFAULT)) {
+			*val = first | ((unsigned long long)second << 32);
+			return 0;
+		}
+	}
+	log_efault(__func__, address);
+	return -EFAULT;
+}
+EXPORT_SYMBOL(__get_user_8);
+
 long __put_user_1(unsigned char val, const void __user *address)
 {
 	unsigned long page, offset;

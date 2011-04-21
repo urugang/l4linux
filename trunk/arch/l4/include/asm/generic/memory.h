@@ -80,7 +80,7 @@ static inline pte_t *lookup_pte(pgd_t *page_dir, unsigned long address)
 
 static inline int l4x_pte_read(pte_t pte)
 {
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 	return pte_val(pte) & _PAGE_USER;
 #else
 	return pte_val(pte) & L_PTE_USER;

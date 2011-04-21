@@ -51,6 +51,12 @@ void do_resolve_error(const char *funcname)
 	enter_kdebug("Symbol not found!");
 }
 
+#ifdef ARCH_amd64
+#define FMT "%016llx"
+#else
+#define FMT "%08x"
+#endif
+
 int main(int argc, char **argv)
 {
 	ElfW(Ehdr) *ehdr = (void *)image_vmlinux_start;
@@ -73,8 +79,8 @@ int main(int argc, char **argv)
 
 		ElfW(Phdr) *ph = (ElfW(Phdr)*)((l4_addr_t)l4util_elf_phdr(ehdr)
 		                               + i * ehdr->e_phentsize);
-		printf("PH %2d (t: %8d) offs=%08x vaddr=%08x vend=%08x\n"
-		       "                    f_sz=%08x memsz=%08x flgs=%c%c%c\n",
+		printf("PH %2d (t: %8d) offs="FMT" vaddr="FMT" vend="FMT"\n"
+		       "                    f_sz="FMT" memsz="FMT" flgs=%c%c%c\n",
 		       i, ph->p_type, ph->p_offset, ph->p_vaddr,
 		       ph->p_vaddr + ph->p_memsz,
 		       ph->p_filesz, ph->p_memsz,
@@ -107,7 +113,10 @@ int main(int argc, char **argv)
 			if (l4re_rm_attach((void **)&map_addr,
 			                    ph->p_memsz, L4RE_RM_EAGER_MAP,
 			                    ds, 0, 0)) {
-				printf("lxldr: failed attaching memory\n");
+				printf("lxldr: failed attaching memory:"
+				       " "FMT" - "FMT"\n",
+				       ph->p_vaddr,
+				       ph->p_vaddr + ph->p_memsz - 1);
 				return 1;
 			}
 #if 0
@@ -165,7 +174,8 @@ int main(int argc, char **argv)
 	}
 
 	entry = (void *)ehdr->e_entry;
-	printf("Starting binary at %p, argc=%d argv0=%s\n", entry, argc, *argv);
+	printf("Starting binary at %p, argc=%d argv=%p *argv=%p argv0=%s\n",
+	       entry, argc, argv, *argv, *argv);
 	//printf("%x %x %x %x %x\n", *((char *)entry + 0), *((char *)entry + 1), *((char *)entry + 2), *((char *)entry + 3), *((char *)entry + 4));
 	exchg.external_resolver = __l4_external_resolver;
 	exchg.l4re_global_env  = l4re_global_env;
@@ -187,7 +197,7 @@ int main(int argc, char **argv)
 			       "r" (_entry)
 			     : "memory");
 	}
-#else
+#elif defined(ARCH_x86)
 	asm volatile("push %[argv]\n"
 	             "push %[argc]\n"
 	             "mov  %[exchg], %%esi\n"
@@ -199,7 +209,16 @@ int main(int argc, char **argv)
 		       [argc] "r" (argc),
 		       [exchg] "r" (&exchg),
 		       [entry] "r" (entry)
-		     : "memory");
+		     : "memory", "esi");
+#else
+	asm volatile("movq  %[exchg], %%rcx\n"
+	             "call  *%[entry]\n"
+		     : "=a" (i)
+		     : [argv] "S" (argv),
+		       [argc] "D" ((unsigned long)argc),
+		       [exchg] "r" (&exchg),
+		       [entry] "r" (entry)
+		     : "memory", "rcx");
 #endif
 
 	return i;
