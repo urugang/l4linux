@@ -252,11 +252,14 @@ static inline void native_load_tls(struct thread_struct *t, unsigned int cpu)
 {
 	unsigned int i;
 	struct desc_struct *gdt = get_cpu_gdt_table(cpu);
+#ifdef CONFIG_X86_32
 	L4XV_V(f);
+#endif
 
 	for (i = 0; i < GDT_ENTRY_TLS_ENTRIES; i++)
 		gdt[GDT_ENTRY_TLS_MIN + i] = t->tls_array[i];
 
+#ifdef CONFIG_X86_32
 #ifdef CONFIG_L4_VCPU
 	L4XV_L(f);
 	fiasco_gdt_set(L4_INVALID_CAP, t->tls_array,
@@ -265,6 +268,7 @@ static inline void native_load_tls(struct thread_struct *t, unsigned int cpu)
 #else
 	fiasco_gdt_set(t->user_thread_id, t->tls_array,
 	               3 * LDT_ENTRY_SIZE, 0, l4_utcb());
+#endif
 #endif
 }
 

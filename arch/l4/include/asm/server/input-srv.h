@@ -4,7 +4,7 @@
 #include <asm/server/server.h>
 #include <l4/re/event.h>
 
-struct l4_input_event
+struct l4x_input_event
 {
   unsigned long long time;       // struct timeval
   unsigned short     type;       // u16
@@ -13,7 +13,7 @@ struct l4_input_event
   unsigned long      stream_id;
 };
 
-struct l4_input_srv_ops
+struct l4x_input_srv_ops
 {
 	L4_CV int (*num_streams)(void);
 	L4_CV int (*stream_info)(int, l4re_event_stream_info_t *);
@@ -23,10 +23,10 @@ struct l4_input_srv_ops
 };
 
 C_FUNC void
-l4x_srv_input_init(l4_cap_idx_t thread, struct l4_input_srv_ops *ops);
+l4x_srv_input_init(l4_cap_idx_t thread, struct l4x_input_srv_ops *ops);
 
 C_FUNC void
-l4x_srv_input_add_event(struct l4_input_event *e);
+l4x_srv_input_add_event(struct l4x_input_event *e);
 
 C_FUNC void
 l4x_srv_input_trigger(void);

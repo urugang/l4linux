@@ -33,7 +33,7 @@ union thread_union init_thread_union __init_task_data =
 struct task_struct init_task = INIT_TASK(init_task);
 EXPORT_SYMBOL(init_task);
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 /*
  * per-CPU TSS segments. Threads are completely 'soft' on Linux,
  * no more per-task TSS's. The TSS size is kept cacheline-aligned

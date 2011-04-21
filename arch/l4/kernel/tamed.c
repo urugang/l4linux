@@ -315,7 +315,7 @@ EXPORT_SYMBOL(l4x_global_cli);
 static void do_vcpu_irq(l4_vcpu_state_t *v)
 {
 	struct pt_regs regs;
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 	regs.cs = get_kernel_rpl(); // in-kernel
 	regs.flags = 0;
 #elif defined(ARCH_arm)

@@ -6,7 +6,7 @@
 #include <asm/l4x/signal.h>
 #include <l4/sys/kdebug.h>
 
-#if defined(ARCH_x86)
+#if defined(CONFIG_X86)
 int l4x_deliver_signal(int exception_nr, int errcode)
 {
 	siginfo_t info;
@@ -68,7 +68,7 @@ void l4x_sig_current_kill(void)
 	 * invoke do_signal which will dequeue the signal from the queue
 	 * and feed us further to do_exit
 	 */
-#if defined(ARCH_x86)
+#if defined(CONFIG_X86)
 	do_signal(L4X_THREAD_REGSP(&current->thread));
 #elif defined(ARCH_arm)
 	do_signal(L4X_THREAD_REGSP(&current->thread), 0);

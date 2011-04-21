@@ -66,7 +66,7 @@ enum {
 };
 
 
-#if 0
+#if 1
 #define TBUF_LOG_IDLE(x)        TBUF_DO_IT(x)
 #define TBUF_LOG_WAKEUP_IDLE(x)	TBUF_DO_IT(x)
 #define TBUF_LOG_USER_PF(x)     TBUF_DO_IT(x)
@@ -670,7 +670,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
 		if (0 && unlikely(l4x_is_upage_user_addr(regs->ARM_pc))) {
 			printk("Got SWI at %08lx\n", regs->ARM_pc);
-			l4x_print_vm_area_maps(p);
+			l4x_print_vm_area_maps(p, regs->ARM_pc);
 			l4x_print_regs(&p->thread, regs);
 			goto go_away;
 		}
@@ -739,7 +739,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
 		if (unlikely(!is_lx_syscall(scno))) {
 			printk("Hmm, rather unknown syscall nr 0x%lx/%ld\n", scno, scno);
-			l4x_print_vm_area_maps(p);
+			l4x_print_vm_area_maps(p, ~0UL);
 			l4x_print_regs(&p->thread, regs);
 			goto go_away;
 		}
@@ -880,7 +880,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		printk(" %s/%d: Undefined instruction at"
 		       " %08lx with content %08lx, err %08lx\n",
 		       p->comm, p->pid, regs->ARM_pc, val, t->error_code);
-		l4x_print_vm_area_maps(p);
+		l4x_print_vm_area_maps(p, regs->ARM_pc);
 		l4x_print_regs(&p->thread, regs);
 		enter_kdebug("undef insn");
 	}
@@ -1067,7 +1067,7 @@ trap_and_emulate:
 			printk("CMPXCHG hit at lr=%lx pc=%lx\n", regs->ARM_lr, regs->ARM_pc);
 			fiasco_tbuf_log_3val("cmpxchg", regs->ARM_lr, regs->ARM_pc, 0);
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
-			l4x_print_vm_area_maps(current);
+			l4x_print_vm_area_maps(current, regs->ARM_pc);
 #endif
 		}
 

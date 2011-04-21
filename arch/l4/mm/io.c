@@ -284,6 +284,15 @@ __l4x_ioremap(unsigned long phys_addr, size_t size, unsigned long flags)
 	}
 
 	L4XV_L(f);
+
+	if (!l4io_has_resource(L4IO_RESOURCE_MEM, phys_addr,
+	                       phys_addr + size - 1)) {
+		printk("ERROR: IO-memory (%lx+%zx) not available\n",
+		       phys_addr, size);
+		L4XV_U(f);
+		return NULL;
+	}
+
 	if ((i = l4io_search_iomem_region(phys_addr, size, &reg_start, &reg_len))) {
 		printk("ioremap: No region found for %lx: %d\n", phys_addr, i);
 		L4XV_U(f);
@@ -308,7 +317,7 @@ __l4x_ioremap(unsigned long phys_addr, size_t size, unsigned long flags)
 
 	offset += phys_addr - reg_start;
 
-	printk("%s: Mapping physaddr %08lx [0x%x Bytes, %08lx+%06lx] "
+	printk("%s: Mapping physaddr %08lx [0x%zx Bytes, %08lx+%06lx] "
 	       "to %08lx+%06lx\n",
 	       __func__, phys_addr, size, reg_start, reg_len,
 	       (unsigned long)addr, offset);

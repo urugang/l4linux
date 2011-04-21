@@ -1,9 +1,9 @@
 /*
  * The location of this file is hard coded in the top-level Makefiles
  */
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 #include "arch-x86/vmlinux.lds.S"
 #endif
-#ifdef ARCH_arm
+#ifdef CONFIG_ARM
 #include "arch-arm/vmlinux.lds.S"
 #endif

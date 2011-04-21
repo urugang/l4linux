@@ -27,6 +27,8 @@
 
 #include "physaddr.h"
 
+#include <l4/log/log.h>
+
 /*
  * Fix up the linear direct mapping of the kernel to avoid cache attribute
  * conflicts.
@@ -514,7 +516,8 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
             && (unsigned long)phys_addr + size <= 0x100000)
 		return (void __iomem *)phys_addr;
 
-	printk("%s(%x, %ld, -)\n", __func__, phys_addr, size);
+	LOG_printf("%s(%llx, %ld, -)\n", __func__,
+	           (unsigned long long)phys_addr, size);
 	/* L4 specific thing end */
 	enter_kdebug("__early_ioremap");
 

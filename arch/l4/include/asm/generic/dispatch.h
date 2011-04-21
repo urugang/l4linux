@@ -31,7 +31,7 @@ asmlinkage int l4_kernelinternal_execve(const char * file,
                                         const char * const * envp);
 
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
-void l4x_print_vm_area_maps(struct task_struct *p);
+void l4x_print_vm_area_maps(struct task_struct *p, unsigned long highlight);
 extern u32 l4x_dbg_stop_on_segv_pf;
 #endif
 

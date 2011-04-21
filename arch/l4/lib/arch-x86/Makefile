@@ -23,7 +23,7 @@ KBUILD_CFLAGS += -Iarch/x86/lib
 lib-y := $(b)/delay.o
 
 lib-y += ../memcpy_user.o ../uaccess.o ../pte.o
-lib-y += memcpy.o
+lib-y += $(b)/memcpy_$(BITS).o
 lib-$(CONFIG_INSTRUCTION_DECODER) += $(b)/insn.o $(b)/inat.o
 
 obj-y += msr.o msr-reg.o msr-reg-export.o
@@ -41,11 +41,11 @@ endif
         lib-$(CONFIG_X86_USE_3DNOW) += $(b)/mmx_32.o
 else
         obj-y += iomap_copy_64.o
-        lib-y += csum-partial_64.o csum-copy_64.o csum-wrappers_64.o
-        lib-y += thunk_64.o clear_page_64.o copy_page_64.o
-        lib-y += memmove_64.o memset_64.o
-        lib-y += copy_user_64.o rwlock_64.o copy_user_nocache_64.o
-	lib-$(CONFIG_RWSEM_XCHGADD_ALGORITHM) += rwsem_64.o
+        lib-y += $(b)/csum-partial_64.o $(b)/csum-copy_64.o $(b)/csum-wrappers_64.o
+        lib-y += $(b)/thunk_64.o $(b)/clear_page_64.o $(b)/copy_page_64.o
+        lib-y += $(b)/memmove_64.o $(b)/memset_64.o
+        #lib-y += copy_user_64.o rwlock_64.o copy_user_nocache_64.o
+	lib-$(CONFIG_RWSEM_XCHGADD_ALGORITHM) += $(b)/rwsem_64.o
 endif
 
 obj-y                  += proc.o
@@ -58,6 +58,7 @@ msr-reg-export-y       := $(b)/msr-reg-export.o
 proc-y                 := ../proc.o
 atomic64_32-y          := $(b)/atomic64_32.o
 cache-smp-y            := $(b)/cache-smp.o
+iomap_copy_64-y        := $(b)/iomap_copy_64.o
 
 create_dir:
 	$(Q)mkdir -p $(obj)/../../../x86/lib

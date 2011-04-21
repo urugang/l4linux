@@ -16,7 +16,7 @@ asm(
 	"	add sp, sp, #4 \n"
 	"	ldmia sp!, {pc} \n"
    );
-#else
+#elif defined(ARCH_x86)
 asm(
 	".global __l4_external_resolver\n"
 	"__l4_external_resolver: \n"
@@ -28,6 +28,47 @@ asm(
 	"	mov %eax, 0x20(%esp) \n"
 	"	popa\n"
 	"	ret $4\n"
+   );
+#else
+asm(
+	".global __l4_external_resolver\n"
+	"__l4_external_resolver: \n"
+	"	push    %rcx\n"
+	"	push    %rdx\n"
+	"	push    %rbx\n"
+	"	push    %rax\n"
+	"	push    %rbp\n"
+	"	push    %rsi\n"
+	"	push    %rdi\n"
+	"	push    %r8\n"
+	"	push    %r9\n"
+	"	push    %r10\n"
+	"	push    %r11\n"
+	"	push    %r12\n"
+	"	push    %r13\n"
+	"	push    %r14\n"
+	"	push    %r15\n"
+	"	mov     128(%rsp), %rdi\n" // rdi (1st) is the jmptblentry
+	"	mov     120(%rsp), %rsi\n" // rsi       is the symtab_ptr
+	"	mov     (%rsi), %rsi\n"    // rsi (2nd) is the funcname pointer
+	"	call    __C__l4_external_resolver \n"
+	"	mov	%rax, 120(%rsp)\n"
+	"	pop     %r15\n"
+	"	pop     %r14\n"
+	"	pop     %r13\n"
+	"	pop     %r12\n"
+	"	pop     %r11\n"
+	"	pop     %r10\n"
+	"	pop     %r9\n"
+	"	pop     %r8\n"
+	"	pop     %rdi\n"
+	"	pop     %rsi\n"
+	"	pop     %rbp\n"
+	"	pop     %rax\n"
+	"	pop     %rbx\n"
+	"	pop     %rdx\n"
+	"	pop     %rcx\n"
+	"	ret     $8\n"
    );
 #endif
 

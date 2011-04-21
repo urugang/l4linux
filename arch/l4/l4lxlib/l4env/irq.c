@@ -118,15 +118,17 @@ int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 	return 0;
 }
 
-static inline void attach_to_irq(struct irq_desc *desc)
+static inline int attach_to_irq(struct irq_desc *desc)
 {
 	long ret;
 	struct l4x_irq_desc_private *p = desc->chip_data;
 
 	if ((ret  = l4_error(l4_irq_attach(p->irq_cap, desc->irq << 2,
 	                                   l4x_stack_id_get()))))
-		dd_printk("%s: can't register to irq %u: return=%d\n",
+		dd_printk("%s: can't attach to irq %u: %ld\n",
 		          __func__, desc->irq, ret);
+
+	return !ret;
 }
 
 enum irq_cmds {
@@ -138,11 +140,10 @@ enum irq_cmds {
 static void attach_to_interrupt(unsigned irq)
 {
 	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
-	attach_to_irq(irq_to_desc(irq));
+	if (!p->enabled)
+		p->enabled = attach_to_irq(irq_to_desc(irq));
 
 	dd_printk("attaching to irq %d\n", irq);
-
-	p->enabled = 1;
 }
 
 static void detach_from_interrupt(struct irq_desc *desc, int irq)
@@ -183,7 +184,7 @@ static inline void wait_for_irq_message(unsigned irq)
 			           "receive failed, error = 0x%d\n",
 			           __func__, irq, PRINTF_L4TASK_ARG(p->irq_cap), err);
 			enter_kdebug("receive from intr failed");
-		} else if (likely(l4_msgtag_is_irq(tag))) {
+		} else if (likely(src_id)) {
 			/* Interrupt coming! */
 			if (likely(p->enabled))
 				break;
@@ -193,15 +194,16 @@ static inline void wait_for_irq_message(unsigned irq)
 
 			/* Non-IRQ message, handle */
 
-			dd_printk("irq-messsage: %d: cmd=%d\n", irq, cmd);
+			dd_printk("irq-messsage: %d: cmd=%ld\n", irq, cmd);
 
-			if (cmd == CMD_IRQ_ENABLE && !p->enabled)
-				attach_to_interrupt(irq);
-			else if (cmd == CMD_IRQ_DISABLE
-			         && p->enabled
-			         && irq_disable_cmd_state[irq])
-				detach_from_interrupt(desc, irq);
-			else if (cmd == CMD_IRQ_UPDATE) {
+			if (cmd == CMD_IRQ_ENABLE) {
+				if (!p->enabled)
+					attach_to_interrupt(irq);
+			} else if (cmd == CMD_IRQ_DISABLE) {
+				if (p->enabled
+				    && irq_disable_cmd_state[irq])
+					detach_from_interrupt(desc, irq);
+			} else if (cmd == CMD_IRQ_UPDATE) {
 				l4x_prepare_irq_thread(current_thread_info(),
 				                       get_irq_cpu(irq));
 			} else
@@ -220,10 +222,11 @@ static L4_CV void irq_thread(void *data)
 {
 	unsigned irq = *(unsigned *)data;
 	struct thread_info *ctx = current_thread_info();
+	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
 	unsigned state;
 
 	l4x_prepare_irq_thread(current_thread_info(), get_irq_cpu(irq));
-	attach_to_irq(irq_to_desc(irq));
+	p->enabled = attach_to_irq(irq_to_desc(irq));
 
 	dd_printk("%s: Started IRQ thread for IRQ %d\n", __func__, irq);
 	LOG_printf("%s: Started IRQ thread for IRQ %d\n", __func__, irq);

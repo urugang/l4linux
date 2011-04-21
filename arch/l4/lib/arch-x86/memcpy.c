@@ -1,6 +1,8 @@
 #include <linux/string.h>
 #include <linux/module.h>
 
+#error not used anymore
+
 #undef memcpy
 #undef memset
 

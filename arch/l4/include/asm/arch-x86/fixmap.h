@@ -5,6 +5,7 @@
 
 #include <asm/generic/upage.h>
 
+#ifdef CONFIG_X86_32
 extern unsigned long l4x_fixmap_space_start;
 
 /*
@@ -24,5 +25,6 @@ static inline unsigned long __l4x__fix_to_virt(const unsigned int x)
 
 #undef __fix_to_virt
 #define __fix_to_virt(x) __l4x__fix_to_virt(x)
+#endif
 
 #endif /* ! __ASM_L4__ARCH_I386__FIXMAP_H__ */

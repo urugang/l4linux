@@ -195,10 +195,10 @@
  * DMA support - see dma-mapping.h.
  */
 #include <asm/api/api.h>
-static inline unsigned long virt_to_phys(void *x)
+static inline unsigned long virt_to_phys(const volatile void *x)
 {
 #ifdef CONFIG_L4
-	return l4x_virt_to_phys(x);
+	return l4x_virt_to_phys((void *)x);
 #else
 	return __virt_to_phys((unsigned long)(x));
 #endif

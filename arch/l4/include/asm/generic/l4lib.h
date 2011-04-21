@@ -28,17 +28,22 @@
 	   )
 
 #else
+#ifdef CONFIG_X86_32
+#define PSTOR ".long"
+#else
+#define PSTOR ".quad"
+#endif
 #define L4_EXTERNAL_FUNC(func) \
 	asm(".section \".data.l4externals.str\"                         \n" \
 	    "9: .string \"" __stringify(func) "\"                       \n" \
 	    ".previous                                                  \n" \
 	    \
 	    ".section \".data.l4externals.symtab\"                      \n" \
-	    "7: .long 9b                                                \n" \
+	    "7: "PSTOR" 9b                                              \n" \
 	    ".previous                                                  \n" \
 	    \
 	    ".section \".data.l4externals.jmptbl\"                      \n" \
-	    "8: .long " __stringify(func##_resolver) "                  \n" \
+	    "8: "PSTOR" " __stringify(func##_resolver) "                \n" \
 	    ".previous                                                  \n" \
 	    \
 	    ".section \"" __stringify(.text.l4externals.fu##nc) "\"     \n" \

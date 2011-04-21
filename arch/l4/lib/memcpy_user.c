@@ -227,7 +227,7 @@ EXPORT_SYMBOL(__clear_user);
  * Copy a null terminated string from userspace.
  */
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86_32
 #define __do_strncpy_from_user_page(dst,src,count)			   \
 do {									   \
 	int __d0, __d1, __d2;						   \
@@ -246,8 +246,7 @@ do {									   \
 		: "0"(count), "2"(src), "3"(dst)			   \
 		: "memory");						   \
 } while (0)
-#endif
-#ifdef ARCH_arm
+#else
 #define __do_strncpy_from_user_page(dst, src, count)                    \
 	do {								\
 		char *_src = src;					\

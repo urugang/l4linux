@@ -119,7 +119,7 @@ static inline unsigned long l4x_handle_dev_mem(unsigned long phy)
 {
 	unsigned long devmem;
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 	if (phy > 0x80000000U) {
 		if (!(devmem = find_ioremap_entry(phy))
 		    && !(devmem = (unsigned long)ioremap(phy & L4_PAGEMASK,
@@ -153,7 +153,7 @@ static inline void verbose_segfault(struct task_struct *p,
 		           smp_processor_id(), p->comm, p->pid,
 		           l4_debugger_global_id(p->mm->context.task),
 		           pfa, ip, pferror);
-		l4x_print_vm_area_maps(p);
+		l4x_print_vm_area_maps(p, ip);
 		l4x_print_regs(&p->thread, regs);
 		enter_kdebug("segfault");
 		l4x_dbg_stop_on_segv_pf--;
@@ -203,7 +203,7 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 				pte_t *ptep = lookup_pte(p->mm->pgd, pfa);
 				printk("%s: phy=%lx pfa=%lx pferror=%lx pte_val=%lx "
 				       "present="
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 				       "%d"
 #else
 				       "%ld"
@@ -252,7 +252,7 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 	} else {
 		printk("WARN: Page-fault above task size: pfa=%lx pc=%lx\n", pfa, ip);
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
-		l4x_print_vm_area_maps(p);
+		l4x_print_vm_area_maps(p, ip);
 #endif
 		l4x_print_regs(&p->thread, regs);
 		return 1; /* Failed */
@@ -492,7 +492,7 @@ void l4x_shutdown_cpu(unsigned cpu)
 	l4x_destroy_ugate(cpu);
 
 	// IPI IRQ
-	l4x_cpu_ipi_thread_stop(cpu);
+	l4x_cpu_ipi_stop(cpu);
 
 	// suicide
 	l4x_global_cli();
@@ -530,9 +530,9 @@ void l4x_shutdown_cpu(unsigned cpu)
 	l4lx_thread_shutdown(idler_thread[cpu], 0);
 
 	// kill ipi thread
-	l4x_cpu_ipi_thread_stop(cpu);
+	l4x_cpu_ipi_stop(cpu);
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86_32
 	// the next one will be switching stacks, so make utcb-getter work
 	// there too
 	asm volatile ("mov %0, %%gs" : : "r" (0x43));
@@ -546,7 +546,7 @@ static int l4x_handle_async_event(l4_umword_t label,
                                   l4_utcb_t *u,
                                   l4_msgtag_t tag)
 {
-	struct l4x_srv_object *o = (struct l4x_srv_object *)label;
+	struct l4x_srv_object *o = (struct l4x_srv_object *)(label & ~3UL);
 	return o->dispatch(o, label, u, &tag);
 }
 
@@ -1051,7 +1051,7 @@ only_receive_IPC:
 static void l4x_handle_external_event(l4_vcpu_state_t *v,
                                       struct pt_regs *regs)
 {
-	struct l4x_srv_object *o = (struct l4x_srv_object *)v->i.label;
+	struct l4x_srv_object *o = (struct l4x_srv_object *)(v->i.label & ~3UL);
 	l4_msgtag_t tag = v->i.tag;
 	o->dispatch((struct l4x_srv_object *)v->i.label, v->i.label,
 	             l4_utcb(), &tag);
@@ -1075,7 +1075,7 @@ void l4x_vcpu_handle_irq(l4_vcpu_state_t *v, struct pt_regs *regs)
 		l4x_handle_external_event(v, regs);
 	else {
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 		do_IRQ(irq, regs);
 #else
 		asm_do_IRQ(irq, regs);
@@ -1163,11 +1163,15 @@ void l4x_vcpu_iret(struct task_struct *p,
 
 	} else {
 		if (vcpu->r.sp == 0)
+#ifdef CONFIG_X86_32
 			vcpu->r.sp = (l4_umword_t)task_pt_regs_v(current);
+#else
+			vcpu->r.sp = (l4_umword_t)task_pt_regs(current);
+#endif
 
 		vcpu->saved_state |= L4_VCPU_F_EXCEPTIONS;
 		vcpu->saved_state &= ~(L4_VCPU_F_DEBUG_EXC | L4_VCPU_F_PAGE_FAULTS);
-#ifdef ARCH_x86
+#ifdef CONFIG_X86_32
 		vcpu->r.gs = l4x_x86_utcb_get_orig_segment();
 #endif
 	}
@@ -1186,8 +1190,9 @@ void l4x_vcpu_iret(struct task_struct *p,
 		if (l4_ipc_error(tag, utcb) == L4_IPC_SEMAPFAILED)
 			l4x_evict_mem(fp2);
 		else {
-			LOG_printf("l4x: resume returned: %d\n",
-			           l4_ipc_error(tag, utcb));
+			LOG_printf("l4x: resume returned: %ld [%x, %lx]\n",
+			           l4_error(tag), vcpu->saved_state,
+			           vcpu->user_task);
 			enter_kdebug("IRET returned");
 			while (1)
 				;
@@ -1195,7 +1200,7 @@ void l4x_vcpu_iret(struct task_struct *p,
 	}
 }
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 asmlinkage void l4x_vcpu_ret_from_fork(struct pt_regs regs)
 {
 	struct task_struct *p = current;
@@ -1301,7 +1306,11 @@ asmlinkage void l4x_vcpu_entry(void)
 	p = current;
 	t = &p->thread;
 
+#ifdef CONFIG_X86_32
 	regsp = task_pt_regs_v(p);
+#else
+	regsp = task_pt_regs(p);
+#endif
 
 	vcpu_to_ptregs(vcpu, regsp);
 	vcpu_to_thread_struct(vcpu, t);
