@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #include <l4/util/elf.h>
 #include <l4/util/util.h>
@@ -35,7 +36,18 @@ L4_CV l4_utcb_t *l4_utcb_wrap(void)
 	return l4_utcb_direct();
 }
 
+void *mmap(void *addr, size_t length, int prot, int flags,
+           int fd, off_t offset)
+{
+	LOG_printf("mmap called, should only happen for exceptions\n");
+	return MAP_FAILED;
+}
 
+int munmap(void *addr, size_t length)
+{
+	LOG_printf("munmap called, should only happen for exceptions\n");
+	return -1;
+}
 
 
 void l4x_external_exit(int code);

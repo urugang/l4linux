@@ -7,6 +7,7 @@
 #include <asm/asm-offsets.h>
 
 #ifdef ARCH_x86
+#include <asm/page_types.h>
 
 /* Physical address */
 //#define pa(X) ((X) - __PAGE_OFFSET)
@@ -35,7 +36,7 @@
  * BSS section
  */
 __PAGE_ALIGNED_BSS
-	.align PAGE_SIZE_asm
+	.align PAGE_SIZE
 #ifdef CONFIG_X86_PAE
 ENTRY(initial_pg_pmd)
 	.fill 1024*KPMDS,4,0

@@ -488,6 +488,8 @@ copy_thread(unsigned long clone_flags, unsigned long stack_start,
 	if (clone_flags & CLONE_SETTLS)
 		thread->tp_value = regs->ARM_r3;
 
+	thread_notify(THREAD_NOTIFY_COPY, thread);
+
 #ifdef CONFIG_L4_VCPU
 	thread->cpu_context.extra[0] = (unsigned long) (childregs+0);
 	l4x_stack_setup(p->stack, l4_utcb(),

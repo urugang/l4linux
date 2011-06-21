@@ -60,7 +60,7 @@
 #include <asm/generic/stack_id.h>
 #include <asm/generic/stats.h>
 #include <asm/generic/tamed.h>
-#include <asm/generic/task.h> /* for l4x_id2task */
+#include <asm/generic/task.h>
 #include <asm/generic/upage.h>
 #include <asm/generic/cap_alloc.h>
 #include <asm/generic/log.h>
@@ -175,6 +175,7 @@ L4_EXTERNAL_FUNC(l4shmc_get_signal_to);
 #ifdef CONFIG_L4_SERVER
 L4_EXTERNAL_FUNC(l4x_srv_init);
 L4_EXTERNAL_FUNC(l4x_srv_setup_recv);
+L4_EXTERNAL_FUNC(l4x_srv_register_c);
 #endif
 
 #if defined(CONFIG_X86) && defined(CONFIG_L4_EXTERNAL_RTC)
@@ -200,12 +201,6 @@ unsigned long l4x_fixmap_space_start;
 void ia32_sysenter_target(void) {}
 
 l4_utcb_t *l4x_utcb_pointer[L4X_UTCB_POINTERS];
-
-#ifdef CONFIG_SMP
-unsigned char trampoline_data [1];
-unsigned char trampoline_end  [1];
-#endif
-
 #endif /* x86 */
 
 #ifdef ARCH_arm
@@ -476,7 +471,7 @@ static int l4x_pagein(unsigned long addr, unsigned long size,
 static unsigned l4x_x86_orig_utcb_segment;
 static inline void l4x_x86_utcb_save_orig_segment(void)
 {
-	asm volatile ("mov %%gs, %0": "=r" (l4x_x86_orig_utcb_segment));
+	asm volatile ("mov %%fs, %0": "=r" (l4x_x86_orig_utcb_segment));
 }
 unsigned l4x_x86_utcb_get_orig_segment(void)
 {
@@ -492,9 +487,9 @@ L4_CV l4_utcb_t *l4_utcb_wrap(void)
 	return l4_utcb_direct();
 #elif defined(CONFIG_X86_32)
 	unsigned long v;
-	asm volatile ("mov %%gs, %0": "=r" (v));
+	asm volatile ("mov %%fs, %0": "=r" (v));
 	if (v == 0x43 || v == 7) {
-		asm volatile("mov %%gs:0, %0" : "=r" (v));
+		asm volatile("mov %%fs:0, %0" : "=r" (v));
 		return (l4_utcb_t *)v;
 	}
 	return l4x_stack_utcb_get();
@@ -953,7 +948,6 @@ static void l4x_map_below_mainmem(void)
 		}
 
 		if (!map_count) {
-			LOG_printf("blah\n");
 			/* Get new ghost page every 1024 mappings
 			 * to overcome a Fiasco mapping db
 			 * limitation. */
@@ -1406,16 +1400,17 @@ static void l4x_cpu_thread_set(int cpu, l4lx_thread_t tid)
 #ifdef ARCH_x86
 void l4x_load_percpu_gdt_descriptor(struct desc_struct *gdt)
 {
+	long r;
 #ifdef CONFIG_L4_VCPU
-	if (fiasco_gdt_set(L4_INVALID_CAP,
-	                   &gdt[GDT_ENTRY_PERCPU], 8, 2, l4_utcb()))
-		LOG_printf("GDT setting failed\n");
+	if ((r = fiasco_gdt_set(L4_INVALID_CAP,
+	                        &gdt[GDT_ENTRY_PERCPU], 8, 2, l4_utcb())) < 0)
+		LOG_printf("GDT setting failed: %ld\n", r);
 	asm("mov %0, %%fs"
 	    : : "r" ((l4x_fiasco_gdt_entry_offset + 2) * 8 + 3) : "memory");
 #else
-	if (fiasco_gdt_set(l4x_stack_id_get(),
-	                   &gdt[GDT_ENTRY_PERCPU], 8, 0, l4_utcb()))
-		LOG_printf("GDT setting failed\n");
+	if ((r = fiasco_gdt_set(l4x_stack_id_get(),
+	                        &gdt[GDT_ENTRY_PERCPU], 8, 0, l4_utcb())) < 0)
+		LOG_printf("GDT setting failed: %ld\n", r);
 	asm("mov %0, %%fs"
 	    : : "r" (l4x_fiasco_gdt_entry_offset * 8 + 3) : "memory");
 #endif

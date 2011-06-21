@@ -51,13 +51,16 @@ obj-$(CONFIG_AMD_NB)		+= amd_nb.o
 obj-$(CONFIG_PCI)               += early-quirks.o
 obj-y				+= apic/
 obj-$(CONFIG_X86_MPPARSE)	+= mpparse.o
-obj-$(CONFIG_SMP)		+= smp.o smpboot.o trampoline.o setup_percpu.o
+obj-$(CONFIG_SMP)		+= smp.o smpboot.o setup_percpu.o
+obj-y				+= trampoline.o
 obj-$(CONFIG_HPET_TIMER)	+= hpet.o
 
 # Make sure this is linked after any other paravirt_ops structs: see head.S
 obj-$(CONFIG_PARAVIRT)		+= paravirt.o
 
 obj-$(CONFIG_SWIOTLB)		+= pci-swiotlb.o
+obj-$(CONFIG_OF)                += devicetree.o
+
 
 ###
 # 64 bit specific files
@@ -100,6 +103,7 @@ hpet-y          += $(b)/hpet.o
 quirks-y        += $(b)/quirks.o
 sys_x86_64-y	+= $(b)/sys_x86_64.o
 pci-swiotlb-y	+= $(b)/pci-swiotlb.o
+devicetree-y	+= $(b)/devicetree.o
 vsmp_64-y	+= $(b)/vsmp_64.o
 x8664_ksyms_64-y += $(b)/x8664_ksyms_64.o
 

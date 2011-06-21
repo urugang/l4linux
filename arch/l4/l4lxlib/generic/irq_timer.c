@@ -64,7 +64,7 @@ static void deep_sleep(void)
 
 static void suspend_resume_func(enum l4x_suspend_resume_state state)
 {
-	struct l4x_irq_desc_private *p = get_irq_chip_data(TIMER_IRQ);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(TIMER_IRQ);
 	switch (state) {
 		case L4X_SUSPEND:
 			l4x_thread_set_pc(l4lx_thread_get_cap(p->irq_thread), deep_sleep);
@@ -86,7 +86,7 @@ unsigned int l4lx_irq_timer_startup(struct irq_data *data)
 	char thread_name[15];
 	int cpu = smp_processor_id();
 	unsigned irq = data->irq;
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 	static struct l4x_suspend_resume_struct susp_res;
 
 	printk("%s(%d)\n", __func__, irq);

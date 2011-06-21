@@ -13,8 +13,8 @@ class Input : public L4Re::Util::Event_svr<Input>,
 {
 public:
 	l4x_input_srv_ops *ops;
-	Input();
 
+	int init();
 	int get_num_streams();
 	int get_stream_info(int idx, L4Re::Event_stream_info *);
 	int get_stream_info_for_id(l4_umword_t id, L4Re::Event_stream_info *);
@@ -30,25 +30,27 @@ private:
 	L4Re::Util::Event_buffer _evbuf;
 };
 
-Input::Input()
+int
+Input::init()
 {
 	L4Re::Util::Auto_cap<L4Re::Dataspace>::Cap b
 		= L4Re::Util::cap_alloc.alloc<L4Re::Dataspace>();
 	if (!b.is_valid())
-		throw(-L4_ENOMEM);
+		return -L4_ENOMEM;
 
 	int r;
 	if ((r = L4Re::Env::env()->mem_alloc()->alloc(L4_PAGESIZE, b.get())) < 0)
-		throw(r);
+		return r;
 
 	if ((r = _evbuf.attach(b.get(), L4Re::Env::env()->rm())) < 0)
-		throw(r);
+		return r;
 
 	memset(_evbuf.buf(), 0, b.get()->size());
 
 	_ds  = b.release();
 
 	l4x_srv_object::dispatch = &l4x_srv_generic_dispatch<Input>;
+	return 0;
 }
 
 void
@@ -99,9 +101,10 @@ Input::dispatch(l4_umword_t obj, L4::Ipc_iostream &ios)
 	}
 }
 
+static Input _input;
+
 static Input *input_obj()
 {
-	static Input _input;
 	return &_input;
 }
 
@@ -109,6 +112,15 @@ extern "C" void
 l4x_srv_input_init(l4_cap_idx_t thread, struct l4x_input_srv_ops *ops)
 {
 	L4::Cap<void> c;
+	int err;
+
+	if ((err = input_obj()->init()) < 0) {
+		LOG_printf("l4x-srv: Input server object initialization failed (%d)\n",
+		           err);
+		return;
+	}
+
+
 	input_obj()->ops = ops;
 	c = l4x_srv_register_name(input_obj(),
 	                          L4::Cap<L4::Thread>(thread), "ev");

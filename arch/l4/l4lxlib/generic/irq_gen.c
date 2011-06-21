@@ -14,5 +14,5 @@ int l4x_alloc_irq_desc_data(int irq)
 	if (!p)
 		return -ENOMEM;
 
-	return set_irq_chip_data(irq, p);
+	return irq_set_chip_data(irq, p);
 }

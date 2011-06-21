@@ -1417,7 +1417,7 @@ static int l4fb_alloc_screen(int id, char const *cap)
 	int ret;
 	L4XV_V(f);
 
-	printk(KERN_INFO "l4fb l4fb.%d: look for capability '%s' as goos sesseion\n", id, cap);
+	printk(KERN_INFO "l4fb l4fb.%d: look for capability '%s' as goos session\n", id, cap);
 
 	screen = kzalloc(sizeof(struct l4fb_screen), GFP_KERNEL);
 

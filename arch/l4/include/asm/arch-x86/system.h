@@ -122,8 +122,6 @@ extern void l4x_switch_to(struct task_struct *prev, struct task_struct *next);
  */
 #define HAVE_DISABLE_HLT
 #else
-#define __SAVE(reg, offset) "movq %%" #reg ",(14-" #offset ")*8(%%rsp)\n\t"
-#define __RESTORE(reg, offset) "movq (14-" #offset ")*8(%%rsp),%%" #reg "\n\t"
 
 /* frame pointer must be last for get_wchan */
 #define SAVE_CONTEXT    "pushf ; pushq %%rbp ; movq %%rsi,%%rbp\n\t"

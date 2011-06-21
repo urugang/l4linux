@@ -36,7 +36,7 @@ ifeq ($(CONFIG_X86_32),y)
         lib-y += $(b)/semaphore_32.o $(b)/string_32.o
 	lib-y += $(b)/cmpxchg.o
 ifneq ($(CONFIG_X86_CMPXCHG64),y)
-        lib-y += $(b)/cmpxchg8b_emu.o $(b)/atomic64_386_32.o
+        lib-y += cmpxchg8b_emu.o $(b)/atomic64_386_32.o
 endif
         lib-$(CONFIG_X86_USE_3DNOW) += $(b)/mmx_32.o
 else
@@ -46,6 +46,7 @@ else
         lib-y += $(b)/memmove_64.o $(b)/memset_64.o
         #lib-y += copy_user_64.o rwlock_64.o copy_user_nocache_64.o
 	lib-$(CONFIG_RWSEM_XCHGADD_ALGORITHM) += $(b)/rwsem_64.o
+	lib-y += cmpxchg16b_emu.o
 endif
 
 obj-y                  += proc.o

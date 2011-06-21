@@ -87,18 +87,18 @@ void __init l4x_init_IRQ(void)
 	l4x_alloc_irq_desc_data(0);
 
 #ifdef CONFIG_L4_IRQ_SINGLE
-	set_irq_chip_and_handler_name(0, &l4x_irq_timer_chip, handle_edge_irq, "timer");
+	irq_set_chip_and_handler_name(0, &l4x_irq_timer_chip, handle_edge_irq, "timer");
 #else
-	set_irq_chip_and_handler_name(0, &l4x_irq_dev_chip, handle_edge_irq, "edge");
+	irq_set_chip_and_handler_name(0, &l4x_irq_dev_chip, handle_edge_irq, "edge");
 #endif
 
 	for (i = 1; i < NR_IRQS; i++) {
 		if (i < l4lx_irq_max) {
 			l4x_alloc_irq_desc_data(i);
-			//set_irq_chip_and_handler_name(i, &l4x_irq_dev_chip, handle_edge_irq, "edge");
-			set_irq_chip_and_handler_name(i, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
+			//irq_set_chip_and_handler_name(i, &l4x_irq_dev_chip, handle_edge_irq, "edge");
+			irq_set_chip_and_handler_name(i, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
 		} else
-			set_irq_chip_and_handler(i, &no_irq_chip, handle_edge_irq);
+			irq_set_chip_and_handler(i, &no_irq_chip, handle_edge_irq);
 	}
 
 	/* from native_init_IRQ() */

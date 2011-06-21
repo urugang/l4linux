@@ -86,7 +86,9 @@ int cpu_v6_do_idle(void)
 
 void cpu_sa1100_proc_init(void) { printk("%s\n", __func__); }
 void cpu_arm926_proc_init(void) { printk("%s\n", __func__); }
+#ifdef CONFIG_CPU_V6K
 void cpu_v6_proc_init(void) { printk("%s\n", __func__); }
+#endif
 
 /*
  * cpu_proc_fin()
@@ -97,7 +99,7 @@ void cpu_v6_proc_init(void) { printk("%s\n", __func__); }
  */
 void cpu_sa1100_proc_fin(void) { }
 void cpu_arm926_proc_fin(void) { }
-#ifdef CONFIG_CPU_V6
+#ifdef CONFIG_CPU_V6K
 void cpu_v6_proc_fin(void) { }
 #endif
 
@@ -152,7 +154,7 @@ void v4wbi_flush_user_tlb_range(unsigned long start, unsigned long end,
                                struct vm_area_struct *mm)
 {}
 
-#ifdef CONFIG_CPU_V6
+#ifdef CONFIG_CPU_V6K
 void v6wbi_flush_user_tlb_range(unsigned long start, unsigned long end,
                                struct vm_area_struct *mm)
 {
@@ -191,7 +193,7 @@ void v4wbi_flush_kern_tlb_range(unsigned long start, unsigned long end)
 {
 }
 
-#ifdef CONFIG_CPU_V6
+#ifdef CONFIG_CPU_V6K
 void v6wbi_flush_kern_tlb_range(unsigned long start, unsigned long end)
 {
 }
@@ -285,7 +287,6 @@ void arm926_dma_map_area(const void *start, size_t sz, int direction)
 #undef cpu_dcache_clean_area
 #undef cpu_set_pte_ext
 #undef cpu_do_switch_mm
-#include <asm/cpu-multi32.h>
 #include <asm/cacheflush.h>
 
 static struct processor l4_proc_fns = {
@@ -297,6 +298,9 @@ static struct processor l4_proc_fns = {
 	.dcache_clean_area   = cpu_sa1100_dcache_clean_area,
 	.switch_mm           = cpu_sa1100_switch_mm,
 	.set_pte_ext         = cpu_sa1100_set_pte_ext,
+	//.suspend_size = ...,
+	//.do_suspend = ...,
+	//.do_resume = ...,
 };
 
 static struct cpu_tlb_fns l4_tlb_fns = {
@@ -329,7 +333,7 @@ static struct proc_info_list l4_proc_info __attribute__((__section__(".proc.info
 	.__cpu_mm_mmu_flags = 0,
 	.__cpu_io_mmu_flags = 0,
 	.__cpu_flush     = 0,
-#ifndef CONFIG_CPU_V6
+#ifndef CONFIG_CPU_V6K
 	.arch_name       = "armv5",
 	.elf_name        = "v5",
 #else
