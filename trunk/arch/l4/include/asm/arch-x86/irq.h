@@ -13,9 +13,6 @@
 /* the defines are from irq_vectors out of the mach-default directory */
 #define NR_IRQS_HW		64
 
-/* Even though we don't support this, supply it to appease OF */
-static inline void irq_dispose_mapping(unsigned int virq) { }
-
 static inline int irq_canonicalize(int irq)
 {
 	return ((irq == 2) ? 9 : irq);

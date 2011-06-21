@@ -61,7 +61,7 @@ int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 	if (unlikely(irq >= NR_IRQS))
 		return -1;
 
-	p = get_irq_chip_data(irq);
+	p = irq_get_chip_data(irq);
 	if (!p)
 		return -1;
 
@@ -70,25 +70,25 @@ int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 		case IRQF_TRIGGER_RISING:
 			p->trigger = L4_IRQ_F_POS_EDGE;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
+			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
 #endif
 			break;
 		case IRQF_TRIGGER_FALLING:
 			p->trigger = L4_IRQ_F_NEG_EDGE;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
+			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
 #endif
 			break;
 		case IRQF_TRIGGER_HIGH:
 			p->trigger = L4_IRQ_F_LEVEL_HIGH;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
+			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
 #endif
 			break;
 		case IRQF_TRIGGER_LOW:
 			p->trigger = L4_IRQ_F_LEVEL_LOW;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
+			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
 #endif
 			break;
 		default:
@@ -103,10 +103,10 @@ static inline void attach_to_irq(struct irq_desc *desc)
 {
 	long ret;
 	unsigned long flags;
-	struct l4x_irq_desc_private *p = desc->chip_data;
+	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
 
 	local_irq_save(flags);
-	if ((ret  = l4_error(l4_irq_attach(p->irq_cap, desc->irq << 2,
+	if ((ret  = l4_error(l4_irq_attach(p->irq_cap, irq_desc_get_irq_data(desc)->irq << 2,
 	                                   l4x_cpu_thread_get_cap(p->cpu)))))
 		dd_printk("%s: can't register to irq %u: return=%ld\n",
 		          __func__, desc->irq, ret);
@@ -115,7 +115,7 @@ static inline void attach_to_irq(struct irq_desc *desc)
 
 static void detach_from_interrupt(struct irq_desc *desc)
 {
-	struct l4x_irq_desc_private *p = desc->chip_data;
+	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
 	unsigned long flags;
 	local_irq_save(flags);
 	if (l4_error(l4_irq_detach(p->irq_cap)))
@@ -134,7 +134,7 @@ void L4_CV timer_irq_thread(void *data)
 	l4_timeout_t to;
 	l4_kernel_clock_t pint;
 	l4_utcb_t *u = l4_utcb();
-	struct l4x_irq_desc_private *p = irq_to_desc(TIMER_IRQ)->chip_data;
+	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(irq_to_desc(TIMER_IRQ));
 
 	LOG_printf("%s: Starting timer IRQ thread.\n", __func__);
 
@@ -211,7 +211,7 @@ static void l4lx_irq_dev_shutdown_timer(struct irq_data *data)
 unsigned int l4lx_irq_dev_startup(struct irq_data *data)
 {
 	unsigned irq = data->irq;
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 
 	if (irq == TIMER_IRQ)
 		return l4lx_irq_dev_startup_timer(p);
@@ -242,7 +242,7 @@ unsigned int l4lx_irq_dev_startup(struct irq_data *data)
 void l4lx_irq_dev_shutdown(struct irq_data *data)
 {
 	unsigned irq = data->irq;
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 
 	if (irq == TIMER_IRQ) {
 		l4lx_irq_dev_shutdown_timer(data);
@@ -259,7 +259,7 @@ void l4lx_irq_dev_shutdown(struct irq_data *data)
 void l4lx_irq_dev_enable(struct irq_data *data)
 {
 	struct irq_desc *desc = irq_to_desc(data->irq);
-	struct l4x_irq_desc_private *p = desc->chip_data;
+	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
 
 	dd_printk("%s: %u\n", __func__, data->irq);
 
@@ -271,7 +271,7 @@ void l4lx_irq_dev_enable(struct irq_data *data)
 void l4lx_irq_dev_disable(struct irq_data *data)
 {
 	struct irq_desc *desc = irq_to_desc(data->irq);
-	struct l4x_irq_desc_private *p = desc->chip_data;
+	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
 
 	dd_printk("%s: %u\n", __func__, data->irq);
 
@@ -296,7 +296,7 @@ void l4lx_irq_dev_unmask(struct irq_data *data)
 
 void l4lx_irq_dev_eoi(struct irq_data *data)
 {
-	struct l4x_irq_desc_private *p = get_irq_chip_data(data->irq);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(data->irq);
 	unsigned long flags;
 
 	dd_printk("%s: %u\n", __func__, data->irq);
@@ -314,7 +314,7 @@ int l4lx_irq_dev_set_affinity(struct irq_data *data,
         unsigned target_cpu;
 	unsigned long flags;
 	struct irq_desc *desc = irq_to_desc(data->irq);
-	struct l4x_irq_desc_private *p = desc->chip_data;
+	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
 
 	if (!p->irq_cap)
 		return 0;
@@ -330,7 +330,7 @@ int l4lx_irq_dev_set_affinity(struct irq_data *data,
 	spin_lock_irqsave(&migrate_lock, flags);
 	detach_from_interrupt(desc);
 
-	cpumask_copy(desc->affinity, dest);
+	cpumask_copy(irq_desc_get_irq_data(desc)->affinity, dest);
 	p->cpu = target_cpu;
 	attach_to_irq(desc);
 	if (p->enabled);

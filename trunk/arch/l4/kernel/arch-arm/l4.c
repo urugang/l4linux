@@ -30,58 +30,64 @@ static void __init fixup_l4(struct machine_desc *desc, struct tag *tags,
 {
 }
 
+#ifdef CONFIG_DEBUG_LL
+#include <l4/sys/kdebug.h>
+void printascii(const char *buf)
+{
+	outstring(buf);
+}
+#endif
 
-static void l4x_irq_ackmaskun_empty(unsigned int irq)
+static void l4x_irq_ackmaskun_empty(struct irq_data *data)
 {
 #ifdef CONFIG_L4_VCPU
-	printk("l4x_irq_ackmaskun_empty: %d\n", irq);
+	printk("l4x_irq_ackmaskun_empty: %d\n", data->irq);
 #endif
 }
 
-static int l4x_irq_type_empty(unsigned int irq, unsigned int type)
+static int l4x_irq_type_empty(struct irq_data *data, unsigned int type)
 {
 	return 0;
 }
 
-static int l4x_irq_wake_empty(unsigned int irq, unsigned int type)
+static int l4x_irq_wake_empty(struct irq_data *data, unsigned int type)
 {
 	return 0;
 }
 
-static void l4x_irq_startup(unsigned int irq)
+static void l4x_irq_startup(struct irq_data *data)
 {
-	l4lx_irq_dev_startup(irq_get_irq_data(irq));
+	l4lx_irq_dev_startup(data);
 }
 
-static void irq_shutdown(unsigned int irq)
+static void l4x_irq_shutdown(struct irq_data *data)
 {
-	l4lx_irq_dev_shutdown(irq_get_irq_data(irq));
+	l4lx_irq_dev_shutdown(data);
 }
 
 static struct irq_chip l4_irq_dev_chip = {
-	.name           = "L4",
-	.ack            = l4x_irq_ackmaskun_empty,
-	.mask           = irq_shutdown,
-	.unmask         = l4x_irq_startup,
-	.set_type       = l4x_irq_type_empty,
-	.set_wake       = l4x_irq_wake_empty,
+	.name               = "L4",
+	.irq_ack            = l4x_irq_ackmaskun_empty,
+	.irq_mask           = l4x_irq_shutdown,
+	.irq_unmask         = l4x_irq_startup,
+	.irq_set_type       = l4x_irq_type_empty,
+	.irq_set_wake       = l4x_irq_wake_empty,
 };
 
 #if defined(CONFIG_L4_IRQ_SINGLE)
 static struct irq_chip l4_irq_timer_chip = {
-	.name           = "L4timer",
-	.ack            = l4x_irq_ackmaskun_empty,
-	.mask           = l4x_irq_ackmaskun_empty,
-	.unmask         = l4x_irq_ackmaskun_empty,
-	.set_type       = l4x_irq_type_empty,
-	.set_wake       = l4x_irq_wake_empty,
+	.name               = "L4timer",
+	.irq_ack            = l4x_irq_ackmaskun_empty,
+	.irq_mask           = l4x_irq_ackmaskun_empty,
+	.irq_unmask         = l4x_irq_ackmaskun_empty,
+	.irq_set_type       = l4x_irq_type_empty,
+	.irq_set_wake       = l4x_irq_wake_empty,
 };
 #endif
 
 void __init l4x_setup_irq(unsigned int irq)
 {
-	set_irq_chip           (irq, &l4_irq_dev_chip);
-	set_irq_handler        (irq, handle_simple_irq);
+	irq_set_chip_and_handler(irq, &l4_irq_dev_chip, handle_simple_irq);
 	set_irq_flags          (irq, IRQF_VALID);
 	l4x_alloc_irq_desc_data(irq);
 }
@@ -170,11 +176,10 @@ static void l4x_timer_init(void)
 	l4x_alloc_irq_desc_data(0);
 
 #if defined(CONFIG_L4_IRQ_SINGLE)
-	set_irq_chip     (0, &l4_irq_timer_chip);
+	irq_set_chip_and_handler(0, &l4_irq_timer_chip, handle_simple_irq);
 #else
-	set_irq_chip     (0, &l4_irq_dev_chip);
+	irq_set_chip_and_handler(0, &l4_irq_dev_chip,   handle_simple_irq);
 #endif
-	set_irq_handler  (0, handle_simple_irq);
 	set_irq_flags    (0, IRQF_VALID);
 
 	setup_irq(0, &timer_irq);

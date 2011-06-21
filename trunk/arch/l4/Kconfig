@@ -260,7 +260,8 @@ config L4_TAMED
 	def_bool y
 
 config L4_VCPU
-	bool "Use alternative execution model"
+	def_bool y
+	bool "Use vCPU execution model"
 
 
 menu "Priority configuration"

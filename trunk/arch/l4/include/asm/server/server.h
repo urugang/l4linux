@@ -21,6 +21,9 @@ L4::Cap<L4::Kobject>
 l4x_srv_rcv_cap();
 
 L4::Cap<void>
+l4x_srv_register(l4x_srv_object *o, L4::Cap<L4::Thread> thread);
+
+L4::Cap<void>
 l4x_srv_register_name(l4x_srv_object *o,
                       L4::Cap<L4::Thread> thread,
                       const char *service);
@@ -51,6 +54,9 @@ long l4x_srv_generic_dispatch(l4x_srv_object *_this, l4_umword_t obj,
 #define C_FUNC L4_CV
 #include <l4/sys/types.h>
 #endif
+
+C_FUNC l4_cap_idx_t
+l4x_srv_register_c(struct l4x_srv_object *obj, l4_cap_idx_t thread);
 
 C_FUNC l4_cap_idx_t
 l4x_srv_register_name_c(struct l4x_srv_object *obj,

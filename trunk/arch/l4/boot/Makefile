@@ -2,8 +2,6 @@
 # arch/l4/boot/Makefile
 #
 
-SUFFIX = $(patsubst "%",%,$(CONFIG_L4_VMLINUZ_SUFFIX))
-
 quiet_cmd_localinst = LOCINST $@
       cmd_localinst = ([ -x "$(srctree)/arch/l4/install.local" ] && \
                        $(srctree)/arch/l4/install.local $@ $(BASEARCH)) || true
@@ -12,13 +10,13 @@ $(obj)/Image: vmlinux FORCE
 	$(call if_changed,objcopy)
 	@echo '  Kernel: $@ is ready'
 
-lImage: $(obj)/Image vmlinuz$(SUFFIX) l4linux$(SUFFIX)
+lImage: $(obj)/Image vmlinuz$(VMLINUZ_SUFFIX) l4linux$(VMLINUZ_SUFFIX)
 
-vmlinuz$(SUFFIX): ldrImage FORCE
+vmlinuz$(VMLINUZ_SUFFIX): ldrImage FORCE
 	$(call if_changed,gzip)
 	$(call cmd,localinst)
 
-l4linux$(SUFFIX): ldrImage FORCE
+l4linux$(VMLINUZ_SUFFIX): ldrImage FORCE
 	$(Q)ln -sf $< $@
 
 objects-y := ldr.o res.o image.o
@@ -67,7 +65,7 @@ ldrImage: $(OBJS)
 	  $(L4_CRT0_STATIC) $(OBJS) $(servers-y) \
 	  --start-group $(L4LIBS) $(L4_GCCLIB) --end-group \
 	  $(L4_CRTN_STATIC) \
-	  -Ttext=$(LINKADDR-$(BITS)) \
+	  --defsym __executable_start=$(LINKADDR-$(BITS)) \
 	  --defsym __L4_STACK_ADDR__=$(L4_BID_STACK_ADDR) \
 	  --defsym __L4_KIP_ADDR__=$(L4_BID_KIP_ADDR) \
           --defsym __l4sys_invoke_direct=$(L4_BID_KIP_ADDR)+$(L4_BID_KIP_OFFS_SYS_INVOKE) \

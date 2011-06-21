@@ -18,6 +18,7 @@ lib-y	+= ../../../arm/lib/ashrdi3.o
 lib-y	+= ../../../arm/lib/lshrdi3.o
 lib-y	+= ../../../arm/lib/testsetbit.o
 lib-y	+= ../../../arm/lib/testclearbit.o
+lib-y	+= ../../../arm/lib/testchangebit.o
 lib-y	+= ../../../arm/lib/setbit.o
 lib-y	+= ../../../arm/lib/clearbit.o
 lib-y	+= ../../../arm/lib/findbit.o

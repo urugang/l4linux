@@ -49,7 +49,9 @@ else
 	KBUILD_DEFCONFIG := $(ARCH)_defconfig
 endif
 
-export BASEARCH L4_MK_ARCH L4_MK_API OBJCOPYARCH
+VMLINUZ_SUFFIX = $(patsubst "%",%,$(CONFIG_L4_VMLINUZ_SUFFIX))
+
+export BASEARCH L4_MK_ARCH L4_MK_API OBJCOPYARCH VMLINUZ_SUFFIX
 
 # crude hack
 TRASH := $(shell cd $(srctree)/arch/l4 \
@@ -210,6 +212,7 @@ tune-$(CONFIG_CPU_XSCALE)	:=$(call cc-option,-mtune=xscale,-mtune=strongarm110) 
 tune-$(CONFIG_CPU_XSC3)		:=$(call cc-option,-mtune=xscale,-mtune=strongarm110) -Wa,-mcpu=xscale
 tune-$(CONFIG_CPU_FEROCEON)	:=$(call cc-option,-mtune=marvell-f,-mtune=xscale)
 tune-$(CONFIG_CPU_V6)		:=$(call cc-option,-mtune=arm1136j-s,-mtune=strongarm)
+tune-$(CONFIG_CPU_V6K)		:=$(call cc-option,-mtune=arm1136j-s,-mtune=strongarm)
 
 ifeq ($(CONFIG_AEABI),y)
 CFLAGS_ABI	:=-mabi=aapcs-linux -mno-thumb-interwork
@@ -222,10 +225,14 @@ CFLAGS_ABI	+=-funwind-tables
 endif
 
 ifeq ($(CONFIG_THUMB2_KERNEL),y)
-AFLAGS_AUTOIT	:=$(call as-option,-Wa$(comma)-mimplicit-it=thumb,-Wa$(comma)-mauto-it)
+AFLAGS_AUTOIT	:=$(call as-option,-Wa$(comma)-mimplicit-it=always,-Wa$(comma)-mauto-it)
 AFLAGS_NOWARN	:=$(call as-option,-Wa$(comma)-mno-warn-deprecated,-Wa$(comma)-W)
 CFLAGS_THUMB2	:=-mthumb $(AFLAGS_AUTOIT) $(AFLAGS_NOWARN)
 AFLAGS_THUMB2	:=$(CFLAGS_THUMB2) -Wa$(comma)-mthumb
+# Work around buggy relocation from gas if requested:
+ifeq ($(CONFIG_THUMB2_AVOID_R_ARM_THM_JUMP11),y)
+CFLAGS_MODULE	+=-fno-optimize-sibling-calls
+endif
 endif
 
 # Need -Uarm for gcc < 3.x
@@ -294,7 +301,9 @@ core-y += arch/l4/
 
 -include $(L4OBJ)/l4defs.mk.inc
 
-L4_REQUIRED_MODS		:= stdlibs log l4re_c-util \
+L4_REQUIRED_MODS		:= l4re-main libc_be_minimal_log_io \
+                                   libc_minimal libsupc++_minimal \
+                                   log l4re_c-util \
                                    $(if $(CONFIG_L4_LINK_LIBIO_DIRECT),libio-direct,libio) \
 				   $(L4LX_E_L-y)
 
@@ -328,7 +337,6 @@ KBUILD_CPPFLAGS	+= -Iarch/l4/include/asm/l4-arch \
 KBUILD_CPPFLAGS	+= -DL4API_$(L4_MK_API)
 
 KBUILD_CPPFLAGS += -DL4SYS_USE_UTCB_WRAP=1
-
 
 ifneq ($(CONFIG_L4_ARCH_ARM),)
 KBUILD_CPPFLAGS += -DTEXT_OFFSET=0x0100000
@@ -418,7 +426,7 @@ ifneq ($(wildcard .config),)
 $(objtree)/Makeconf.l4conf: $(srctree)/arch/l4/Makefile.l4conf $(srctree)/arch/l4/Makefile
 	$(Q)$(if $(L4DIR),PWD=$(L4DIR),) $(MAKE) $(if $(L4DIR),-C $(L4DIR),) -f $< O=$(L4OBJ) OUTPUT=$@
 
-archprepare: check_linux_config $(symlink_files) $(symlink_dirs) $(objtree)/Makeconf.l4conf
+archprepare: print_instructions check_linux_config $(symlink_files) $(symlink_dirs) $(objtree)/Makeconf.l4conf
 	$(Q)mkdir -p arch/$(BASEARCH)/lib
 
 endif # .config available
@@ -445,10 +453,18 @@ DIS_OPTS-x86-32 := HPET_TIMER
 DIS_OPTS := HIGHMEM4G HIGHMEM64G PCI_GOANY PCI_GOBIOS \
             X86_MCE X86_MCE MTRR PARAVIRT KEXEC MCA SOFTWARE_SUSPEND APM \
 	    CPU_FREQ VM86 X86_DS X86_PTRACE_BTS HT_IRQ DMI \
-	    TRANSPARENT_HUGEPAGE COMPACTION \
+	    TRANSPARENT_HUGEPAGE COMPACTION X86_PAE \
 	    $(DIS_OPTS-$(BASEARCH)-$(BITS))
-ENA_OPTS-x86 := X86_CMPXCHG64
 ENA_OPTS := $(ENA_OPTS-$(BASEARCH))
+
+print_instructions:
+	@if [ ! -e vmlinuz$(VMLINUZ_SUFFIX) ]; then \
+	  echo ===============================================; \
+	  echo "  For quick build instructions, please visit:"; \
+	  echo "    http://wiki.tudos.org/Quickstart"; \
+	  echo "    http://l4linux.org/build.shtml"; \
+	  echo ===============================================; \
+	fi
 
 check_linux_config:
 	@$(foreach i,$(addprefix CONFIG_,$(DIS_OPTS)),     \

@@ -161,6 +161,8 @@ static int __init l4bdds_init_one(int nr)
 	if (device[nr].queue == NULL)
 		goto out1;
 
+	blk_set_default_limits(&device[nr].queue->limits);
+
 	/* gendisk structure. */
 	device[nr].gd = alloc_disk(16);
 	if (!device[nr].gd)

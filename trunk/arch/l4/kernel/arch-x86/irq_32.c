@@ -190,7 +190,7 @@ asmlinkage void do_softirq(void)
 		}
 
 		/*
-		 * Shouldnt happen, we returned above if in_interrupt():
+		 * Shouldn't happen, we returned above if in_interrupt():
 		 */
 		WARN_ON_ONCE(softirq_count());
 	}

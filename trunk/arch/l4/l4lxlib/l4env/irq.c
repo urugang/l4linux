@@ -80,7 +80,7 @@ int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 	if (unlikely(irq >= NR_IRQS))
 		return -1;
 
-	p = get_irq_chip_data(irq);
+	p = irq_get_chip_data(irq);
 	if (!p)
 		return -1;
 
@@ -89,25 +89,25 @@ int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 		case IRQF_TRIGGER_RISING:
 			p->trigger = L4_IRQ_F_POS_EDGE;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
+			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
 #endif
 			break;
 		case IRQF_TRIGGER_FALLING:
 			p->trigger = L4_IRQ_F_NEG_EDGE;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
+			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
 #endif
 			break;
 		case IRQF_TRIGGER_HIGH:
 			p->trigger = L4_IRQ_F_LEVEL_HIGH;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
+			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
 #endif
 			break;
 		case IRQF_TRIGGER_LOW:
 			p->trigger = L4_IRQ_F_LEVEL_LOW;
 #ifdef ARCH_x86
-			set_irq_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
+			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
 #endif
 			break;
 		default:
@@ -121,9 +121,9 @@ int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 static inline int attach_to_irq(struct irq_desc *desc)
 {
 	long ret;
-	struct l4x_irq_desc_private *p = desc->chip_data;
+	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
 
-	if ((ret  = l4_error(l4_irq_attach(p->irq_cap, desc->irq << 2,
+	if ((ret  = l4_error(l4_irq_attach(p->irq_cap, irq_desc_get_irq_data(desc)->irq << 2,
 	                                   l4x_stack_id_get()))))
 		dd_printk("%s: can't attach to irq %u: %ld\n",
 		          __func__, desc->irq, ret);
@@ -139,7 +139,7 @@ enum irq_cmds {
 
 static void attach_to_interrupt(unsigned irq)
 {
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 	if (!p->enabled)
 		p->enabled = attach_to_irq(irq_to_desc(irq));
 
@@ -148,14 +148,16 @@ static void attach_to_interrupt(unsigned irq)
 
 static void detach_from_interrupt(struct irq_desc *desc, int irq)
 {
-	struct l4x_irq_desc_private *p = desc->chip_data;
+	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
 	if (l4_error(l4_irq_detach(p->irq_cap)))
-		dd_printk("%02d: Unable to detach from IRQ\n", irq);
+		dd_printk("%02d: Unable to detach from IRQ\n",
+		          irq_desc_get_irq_data(desc)->irq);
 
-	dd_printk("detaching from irq %d (cap: %lx)\n", irq, p->irq_cap);
+	dd_printk("detaching from irq %d (cap: %lx)\n",
+	          irq_desc_get_irq_data(desc)->irq, p->irq_cap);
 
 	p->enabled = 0;
-	irq_disable_cmd_state[desc->irq] = 0;
+	irq_disable_cmd_state[irq_desc_get_irq_data(desc)->irq] = 0;
 }
 
 /*
@@ -169,7 +171,7 @@ static inline void wait_for_irq_message(unsigned irq)
 	l4_msgtag_t tag;
 	l4_utcb_t *utcb = l4_utcb();
 	struct irq_desc *desc = irq_to_desc(irq);
-	struct l4x_irq_desc_private *p = desc->chip_data;
+	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
 
 	while (1) {
 		if (unlikely(p->enabled && irq_disable_cmd_state[irq]))
@@ -222,7 +224,7 @@ static L4_CV void irq_thread(void *data)
 {
 	unsigned irq = *(unsigned *)data;
 	struct thread_info *ctx = current_thread_info();
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 	unsigned state;
 
 	l4x_prepare_irq_thread(current_thread_info(), get_irq_cpu(irq));
@@ -257,7 +259,7 @@ static void send_msg(unsigned int irq, enum irq_cmds cmd)
 {
 	int error;
 	l4_msgtag_t tag = l4_msgtag(cmd, 0, 0, 0);
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 
 	/* XXX: range checking */
 
@@ -289,7 +291,7 @@ void l4lx_irq_init(void)
 #ifdef CONFIG_SMP
 static void migrate_irq(unsigned irq, unsigned to_cpu)
 {
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 	send_msg(irq, CMD_IRQ_DISABLE);
 
 	l4x_migrate_thread(l4lx_thread_get_cap(p->irq_thread),
@@ -328,7 +330,7 @@ unsigned int l4lx_irq_dev_startup(struct irq_data *data)
 {
 	char thread_name[7];
 	unsigned irq = data->irq;
-	struct l4x_irq_desc_private *p = get_irq_chip_data(irq);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 
 	if (!p)
 		return 0;
@@ -395,7 +397,7 @@ int l4lx_irq_dev_set_affinity(struct irq_data *data,
 
 void l4lx_irq_dev_shutdown(struct irq_data *data)
 {
-	struct l4x_irq_desc_private *p = get_irq_chip_data(data->irq);
+	struct l4x_irq_desc_private *p = irq_get_chip_data(data->irq);
 
 	dd_printk("%s: %u\n", __func__, data->irq);
 	l4lx_irq_dev_disable(data);
