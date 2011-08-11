@@ -17,6 +17,7 @@ obj-$(CONFIG_HOTPLUG_CPU)			+= hotplug.o
 obj-$(CONFIG_ARM_UNWIND)			+= unwind.o
 obj-$(CONFIG_OABI_COMPAT)                       += sys_oabi-compat.o
 obj-$(CONFIG_CRASH_DUMP)			+= crash_dump.o
+obj-$(CONFIG_OF)				+= devtree.o
 obj-$(CONFIG_SWP_EMULATE)			+= swp_emulate.o
 CFLAGS_swp_emulate.o				:= -Wa,-march=armv7-a
 
@@ -34,6 +35,7 @@ compat-y        := ../../../arm/kernel/compat.o
 crash_dump-y    := ../../../arm/kernel/crash_dump.o
 smp_tlb-y       := ../../../arm/kernel/smp_tlb.o
 sched_clock-y   := ../../../arm/kernel/sched_clock.o
+devtree-y       := ../../../arm/kernel/devtree.o
 
 KBUILD_CPPFLAGS	+= -I$(srctree)/arch/arm/kernel
 

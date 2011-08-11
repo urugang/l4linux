@@ -6,7 +6,6 @@
 #include <linux/errno.h>
 #include <linux/compiler.h>
 #include <linux/thread_info.h>
-#include <linux/prefetch.h>
 #include <linux/string.h>
 #include <asm/asm.h>
 #include <asm/page.h>
@@ -25,7 +24,7 @@
 #define MAKE_MM_SEG(s)	((mm_segment_t) { (s) })
 
 #define KERNEL_DS	MAKE_MM_SEG(-1UL)
-#define USER_DS		MAKE_MM_SEG(TASK_SIZE_MAX)
+#define USER_DS 	MAKE_MM_SEG(TASK_SIZE_MAX)
 
 #define get_ds()	(KERNEL_DS)
 #define get_fs()	(current_thread_info()->addr_limit)
@@ -43,7 +42,7 @@
  * Returns 0 if the range is valid, nonzero otherwise.
  *
  * This is equivalent to the following test:
- * (u33)addr + (u33)size >= (u33)current->addr_limit.seg (u65 for x86_64)
+ * (u33)addr + (u33)size > (u33)current->addr_limit.seg (u65 for x86_64)
  *
  * This needs 33-bit (65-bit for x86_64) arithmetic. We have a carry...
  */
@@ -207,13 +206,18 @@ extern long __put_user_bad(void);
  * To avoid warnings from the compiler (in case we want to cast a pointer to
  * u64) we use this dirty asm wrapper trick.
  */
-#define __put_user_8_asm_wrap(x, addr, retval)				\
+#ifdef CONFIG_X86_32
+#define __put_user_8_wrap(x, addr, retval)				\
 	({ unsigned long dummy;                                         \
 	__asm__ __volatile__ (						\
 		"call __put_user_8	\n\t"				\
 		: "=a" (retval), "=d" (dummy), "=c" (dummy)		\
 		: "A" (x), "c" (addr));                                 \
 	 })
+#else
+#define __put_user_8_wrap(x, addr, retval)				\
+        retval = __put_user_8((u64)x,addr);
+#endif
 
 #define put_user_macro(x,ptr)						\
 	({								\
@@ -225,7 +229,7 @@ extern long __put_user_bad(void);
 	case 1:  __ret_pu = __put_user_1(( u8)((unsigned long)__pu_val),ptr); break; \
 	case 2:  __ret_pu = __put_user_2((u16)((unsigned long)__pu_val),ptr); break; \
 	case 4:  __ret_pu = __put_user_4((u32)(__pu_val),ptr); break; \
-	case 8:  __put_user_8_asm_wrap((__pu_val), ptr, __ret_pu); break; \
+	case 8:  __put_user_8_wrap((__pu_val), ptr, __ret_pu); break; \
 	default: __ret_pu = __put_user_bad(); break;			\
 	}								\
 	__ret_pu;							\

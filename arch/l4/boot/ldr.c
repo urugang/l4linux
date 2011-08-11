@@ -92,9 +92,11 @@ int main(int argc, char **argv)
 		ElfW(Phdr) *ph = (ElfW(Phdr)*)((l4_addr_t)l4util_elf_phdr(ehdr)
 		                               + i * ehdr->e_phentsize);
 		printf("PH %2d (t: %8d) offs="FMT" vaddr="FMT" vend="FMT"\n"
+		       "                    phys="FMT" ephys="FMT"\n"
 		       "                    f_sz="FMT" memsz="FMT" flgs=%c%c%c\n",
-		       i, ph->p_type, ph->p_offset, ph->p_vaddr,
-		       ph->p_vaddr + ph->p_memsz,
+		       i, ph->p_type, ph->p_offset,
+		       ph->p_vaddr, ph->p_vaddr + ph->p_memsz,
+		       ph->p_paddr, ph->p_paddr + ph->p_memsz,
 		       ph->p_filesz, ph->p_memsz,
 		       ph->p_flags & PF_R ? 'r' : '-',
 		       ph->p_flags & PF_W ? 'w' : '-',

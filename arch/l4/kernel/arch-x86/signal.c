@@ -610,10 +610,7 @@ long sys_rt_sigreturn(struct pt_regs *regs)
 		goto badframe;
 
 	sigdelsetmask(&set, ~_BLOCKABLE);
-	spin_lock_irq(&current->sighand->siglock);
-	current->blocked = set;
-	recalc_sigpending();
-	spin_unlock_irq(&current->sighand->siglock);
+	set_current_blocked(&set);
 
 	if (restore_sigcontext(regs, &frame->uc.uc_mcontext, &ax))
 		goto badframe;
@@ -691,6 +688,9 @@ static int
 handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	      sigset_t *oldset, struct pt_regs *regs)
 {
+	sigset_t blocked;
+	int ret;
+
 #ifdef DEBUG_L4_SIG
 	printk("%s: entering for " PRINTF_L4TASK_FORM "(%ld)\n",
 	       __func__, PRINTF_L4TASK_ARG(l4_myself()), sig);
@@ -699,7 +699,6 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	       __func__, sig, current->pid, current->comm, regs->ip,
 	       regs->flags, regs->cs, regs->orig_ax);
 #endif
-	int ret;
 
 	/* Are we from a system call? */
 	if (syscall_get_nr(current, regs) >= 0) {
@@ -762,12 +761,10 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	 */
 	regs->flags &= ~X86_EFLAGS_TF;
 
-	spin_lock_irq(&current->sighand->siglock);
-	sigorsets(&current->blocked, &current->blocked, &ka->sa.sa_mask);
+	sigorsets(&blocked, &current->blocked, &ka->sa.sa_mask);
 	if (!(ka->sa.sa_flags & SA_NODEFER))
-		sigaddset(&current->blocked, sig);
-	recalc_sigpending();
-	spin_unlock_irq(&current->sighand->siglock);
+		sigaddset(&blocked, sig);
+	set_current_blocked(&blocked);
 
 	tracehook_signal_handler(sig, info, ka, regs,
 				 test_thread_flag(TIF_SINGLESTEP));

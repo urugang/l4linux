@@ -1204,7 +1204,12 @@ void l4x_vcpu_iret(struct task_struct *p,
 asmlinkage void l4x_vcpu_ret_from_fork(struct pt_regs regs)
 {
 	struct task_struct *p = current;
+#ifdef CONFIG_X86_64
+	clear_ti_thread_flag(current_thread_info(), TIF_FORK);
+	l4x_vcpu_iret(p, &p->thread, p->thread.regsp, 0, 0, 1);
+#else
 	l4x_vcpu_iret(p, &p->thread, &regs, 0, 0, 1);
+#endif
 }
 #endif
 
@@ -1278,6 +1283,14 @@ asm(
 "	b	l4x_vcpu_entry_c \n\t"
 );
 
+asmlinkage void l4x_vcpu_entry_c(void)
+#elif defined(CONFIG_X86_64)
+asm(
+".global l4x_vcpu_entry \n\t"
+"l4x_vcpu_entry: \n\t"
+"	andq	$~15, %rsp\n\t"
+"	jmp	l4x_vcpu_entry_c \n\t"
+);
 asmlinkage void l4x_vcpu_entry_c(void)
 #else
 asmlinkage void l4x_vcpu_entry(void)

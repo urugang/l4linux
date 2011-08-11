@@ -11,4 +11,6 @@
 #define __io(a)			__typesafe_io(a)
 #define __mem_pci(a)		(a)
 
+#define IO_ADDRESS(n) ((void __iomem *)n)
+
 #endif /* ! __ASM_L4__ARCH_ARM__ARCH__IO_H__ */

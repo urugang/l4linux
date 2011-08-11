@@ -6,7 +6,7 @@ obj-y		:= init.o flush.o ioremap.o proc-l4.o dma-mapping.o \
                    fault.o fault-armv.o extable.o mmap.o \
 		   pgd.o mmu.o iomap.o vmregion.o idmap.o
 
-obj-$(CONFIG_L4_ARM_BUILD_FOR_V6K) += context.o
+obj-$(CONFIG_CPU_COPY_V6) += context.o
 
 KBUILD_CPPFLAGS += -I$(srctree)/arch/arm/mm
 

@@ -301,9 +301,9 @@ core-y += arch/l4/
 
 -include $(L4OBJ)/l4defs.mk.inc
 
-L4_REQUIRED_MODS		:= l4re-main libc_be_minimal_log_io \
-                                   libc_minimal libsupc++_minimal \
-                                   log l4re_c-util \
+L4_REQUIRED_MODS		:= libc_be_minimal_log_io \
+                                   libc_minimal libc_minimal_l4re \
+				   libsupc++_minimal log l4re_c-util \
                                    $(if $(CONFIG_L4_LINK_LIBIO_DIRECT),libio-direct,libio) \
 				   $(L4LX_E_L-y)
 

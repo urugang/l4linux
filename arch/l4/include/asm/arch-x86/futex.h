@@ -12,7 +12,7 @@
 #include <asm/system.h>
 
 #ifdef CONFIG_L4
-#include <asm/generic/memory.h>
+#include <asm/generic/futex-helper.h>
 #endif
 
 #define __futex_atomic_op1(insn, ret, oldval, uaddr, oparg)	\
@@ -50,10 +50,7 @@ static inline int futex_atomic_op_inuser(int encoded_op, u32 __user *uaddr)
 	int oldval = 0, ret, tem;
 
 #ifdef CONFIG_L4
-	unsigned long page, offset;
-	if ((page = parse_ptabs_write((unsigned long)uaddr, &offset)) == -EFAULT)
-		return -EFAULT;
-	uaddr = (u32 *)(page + offset);
+	L4X_FUTEX_TRANSLATE_UADDR_NOCHECK(uaddr);
 #endif
 
 	if (encoded_op & (FUTEX_OP_OPARG_SHIFT << 28))
@@ -132,12 +129,7 @@ static inline int futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 #endif
 
 #ifdef CONFIG_L4
-	if (current->mm) {
-		unsigned long page, offset;
-		if ((page = parse_ptabs_write((unsigned long)uaddr, &offset)) == -EFAULT)
-			return -EFAULT;
-		uaddr = (u32 *)(page + offset);
-	}
+	L4X_FUTEX_TRANSLATE_UADDR(uaddr);
 	if (uaddr == NULL) /* Cheat in-kernel test */
 		return -EFAULT;
 #endif

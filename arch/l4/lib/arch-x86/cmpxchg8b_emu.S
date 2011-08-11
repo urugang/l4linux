@@ -31,7 +31,6 @@ CFI_STARTPROC
 # eax:edx with the expected value)
 #
 cmpxchg8b_emu:
-cli
 #ifdef CONFIG_L4
 	push %eax
 	push %edx

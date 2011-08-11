@@ -47,7 +47,7 @@
 #include <asm/l4x/utcb.h>
 #include <asm/l4x/signal.h>
 
-#if 0
+#if 1
 #define TBUF_LOG_IDLE(x)        TBUF_DO_IT(x)
 #define TBUF_LOG_WAKEUP_IDLE(x)	TBUF_DO_IT(x)
 #define TBUF_LOG_USER_PF(x)     TBUF_DO_IT(x)

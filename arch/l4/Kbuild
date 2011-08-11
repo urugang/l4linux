@@ -5,6 +5,7 @@ obj-y				+= kernel/			\
 obj-$(CONFIG_L4_ARCH_X86)	+= ../x86/crypto/
 obj-$(CONFIG_L4_ARCH_X86)	+= ../x86/vdso/
 obj-$(CONFIG_L4_ARCH_X86)	+= ../x86/platform/
+obj-$(CONFIG_L4_ARCH_X86)	+= ../x86/net/
 
 ifeq ($(BASEARCH),arm)
 obj-$(CONFIG_FPE_NWFPE)		+= ../arm/nwfpe/

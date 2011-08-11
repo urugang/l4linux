@@ -248,3 +248,19 @@ void v4wb_dma_flush_range(const void *start, const void *end)
 {
 	l4_cache_flush_data((unsigned long)start, (unsigned long)end);
 }
+
+
+#ifdef CONFIG_SMP
+
+#include <asm/generic/smp_ipi.h>
+
+void l4x_raise_softirq(const struct cpumask *mask, unsigned ipi)
+{
+	int cpu;
+
+	for_each_cpu(cpu, mask) {
+		l4x_cpu_ipi_enqueue_vector(cpu, ipi);
+		l4x_cpu_ipi_trigger(cpu);
+	}
+}
+#endif

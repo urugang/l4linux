@@ -36,6 +36,10 @@ unsigned l4x_utcb_get_orig_segment(void);
 void l4x_load_percpu_gdt_descriptor(struct desc_struct *gdt);
 #endif
 
+#ifdef ARCH_arm
+void l4x_raise_softirq(const struct cpumask *mask, unsigned ipi);
+#endif
+
 #else
 /* UP Systems */
 

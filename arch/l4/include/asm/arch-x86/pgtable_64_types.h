@@ -53,13 +53,16 @@ typedef struct { pteval_t pte; } pte_t;
 
 /* See Documentation/x86/x86_64/mm.txt for a description of the memory map. */
 #define MAXMEM		 _AC(__AC(1, UL) << MAX_PHYSMEM_BITS, UL)
+#ifdef CONFIG_L4
+#define VMALLOC_START    _AC(0x0000000100000000, UL)
+#define VMALLOC_END      _AC(0x00000001ffffffff, UL)
+#define VMEMMAP_START	 _AC(0x0000000300000000, UL)
+#define MODULES_VADDR    _AC(0x0000000002000000, UL)
+#define MODULES_END      _AC(0x0000000010000000, UL)
+#else
 #define VMALLOC_START    _AC(0xffffc90000000000, UL)
 #define VMALLOC_END      _AC(0xffffe8ffffffffff, UL)
 #define VMEMMAP_START	 _AC(0xffffea0000000000, UL)
-#ifdef CONFIG_L4
-#define MODULES_VADDR    _AC(0x00000000a0000000, UL)
-#define MODULES_END      _AC(0x00000000ff000000, UL)
-#else
 #define MODULES_VADDR    _AC(0xffffffffa0000000, UL)
 #define MODULES_END      _AC(0xffffffffff000000, UL)
 #endif

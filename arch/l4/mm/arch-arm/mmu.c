@@ -33,8 +33,6 @@
 
 #include <asm/mach-types.h>
 
-DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
-
 /*
  * empty_zero_page is a special page that is used for
  * zero-initialized data and COW.
@@ -768,19 +766,16 @@ early_param("vmalloc", early_vmalloc);
 
 static phys_addr_t lowmem_limit __initdata = 0;
 
-static void __init sanity_check_meminfo(void)
+void __init sanity_check_meminfo(void)
 {
 	int i, j, highmem = 0;
-
-	lowmem_limit = __pa(vmalloc_min - 1) + 1;
-	memblock_set_current_limit(lowmem_limit);
 
 	for (i = 0, j = 0; i < meminfo.nr_banks; i++) {
 		struct membank *bank = &meminfo.bank[j];
 		*bank = meminfo.bank[i];
 
 #ifdef CONFIG_HIGHMEM
-		if (__va(bank->start) > vmalloc_min ||
+		if (__va(bank->start) >= vmalloc_min ||
 		    __va(bank->start) < (void *)PAGE_OFFSET)
 			highmem = 1;
 
@@ -838,6 +833,9 @@ static void __init sanity_check_meminfo(void)
 			bank->size = newsize;
 		}
 #endif
+		if (!bank->highmem && bank->start + bank->size > lowmem_limit)
+			lowmem_limit = bank->start + bank->size;
+
 		j++;
 	}
 #ifdef CONFIG_HIGHMEM
@@ -861,6 +859,7 @@ static void __init sanity_check_meminfo(void)
 	}
 #endif
 	meminfo.nr_banks = j;
+	memblock_set_current_limit(lowmem_limit);
 }
 
 static inline void prepare_page_table(void)
@@ -1042,8 +1041,9 @@ void __init paging_init(struct machine_desc *mdesc)
 {
 	void *zero_page;
 
+	memblock_set_current_limit(lowmem_limit);
+
 	build_mem_type_table();
-	sanity_check_meminfo();
 	prepare_page_table();
 	map_lowmem();
 	devicemaps_init(mdesc);
