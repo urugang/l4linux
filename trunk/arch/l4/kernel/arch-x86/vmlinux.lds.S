@@ -159,21 +159,37 @@ SECTIONS
 #ifdef CONFIG_X86_64
 
 #ifdef CONFIG_L4
-#define VSYSCALL_ADDR 0x800000
+#define VSYSCALL_ADDR 0x0000000020000000
 #else
 #define VSYSCALL_ADDR (-10*1024*1024)
 #endif
 
 #define VLOAD_OFFSET (VSYSCALL_ADDR - __vsyscall_0 + LOAD_OFFSET)
+#ifndef CONFIG_L4
 #define VLOAD(x) (ADDR(x) - VLOAD_OFFSET)
+#else
+#define VLOAD(x) (ADDR(x))
+#endif
 
 #define VVIRT_OFFSET (VSYSCALL_ADDR - __vsyscall_0)
+#ifndef CONFIG_L4 
 #define VVIRT(x) (ADDR(x) - VVIRT_OFFSET)
+#else
+#define VVIRT(x) (ADDR(x))
+#endif
+#define EMIT_VVAR(x, offset) .vsyscall_var_ ## x	\
+	ADDR(.vsyscall_0) + offset		 	\
+	: AT(VLOAD(.vsyscall_var_ ## x)) {     		\
+		*(.vsyscall_var_ ## x)			\
+	}						\
+	x = VVIRT(.vsyscall_var_ ## x);
 
 	. = ALIGN(4096);
 	__vsyscall_0 = .;
 
+#ifndef CONFIG_L4
 	. = VSYSCALL_ADDR;
+#endif
 	.vsyscall_0 : AT(VLOAD(.vsyscall_0)) {
 		*(.vsyscall_0)
 	} :user
@@ -183,18 +199,6 @@ SECTIONS
 		*(.vsyscall_fn)
 	}
 
-	. = ALIGN(L1_CACHE_BYTES);
-	.vsyscall_gtod_data : AT(VLOAD(.vsyscall_gtod_data)) {
-		*(.vsyscall_gtod_data)
-	}
-
-	vsyscall_gtod_data = VVIRT(.vsyscall_gtod_data);
-	.vsyscall_clock : AT(VLOAD(.vsyscall_clock)) {
-		*(.vsyscall_clock)
-	}
-	vsyscall_clock = VVIRT(.vsyscall_clock);
-
-
 	.vsyscall_1 ADDR(.vsyscall_0) + 1024: AT(VLOAD(.vsyscall_1)) {
 		*(.vsyscall_1)
 	}
@@ -202,20 +206,13 @@ SECTIONS
 		*(.vsyscall_2)
 	}
 
-	.vgetcpu_mode : AT(VLOAD(.vgetcpu_mode)) {
-		*(.vgetcpu_mode)
-	}
-	vgetcpu_mode = VVIRT(.vgetcpu_mode);
-
-	. = ALIGN(L1_CACHE_BYTES);
-	.jiffies : AT(VLOAD(.jiffies)) {
-		*(.jiffies)
-	}
-	jiffies = VVIRT(.jiffies);
-
 	.vsyscall_3 ADDR(.vsyscall_0) + 3072: AT(VLOAD(.vsyscall_3)) {
 		*(.vsyscall_3)
 	}
+
+#define __VVAR_KERNEL_LDS
+#include <asm/vvar.h>
+#undef __VVAR_KERNEL_LDS
 
 	. = __vsyscall_0 + PAGE_SIZE;
 
@@ -224,6 +221,7 @@ SECTIONS
 #undef VLOAD
 #undef VVIRT_OFFSET
 #undef VVIRT
+#undef EMIT_VVAR
 
 #endif /* CONFIG_X86_64 */
 
@@ -314,6 +312,13 @@ SECTIONS
 	}
 
 	. = ALIGN(8);
+	.apicdrivers : AT(ADDR(.apicdrivers) - LOAD_OFFSET) {
+		__apicdrivers = .;
+		*(.apicdrivers);
+		__apicdrivers_end = .;
+	}
+
+	. = ALIGN(8);
 	/*
 	 * .exit.text is discard at runtime, not link time, to deal with
 	 *  references from .altinstructions and .eh_frame
@@ -327,7 +332,7 @@ SECTIONS
 	}
 
 #if !defined(CONFIG_X86_64) || !defined(CONFIG_SMP)
-	PERCPU(INTERNODE_CACHE_BYTES, PAGE_SIZE)
+	PERCPU_SECTION(INTERNODE_CACHE_BYTES)
 #endif
 
 	. = ALIGN(PAGE_SIZE);

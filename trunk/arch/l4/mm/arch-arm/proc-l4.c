@@ -8,7 +8,9 @@
 #include <linux/mm.h>
 #include <linux/string.h>
 #include <linux/highmem.h>
+#include <linux/dma-mapping.h>
 
+#include <asm/cacheflush.h>
 #include <asm/elf.h>
 #include <asm/page.h>
 #include <asm/procinfo.h>
@@ -20,16 +22,10 @@
 #include <asm/generic/memory.h>
 #include <asm/generic/setup.h>
 
-void cpu_sa1100_dcache_clean_area(void *addr, int sz)
-{ l4_cache_clean_data((unsigned long)addr, (unsigned long)addr + sz - 1); }
-void cpu_arm926_dcache_clean_area(void *addr, int sz)
-{ l4_cache_clean_data((unsigned long)addr, (unsigned long)addr + sz - 1); }
-void cpu_v6_dcache_clean_area(void *addr, int sz)
+void cpu_dcache_clean_area(void *addr, int sz)
 { l4_cache_clean_data((unsigned long)addr, (unsigned long)addr + sz - 1); }
 
-void cpu_sa1100_switch_mm(unsigned long pgd_phys, struct mm_struct *mm) {}
-void cpu_arm926_switch_mm(unsigned long pgd_phys, struct mm_struct *mm) {}
-void cpu_v6_switch_mm(unsigned long pgd_phys, struct mm_struct *mm) {}
+void cpu_do_switch_mm(unsigned long pgd_phys, struct mm_struct *mm) {}
 
 extern unsigned long l4x_set_pte(struct mm_struct *mm, unsigned long addr, pte_t pteptr, pte_t pteval);
 extern void          l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte_t ptep);
@@ -46,11 +42,7 @@ static inline void l4x_cpu_set_pte_ext(pte_t *pteptr, pte_t pteval,
 	*pteptr = pteval;
 }
 
-void cpu_sa1100_set_pte_ext(pte_t *pteptr, pte_t pteval, unsigned int ext)
-{ l4x_cpu_set_pte_ext(pteptr, pteval, ext); }
-void cpu_arm926_set_pte_ext(pte_t *pteptr, pte_t pteval, unsigned int ext)
-{ l4x_cpu_set_pte_ext(pteptr, pteval, ext); }
-void cpu_v6_set_pte_ext(pte_t *pteptr, pte_t pteval, unsigned int ext)
+void cpu_set_pte_ext(pte_t *pteptr, pte_t pteval, unsigned int ext)
 { l4x_cpu_set_pte_ext(pteptr, pteval, ext); }
 
 
@@ -61,14 +53,7 @@ extern void l4x_global_halt(void);
  * cpu_do_idle()
  * Cause the processor to idle
  */
-int cpu_sa1100_do_idle(void)
-{
-#ifdef CONFIG_L4_VCPU
-	l4x_global_halt();
-#endif
-	return 0;
-}
-int cpu_arm926_do_idle(void)
+int cpu_do_idle(void)
 {
 #ifdef CONFIG_L4_VCPU
 	l4x_global_halt();
@@ -76,19 +61,7 @@ int cpu_arm926_do_idle(void)
 	return 0;
 }
 
-int cpu_v6_do_idle(void)
-{
-#ifdef CONFIG_L4_VCPU
-	l4x_global_halt();
-#endif
-	return 0;
-}
-
-void cpu_sa1100_proc_init(void) { printk("%s\n", __func__); }
-void cpu_arm926_proc_init(void) { printk("%s\n", __func__); }
-#ifdef CONFIG_CPU_V6K
-void cpu_v6_proc_init(void) { printk("%s\n", __func__); }
-#endif
+void cpu_proc_init(void) { printk("%s\n", __func__); }
 
 /*
  * cpu_proc_fin()
@@ -97,11 +70,7 @@ void cpu_v6_proc_init(void) { printk("%s\n", __func__); }
  *  - Disable interrupts
  *  - Clean and turn off caches.
  */
-void cpu_sa1100_proc_fin(void) { }
-void cpu_arm926_proc_fin(void) { }
-#ifdef CONFIG_CPU_V6K
-void cpu_v6_proc_fin(void) { }
-#endif
+void cpu_proc_fin(void) { }
 
 void  __attribute__((noreturn)) l4x_cpu_reset(unsigned long addr)
 {
@@ -123,13 +92,8 @@ static inline void __copy_user_highpage(struct page *to, struct page *from,
         kunmap_atomic(kfrom, KM_USER0);
 }
 
-void v4wb_copy_user_highpage(struct page *to, struct page *from,
-                             unsigned long vaddr, struct vm_area_struct *vma)
-{
-	__copy_user_highpage(to, from, vaddr, vma);
-}
-void arm926_copy_user_highpage(struct page *to, struct page *from,
-                               unsigned long vaddr, struct vm_area_struct *vma)
+void __glue(_USER, _copy_user_highpage)(struct page *to, struct page *from,
+                                        unsigned long vaddr, struct vm_area_struct *vma)
 {
 	__copy_user_highpage(to, from, vaddr, vma);
 }
@@ -141,28 +105,17 @@ static inline void __clear_user_highpage(struct page *page, unsigned long vaddr)
 	kunmap_atomic(kaddr, KM_USER0);
 }
 
-void v4wb_clear_user_highpage(struct page *page, unsigned long vaddr)
-{
-	__clear_user_highpage(page, vaddr);
-}
-void arm926_clear_user_highpage(struct page *page, unsigned long vaddr)
+void __glue(_USER, _clear_user_highpage)(struct page *page, unsigned long vaddr)
 {
 	__clear_user_highpage(page, vaddr);
 }
 
-void v4wbi_flush_user_tlb_range(unsigned long start, unsigned long end,
-                               struct vm_area_struct *mm)
+void __glue(_TLB, _flush_user_tlb_range)(unsigned long start, unsigned long end,
+                                          struct vm_area_struct *mm)
 {}
 
-#ifdef CONFIG_CPU_V6K
-void v6wbi_flush_user_tlb_range(unsigned long start, unsigned long end,
-                               struct vm_area_struct *mm)
-{
-}
-#endif
-
-void arm926_flush_user_cache_range(unsigned long start, unsigned long end,
-                                 unsigned int flags)
+void __glue(_CACHE, _flush_user_cache_range)(unsigned long start, unsigned long end,
+                                            unsigned int flags)
 {
 	pgd_t *pgd;
 
@@ -185,31 +138,25 @@ void arm926_flush_user_cache_range(unsigned long start, unsigned long end,
 	}
 }
 
-void arm926_flush_user_cache_all(void)
+void __glue(_CACHE, _flush_user_cache_all)(void)
 {
 }
 
-void v4wbi_flush_kern_tlb_range(unsigned long start, unsigned long end)
+void __glue(_TLB, _flush_kern_tlb_range)(unsigned long start, unsigned long end)
 {
 }
 
-#ifdef CONFIG_CPU_V6K
-void v6wbi_flush_kern_tlb_range(unsigned long start, unsigned long end)
+void __glue(_CACHE, _flush_kern_cache_all)(void)
 {
-}
-#endif
-
-void arm926_flush_kern_cache_all(void)
-{
-	printk("arm926_flush_kern_cache_all()\n");
+	printk("%s()\n", __func__);
 }
 
-void arm926_coherent_kern_range(unsigned long start, unsigned long end)
+void __glue(_CACHE, _coherent_kern_range)(unsigned long start, unsigned long end)
 {
 	l4_cache_coherent(start, end - 1);
 }
 
-void arm926_coherent_user_range(unsigned long start, unsigned long end)
+void __glue(_CACHE, _coherent_user_range)(unsigned long start, unsigned long end)
 {
 	pgd_t *pgd;
 
@@ -232,25 +179,17 @@ void arm926_coherent_user_range(unsigned long start, unsigned long end)
 	}
 }
 
-void arm926_flush_kern_dcache_area(void *x, size_t size)
+void __glue(_CACHE, _flush_kern_dcache_area)(void *x, size_t size)
 {
 	l4_cache_clean_data((unsigned long)x,
 	                    (unsigned long)x + size - 1);
 }
 
-#if 0
-void update_mmu_cache(struct vm_area_struct *vma, unsigned long addr, pte_t pte)
-{
-	printk("%s %d\n", __func__, __LINE__);
-	//outstring("update_mmu_cache\n");
-}
-#endif
-
 void l4x_flush_icache_all(void)
 {
 }
 
-void arm926_flush_icache_all(void)
+void __glue(_CACHE, _flush_icache_all)(void)
 {
 }
 
@@ -259,72 +198,66 @@ static void __data_abort(unsigned long pc)
 	printk("%s called.\n", __func__);
 }
 
-void arm926_dma_flush_range(const void *start, const void *stop)
+void __glue(_CACHE, _dma_flush_range)(const void *start, const void *stop)
 {
 	printk("%s(%p, %p) called.\n", __func__, start, stop);
 	l4_cache_flush_data((unsigned long)start, (unsigned long)stop);
 }
 
-void arm926_dma_unmap_area(const void *start, size_t sz, int direction)
+void __glue(_CACHE, _dma_map_area)(const void *start, size_t sz, int direction)
 {
-	printk("%s(%p, %zd, %d) called.\n", __func__, start, sz, direction);
+	if (direction == DMA_FROM_DEVICE)
+		l4_cache_inv_data((unsigned long)start,
+		                  (unsigned long)start + sz);
+	else
+		l4_cache_dma_coherent((unsigned long)start,
+		                      (unsigned long)start + sz);
 }
 
-void arm926_dma_map_area(const void *start, size_t sz, int direction)
+void __glue(_CACHE, _dma_unmap_area)(const void *start, size_t sz, int direction)
 {
-	printk("%s(%p, %zd, %d) called.\n", __func__, start, sz, direction);
+	if (direction != DMA_TO_DEVICE)
+		l4_cache_inv_data((unsigned long)start,
+		                  (unsigned long)start + sz);
 }
 
-/*
- * Could be that we need at least some of the definitions in MULTI only?.
- * That's why we just include this multi32.h file down here.
- */
-
-#undef cpu_proc_init
-#undef cpu_proc_fin
-#undef cpu_reset
-#undef cpu_do_idle
-#undef cpu_dcache_clean_area
-#undef cpu_set_pte_ext
-#undef cpu_do_switch_mm
-#include <asm/cacheflush.h>
 
 static struct processor l4_proc_fns = {
 	._data_abort         = __data_abort,
-	._proc_init          = cpu_sa1100_proc_init,
-	._proc_fin           = cpu_sa1100_proc_fin,
+	._proc_init          = cpu_proc_init,
+	._proc_fin           = cpu_proc_fin,
 	.reset               = l4x_cpu_reset,
-	._do_idle            = cpu_sa1100_do_idle,
-	.dcache_clean_area   = cpu_sa1100_dcache_clean_area,
-	.switch_mm           = cpu_sa1100_switch_mm,
-	.set_pte_ext         = cpu_sa1100_set_pte_ext,
+	._do_idle            = cpu_do_idle,
+	.dcache_clean_area   = cpu_dcache_clean_area,
+	.switch_mm           = cpu_do_switch_mm,
+	.set_pte_ext         = cpu_set_pte_ext,
 	//.suspend_size = ...,
 	//.do_suspend = ...,
 	//.do_resume = ...,
 };
 
 static struct cpu_tlb_fns l4_tlb_fns = {
-	.flush_user_range    = v4wbi_flush_user_tlb_range,
-	.flush_kern_range    = v4wbi_flush_kern_tlb_range,
+	.flush_user_range    = __glue(_TLB, _flush_user_tlb_range),
+	.flush_kern_range    = __glue(_TLB, _flush_kern_tlb_range),
 	.tlb_flags           = 0,
 };
 
 static struct cpu_user_fns l4_cpu_user_fns = {
-	.cpu_clear_user_highpage = v4wb_clear_user_highpage,
-	.cpu_copy_user_highpage  = v4wb_copy_user_highpage,
+	.cpu_clear_user_highpage = __glue(_USER, _clear_user_highpage),
+	.cpu_copy_user_highpage  = __glue(_USER, _copy_user_highpage),
 };
 
 static struct cpu_cache_fns l4_cpu_cache_fns = {
-	.flush_icache_all       = arm926_flush_icache_all,
-	.flush_kern_all         = arm926_flush_kern_cache_all,
-	.flush_user_all         = arm926_flush_user_cache_all,
-	.flush_user_range       = arm926_flush_user_cache_range,
-	.coherent_kern_range    = arm926_coherent_kern_range,
-	.coherent_user_range    = arm926_coherent_user_range,
-	.flush_kern_dcache_area = arm926_flush_kern_dcache_area,
-	.dma_map_area           = arm926_dma_map_area,
-	.dma_unmap_area         = arm926_dma_unmap_area,
-	.dma_flush_range	= arm926_dma_flush_range,
+	.flush_icache_all       = __glue(_CACHE, _flush_icache_all),
+	.flush_kern_all         = __glue(_CACHE, _flush_kern_cache_all),
+	.flush_user_all         = __glue(_CACHE, _flush_user_cache_all),
+	.flush_user_range       = __glue(_CACHE, _flush_user_cache_range),
+	.coherent_kern_range    = __glue(_CACHE, _coherent_kern_range),
+	.coherent_user_range    = __glue(_CACHE, _coherent_user_range),
+	.flush_kern_dcache_area = __glue(_CACHE, _flush_kern_dcache_area),
+	.dma_map_area           = __glue(_CACHE, _dma_map_area),
+	.dma_unmap_area         = __glue(_CACHE, _dma_unmap_area),
+	.dma_flush_range	= __glue(_CACHE, _dma_flush_range),
 };
 
 static struct proc_info_list l4_proc_info __attribute__((__section__(".proc.info.init"))) = {
@@ -333,7 +266,10 @@ static struct proc_info_list l4_proc_info __attribute__((__section__(".proc.info
 	.__cpu_mm_mmu_flags = 0,
 	.__cpu_io_mmu_flags = 0,
 	.__cpu_flush     = 0,
-#ifndef CONFIG_CPU_V6K
+#ifdef CONFIG_CPU_V7
+	.arch_name       = "armv7",
+	.elf_name        = "v7",
+#elif !defined(CONFIG_CPU_V6K)
 	.arch_name       = "armv5",
 	.elf_name        = "v5",
 #else

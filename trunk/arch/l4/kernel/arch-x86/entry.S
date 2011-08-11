@@ -1531,6 +1531,7 @@ zeroentry simd_coprocessor_error do_simd_coprocessor_error
 	/* edi:  new selector */
 ENTRY(native_load_gs_index)
 	CFI_STARTPROC
+#if 0
 	pushfq_cfi
 	DISABLE_INTERRUPTS(CLBR_ANY & ~CLBR_RDI)
 	SWAPGS
@@ -1539,10 +1540,12 @@ gs_change:
 2:	mfence		/* workaround */
 	SWAPGS
 	popfq_cfi
+#endif
 	ret
 	CFI_ENDPROC
 END(native_load_gs_index)
 
+#if 0
 	.section __ex_table,"a"
 	.align 8
 	.quad gs_change,bad_gs
@@ -1555,6 +1558,7 @@ bad_gs:
 	movl %eax,%gs
 	jmp  2b
 	.previous
+#endif
 
 ENTRY(kernel_thread_helper)
 	pushq $0		# fake return address
@@ -1856,8 +1860,10 @@ error_kernelspace:
 	movl %ecx,%eax	/* zero extend */
 	cmpq %rax,RIP+8(%rsp)
 	je bstep_iret
+#if 0
 	cmpq $gs_change,RIP+8(%rsp)
 	je error_swapgs
+#endif
 	jmp error_sti
 
 bstep_iret:

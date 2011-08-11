@@ -256,6 +256,27 @@ static inline void squash_the_stupid_serial_number(struct cpuinfo_x86 *c)
 }
 #endif
 
+static int disable_smep __cpuinitdata;
+static __init int setup_disable_smep(char *arg)
+{
+	disable_smep = 1;
+	return 1;
+}
+__setup("nosmep", setup_disable_smep);
+
+static __cpuinit void setup_smep(struct cpuinfo_x86 *c)
+{
+#ifndef CONFIG_L4
+	if (cpu_has(c, X86_FEATURE_SMEP)) {
+		if (unlikely(disable_smep)) {
+			setup_clear_cpu_cap(X86_FEATURE_SMEP);
+			clear_in_cr4(X86_CR4_SMEP);
+		} else
+			set_in_cr4(X86_CR4_SMEP);
+	}
+#endif
+}
+
 /*
  * Some CPU features depend on higher CPUID levels, which may not always
  * be available due to CPUID level capping or broken virtualization
@@ -466,13 +487,6 @@ void __cpuinit detect_ht(struct cpuinfo_x86 *c)
 	if (smp_num_siblings <= 1)
 		goto out;
 
-	if (smp_num_siblings > nr_cpu_ids) {
-		pr_warning("CPU: Unsupported number of siblings %d",
-			   smp_num_siblings);
-		smp_num_siblings = 1;
-		return;
-	}
-
 	index_msb = get_count_order(smp_num_siblings);
 	c->phys_proc_id = apic->phys_pkg_id(c->initial_apicid, index_msb);
 
@@ -573,8 +587,7 @@ void __cpuinit get_cpu_cap(struct cpuinfo_x86 *c)
 
 		cpuid_count(0x00000007, 0, &eax, &ebx, &ecx, &edx);
 
-		if (eax > 0)
-			c->x86_capability[9] = ebx;
+		c->x86_capability[9] = ebx;
 	}
 
 	/* AMD-defined flags: level 0x80000001 */
@@ -681,6 +694,8 @@ static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 	c->cpu_index = 0;
 #endif
 	filter_cpuid_features(c, false);
+
+	setup_smep(c);
 }
 
 void __init early_cpu_init(void)
@@ -766,6 +781,8 @@ static void __cpuinit generic_identify(struct cpuinfo_x86 *c)
 #endif
 	}
 
+	setup_smep(c);
+
 	get_model_name(c); /* Default name */
 
 	detect_nopl(c);
@@ -811,7 +828,11 @@ static void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 	}
 
 #ifdef CONFIG_X86_64
+#ifdef CONFIG_L4
+	c->apicid = 0;
+#else
 	c->apicid = apic->phys_pkg_id(c->initial_apicid, 0);
+#endif
 #endif
 
 	/*
@@ -902,7 +923,7 @@ static void vgetcpu_set_mode(void)
 void __init identify_boot_cpu(void)
 {
 	identify_cpu(&boot_cpu_data);
-	init_c1e_mask();
+	init_amd_e400_c1e_mask();
 #ifdef CONFIG_X86_32
 	sysenter_setup();
 	enable_sep_cpu();
@@ -1174,7 +1195,9 @@ void __cpuinit cpu_init(void)
 
 	pr_debug("Initializing CPU#%d\n", cpu);
 
+#ifndef CONFIG_L4
 	clear_in_cr4(X86_CR4_VME|X86_CR4_PVI|X86_CR4_TSD|X86_CR4_DE);
+#endif
 
 	/*
 	 * Initialize the per-CPU GDT with the boot GDT,
@@ -1184,13 +1207,17 @@ void __cpuinit cpu_init(void)
 	switch_to_new_gdt(cpu);
 	loadsegment(fs, 0);
 
+#ifndef CONFIG_L4
 	load_idt((const struct desc_ptr *)&idt_descr);
+#endif
 
 	memset(me->thread.tls_array, 0, GDT_ENTRY_TLS_ENTRIES * 8);
+#ifndef CONFIG_L4
 	syscall_init();
 
 	wrmsrl(MSR_FS_BASE, 0);
 	wrmsrl(MSR_KERNEL_GS_BASE, 0);
+#endif
 	barrier();
 
 	x86_configure_nx();
@@ -1226,8 +1253,10 @@ void __cpuinit cpu_init(void)
 
 	load_sp0(t, &current->thread);
 	set_tss_desc(cpu, t);
+#ifndef CONFIG_L4
 	load_TR_desc();
 	load_LDT(&init_mm.context);
+#endif
 
 	clear_all_debug_regs();
 	dbg_restore_debug_regs();

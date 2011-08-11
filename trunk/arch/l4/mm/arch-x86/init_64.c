@@ -28,6 +28,7 @@
 #include <linux/poison.h>
 #include <linux/dma-mapping.h>
 #include <linux/module.h>
+#include <linux/memory.h>
 #include <linux/memory_hotplug.h>
 #include <linux/nmi.h>
 #include <linux/gfp.h>
@@ -53,6 +54,8 @@
 #include <asm/init.h>
 #include <asm/uv/uv.h>
 #include <asm/setup.h>
+
+#include <asm/l4lxapi/memory.h>
 
 static int __init parse_direct_gbpages_off(char *arg)
 {
@@ -329,7 +332,11 @@ static __ref void *alloc_low_page(unsigned long *phys)
 	if (pfn >= pgt_buf_top)
 		panic("alloc_low_page: ran out of memory");
 
+#ifdef CONFIG_L4
+	adr = __va(pfn * PAGE_SIZE);
+#else
 	adr = early_memremap(pfn * PAGE_SIZE, PAGE_SIZE);
+#endif
 	clear_page(adr);
 	*phys  = pfn * PAGE_SIZE;
 	return adr;
@@ -356,7 +363,9 @@ static __ref void unmap_low_page(void *adr)
 	if (after_bootmem)
 		return;
 
+#ifndef CONFIG_L4
 	early_iounmap((void *)((unsigned long)adr & PAGE_MASK), PAGE_SIZE);
+#endif
 }
 
 static unsigned long __meminit
@@ -616,7 +625,9 @@ void __init paging_init(void)
 	unsigned long max_zone_pfns[MAX_NR_ZONES];
 
 	memset(max_zone_pfns, 0, sizeof(max_zone_pfns));
+#ifdef CONFIG_ZONE_DMA
 	max_zone_pfns[ZONE_DMA] = MAX_DMA_PFN;
+#endif
 	max_zone_pfns[ZONE_DMA32] = MAX_DMA32_PFN;
 	max_zone_pfns[ZONE_NORMAL] = max_pfn;
 
@@ -678,14 +689,6 @@ int arch_add_memory(int nid, u64 start, u64 size)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(arch_add_memory);
-
-#if !defined(CONFIG_ACPI_NUMA) && defined(CONFIG_NUMA)
-int memory_add_physaddr_to_nid(u64 start)
-{
-	return 0;
-}
-EXPORT_SYMBOL_GPL(memory_add_physaddr_to_nid);
-#endif
 
 #endif /* CONFIG_MEMORY_HOTPLUG */
 
@@ -901,8 +904,6 @@ const char *arch_vma_name(struct vm_area_struct *vma)
 }
 
 #ifdef CONFIG_X86_UV
-#define MIN_MEMORY_BLOCK_SIZE   (1 << SECTION_SIZE_BITS)
-
 unsigned long memory_block_size_bytes(void)
 {
 	if (is_uv_system()) {
@@ -980,6 +981,9 @@ vmemmap_populate(struct page *start_page, unsigned long size, int node)
 					node_start = node;
 					p_start = p;
 				}
+
+				l4lx_memory_map_virtual_range(addr, PMD_SIZE, __pa(p), 1);
+				// also register virtual mem...
 
 				addr_end = addr + PMD_SIZE;
 				p_end = p + PMD_SIZE;

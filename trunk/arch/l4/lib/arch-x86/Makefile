@@ -46,7 +46,7 @@ else
         lib-y += $(b)/memmove_64.o $(b)/memset_64.o
         #lib-y += copy_user_64.o rwlock_64.o copy_user_nocache_64.o
 	lib-$(CONFIG_RWSEM_XCHGADD_ALGORITHM) += $(b)/rwsem_64.o
-	lib-y += cmpxchg16b_emu.o
+	lib-y += $(b)/cmpxchg16b_emu.o
 endif
 
 obj-y                  += proc.o
@@ -60,6 +60,7 @@ proc-y                 := ../proc.o
 atomic64_32-y          := $(b)/atomic64_32.o
 cache-smp-y            := $(b)/cache-smp.o
 iomap_copy_64-y        := $(b)/iomap_copy_64.o
+cmpxchg16b_emu-y       := $(b)/cmpxchg16b_emu.o
 
 create_dir:
 	$(Q)mkdir -p $(obj)/../../../x86/lib

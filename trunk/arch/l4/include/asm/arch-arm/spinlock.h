@@ -5,6 +5,8 @@
 #error SMP not supported on pre-ARMv6 CPUs
 #endif
 
+#include <asm/processor.h>
+
 #include <linux/stringify.h>
 
 #define L4_REP_NOP_ASM__(jmpcond)           \

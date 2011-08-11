@@ -67,8 +67,12 @@ L4_EXTERNAL_FUNC(l4re_video_goos_refresh);
 L4_EXTERNAL_FUNC(l4re_video_view_set_viewport);
 L4_EXTERNAL_FUNC(l4re_video_view_stack);
 
+enum {
+	MAX_UNMAP_BITS = 32, // enough for the framebuffer
+};
+
 struct l4fb_unmap_info {
-	unsigned int map[L4_MWORD_BITS - 1 - L4_PAGESHIFT];
+	unsigned int map[MAX_UNMAP_BITS - 1 - L4_PAGESHIFT];
 	unsigned int top;
 	unsigned int weight;
 	l4_fpage_t *flexpages;
@@ -1024,7 +1028,7 @@ static void l4fb_update_dirty_init(struct l4fb_screen *screen,
 	struct l4fb_unmap_info *info = &screen->unmap_info;
 	//unsigned int num_flexpages = (L4_UTCB_GENERIC_DATA_SIZE - 2) * unmaps_per_refresh;
 	unsigned int num_flexpages = (3 - 2) * unmaps_per_refresh;
-	unsigned int log2size = L4_MWORD_BITS - 1;
+	unsigned int log2size = MAX_UNMAP_BITS - 1;
 
 	memset(info, 0, sizeof(struct l4fb_unmap_info));
 	size = l4_round_page(size);

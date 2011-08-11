@@ -17,15 +17,18 @@ obj-$(CONFIG_X86_64)	+= head_$(BITS).o
 # no stack-protector checks:
 #
 nostackp := $(call cc-option, -fno-stack-protector)
-CFLAGS_vsyscall_64.o    := $(PROFILING) -g0 $(nostackp)
-CFLAGS_hpet.o           := $(nostackp)
-CFLAGS_tsc.o            := $(nostackp)
-CFLAGS_paravirt.o       := $(nostackp)
-GCOV_PROFILE_vsyscall_64.o      := n
-GCOV_PROFILE_hpet.o             := n
-GCOV_PROFILE_tsc.o              := n
-GCOV_PROFILE_paravirt.o         := n
+CFLAGS_vsyscall_64.o	:= $(PROFILING) -g0 $(nostackp)
+CFLAGS_hpet.o		:= $(nostackp)
+CFLAGS_vread_tsc_64.o	:= $(nostackp)
+CFLAGS_paravirt.o	:= $(nostackp)
+GCOV_PROFILE_vsyscall_64.o	:= n
+GCOV_PROFILE_hpet.o		:= n
+GCOV_PROFILE_tsc.o		:= n
+GCOV_PROFILE_vread_tsc_64.o	:= n
+GCOV_PROFILE_paravirt.o		:= n
 
+# vread_tsc_64 is hot and should be fully optimized:
+CFLAGS_REMOVE_vread_tsc_64.o = -pg -fno-optimize-sibling-calls
 
 obj-y				+= i387.o xsave.o
 obj-y				+= dumpstack_$(BITS).o
@@ -36,9 +39,9 @@ obj-y				+= jump_label.o
 obj-y				+= pci-iommu_table.o
 obj-y				+= resource.o
 obj-y				+= head$(BITS).o
-obj-$(CONFIG_X86_32)		+= probe_roms_32.o
+obj-y				+= probe_roms.o
 obj-$(CONFIG_X86_32)		+= sys_i386_32.o
-obj-$(CONFIG_X86_64)            += syscall_64.o vsyscall_64.o
+obj-$(CONFIG_X86_64)            += syscall_64.o vsyscall_64.o vread_tsc_64.o
 obj-$(CONFIG_X86_64)            += sys_x86_64.o #x8664_ksyms_64.o
 obj-y				+= quirks.o
 
@@ -86,7 +89,7 @@ ds-y		+= $(b)/ds.o
 io_delay-y	+= $(b)/io_delay.o
 trampoline-y	+= $(b)/trampoline.o
 setup_percpu-y  += $(b)/setup_percpu.o
-probe_roms_32-y	+= $(b)/probe_roms_32.o
+probe_roms-y	+= $(b)/probe_roms.o
 early-quirks-y	+= $(b)/early-quirks.o
 kdebugfs-y	+= $(b)/kdebugfs.o
 dumpstack_$(BITS)-y	+= $(b)/dumpstack_$(BITS).o
@@ -98,7 +101,8 @@ resource-y      += $(b)/resource.o
 time-y          += $(b)/time.o
 pci-iommu_table-y += $(b)/pci-iommu_table.o
 syscall_64-y    += $(b)/syscall_64.o
-vsyscall_64-y   += $(b)/vsyscall_64.o
+#vsyscall_64-y   += $(b)/vsyscall_64.o
+vread_tsc_64-y	+= $(b)/vread_tsc_64.o
 hpet-y          += $(b)/hpet.o
 quirks-y        += $(b)/quirks.o
 sys_x86_64-y	+= $(b)/sys_x86_64.o

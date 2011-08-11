@@ -406,7 +406,6 @@ start_thread(struct pt_regs *regs, unsigned long new_ip, unsigned long new_sp)
 
 	//set_user_gs(regs, 0);
 	regs->fs		= 0;
-	set_fs(USER_DS);
 #ifdef CONFIG_L4_VCPU
 	regs->ds                = ds;
 	regs->es                = ds;

@@ -681,11 +681,9 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		 * If we have CONFIG_OABI_COMPAT then we need to look at the swi
 		 * value to determine if it is an EABI or an old ABI call.
 		 */
-#ifdef CONFIG_ARM_THUMB
 		if (thumb_mode(regs))
 			insn = 0;
 		else
-#endif
 			ret = sc_get_user_4(&insn, regs->ARM_pc);
 
 #elif defined(CONFIG_AEABI)
@@ -774,9 +772,15 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 #ifdef CONFIG_VFP
 	if ((t->error_code & 0x01f00000) == 0x01100000) {
 		unsigned long insn;
+		int ret;
 		l4x_fpu_get_info(l4_utcb());
 
-		if (!get_user(insn, (unsigned long *)regs->ARM_pc)) {
+		if (thumb_mode(regs))
+			ret = get_user(insn, (unsigned short *)regs->ARM_pc);
+		else
+			ret = get_user(insn, (unsigned long *)regs->ARM_pc);
+
+		if (!ret) {
 			register unsigned long r0 asm ("r7") = insn;
 			register unsigned long r2 asm ("r9") = regs->ARM_pc + 4;
 			register unsigned long r8 asm ("r8") = (unsigned long)L4X_THREAD_REGSP(t);
@@ -874,7 +878,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 			ret = get_user(val, (unsigned long *)regs->ARM_pc);
 
 		if (ret) {
-			printk("get_user error\n");
+			printk("get_user error: %d\n", ret);
 			val = ~0UL;
 		}
 		printk(" %s/%d: Undefined instruction at"

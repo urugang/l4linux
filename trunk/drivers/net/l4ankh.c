@@ -117,26 +117,25 @@ static irqreturn_t l4x_net_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static unsigned int l4x_net_irq_startup(unsigned int irq)
+static unsigned int l4x_net_irq_startup(struct irq_data *data)
 {
 	printk("L4net: %s\n", __func__);
 	return 1;
 }
 
-static void l4x_net_irq_dummy_void(unsigned int irq)
+static void l4x_net_irq_dummy_void(struct irq_data *data)
 {
 }
 
 struct irq_chip l4x_net_irq_type = {
 	.name		= "L4net IRQ",
-	.startup	= l4x_net_irq_startup,
-	.shutdown	= l4x_net_irq_dummy_void,
-	.enable		= l4x_net_irq_dummy_void,
-	.disable	= l4x_net_irq_dummy_void,
-	.mask		= l4x_net_irq_dummy_void,
-	.unmask		= l4x_net_irq_dummy_void,
-	.ack		= l4x_net_irq_dummy_void,
-	.end		= l4x_net_irq_dummy_void,
+	.irq_startup	= l4x_net_irq_startup,
+	.irq_shutdown	= l4x_net_irq_dummy_void,
+	.irq_enable	= l4x_net_irq_dummy_void,
+	.irq_disable	= l4x_net_irq_dummy_void,
+	.irq_mask	= l4x_net_irq_dummy_void,
+	.irq_unmask	= l4x_net_irq_dummy_void,
+	.irq_ack	= l4x_net_irq_dummy_void,
 };
 
 static L4_CV void l4x_ankh_irq_thread(void *data)
@@ -152,6 +151,8 @@ static L4_CV void l4x_ankh_irq_thread(void *data)
 	l4x_prepare_irq_thread(ctx, 0);
 
 	res = l4ankh_prepare_recv(L4RE_THIS_TASK_CAP);
+	if (res)
+		printk("l4ankh_prepare_recv failed with %d\n", res);
 
 	while (1) {
 		size = 16384;

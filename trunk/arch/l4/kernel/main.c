@@ -1073,6 +1073,7 @@ void __init l4x_setup_memory(char *cmdl,
 {
 	int res;
 	char *memstr;
+	char *memtypestr;
 	unsigned long memory_area_size;
 	l4_addr_t memory_area_id = 0;
 	l4_addr_t memory_area_addr;
@@ -1084,7 +1085,30 @@ void __init l4x_setup_memory(char *cmdl,
 	    && (res = memparse(memstr + 4, &memstr)))
 		l4x_mainmem_size = res;
 
-	LOG_printf("utcb %p\n", l4_utcb());
+	if ((memtypestr = strstr(cmdl, "l4memtype="))) {
+		memtypestr += 9;
+		do {
+			memtypestr++;
+			if (!strncmp(memtypestr, "floating", 8)) {
+				dm_flags &= ~L4RE_MA_PINNED;
+				memtypestr += 8;
+			} else if (!strncmp(memtypestr, "pinned", 6)) {
+				dm_flags |= L4RE_MA_PINNED;
+				memtypestr += 6;
+			} else if (!strncmp(memtypestr, "distributed", 11)) {
+				dm_flags &= ~L4RE_MA_CONTINUOUS;
+				memtypestr += 11;
+			} else if (!strncmp(memtypestr, "continuous", 10)) {
+				dm_flags |= L4RE_MA_CONTINUOUS;
+				memtypestr += 10;
+			} else {
+				LOG_printf("Unknown l4memtype option, use:\n"
+				           "  floating, pinned, distributed, continuous\n"
+				           "as a comma separated list\n");
+				l4x_exit_l4linux();
+			}
+		} while (*memtypestr == ',');
+	}
 
 	if ((l4x_mainmem_size % L4_SUPERPAGESIZE) == 0) {
 		LOG_printf("%s: Forcing superpages for main memory\n", __func__);
@@ -1130,6 +1154,7 @@ void __init l4x_setup_memory(char *cmdl,
 
 	memory_area_size = l4x_mainmem_size;
 
+#ifdef CONFIG_ZONE_DMA
 	/* Try to get ISA DMA memory */
 
 	/* See if we find a memisadma=xxx option in the command line */
@@ -1161,6 +1186,7 @@ void __init l4x_setup_memory(char *cmdl,
 		memory_area_size += l4_round_size(l4x_isa_dma_size, L4_LOG2_SUPERPAGESIZE);
 	} else
 #endif
+#endif
 		l4x_ds_isa_dma = L4_INVALID_CAP;
 
 	/* Get contiguous region in our virtual address space to put
@@ -1175,6 +1201,7 @@ void __init l4x_setup_memory(char *cmdl,
 
 	/* Attach data spaces to local address space */
 	/** First: the ISA DMA memory */
+#ifdef CONFIG_ZONE_DMA
 #if 0
 	if (!l4_is_invalid_cap(l4x_ds_isa_dma)) {
 		l4x_isa_dma_memory_start = (void *)memory_area_addr;
@@ -1191,6 +1218,7 @@ void __init l4x_setup_memory(char *cmdl,
 			l4x_exit_l4linux();
 		}
 	} else
+#endif
 #endif
 		l4x_main_memory_start = (void *)memory_area_addr;
 
@@ -1259,9 +1287,30 @@ void __init l4x_setup_memory(char *cmdl,
 	__FIXADDR_TOP = l4x_fixmap_space_start
 	                 + __end_of_permanent_fixed_addresses * PAGE_SIZE;
 #endif
-#ifndef CONFIG_X86_64
-	l4x_map_below_mainmem();
+
+#ifdef CONFIG_X86_64
+	{
+		unsigned long a = VMEMMAP_START;
+		int npages;
+		extern char vdso_start[], vdso_end[];
+
+		if (l4re_rm_reserve_area(&a, 100 << 20, 0, 20)) {
+			LOG_printf("Failed reserving vmemmap space!\n");
+			l4x_exit_l4linux();
+		}
+
+		// see arch/x86/vdso/vma.c
+		a = 4UL << 30;
+		npages = (vdso_end - vdso_start + PAGE_SIZE - 1) / PAGE_SIZE;
+		if (l4re_rm_reserve_area(&a, npages << PAGE_SHIFT,
+		                         0, L4_SUPERPAGESHIFT)) {
+			LOG_printf("VDSO area reservation failed\n");
+			l4x_exit_l4linux();
+		}
+	}
 #endif
+
+	l4x_map_below_mainmem();
 
 	// that happened with some version of ld...
 	if ((unsigned long)&_end < 0x100000)
@@ -1425,7 +1474,6 @@ static int l4x_cpu_check_pcpu(unsigned pcpu, l4_umword_t max_cpus)
 
 static struct task_struct *l4x_cpu_idler[NR_CPUS] = { &init_task, 0, };
 
-#ifdef ARCH_arm
 int l4x_cpu_cpu_get(void)
 {
 	int i = 0;
@@ -1438,7 +1486,6 @@ int l4x_cpu_cpu_get(void)
 
 	BUG();
 }
-#endif
 
 struct task_struct *l4x_cpu_idle_get(int cpu)
 {
@@ -2024,6 +2071,7 @@ static L4_CV void __init l4x_linux_startup(void *data)
 #ifdef CONFIG_X86_32
 	i386_start_kernel();
 #elif defined(CONFIG_X86_64)
+	l4x_stack_setup((struct thread_info *)per_cpu(irq_stack_union.irq_stack, 0), l4_utcb(), 0);
 	x86_64_start_kernel(NULL);
 #else
 	start_kernel();
@@ -2419,8 +2467,11 @@ int __init_refok L4_CV main(int argc, char **argv)
 	l4lx_thread_name_set(l4x_start_thread_id, "l4x-start");
 
 	/* fire up Linux server, will wait until start message */
-	main_id = l4lx_thread_create(l4x_linux_startup, 0,
-	                             (char *)init_stack + sizeof(init_stack),
+	p = (char *)init_stack + sizeof(init_stack);
+#ifdef CONFIG_X86_64
+	p = (char *)((struct pt_regs *)p - 1);
+#endif
+	main_id = l4lx_thread_create(l4x_linux_startup, 0, p,
 	                             &l4x_start_thread_id,
 	                             sizeof(l4x_start_thread_id),
 	                             CONFIG_L4_PRIO_SERVER_PROC,
@@ -2565,9 +2616,15 @@ static void l4x_setup_die_utcb(l4_exc_regs_t *exc)
 	regs_addr = exc->sp;
 
 	/* Fill arguments in regs for die params */
-	exc->RN(cx) = exc->err;
-	exc->RN(dx) = regs_addr;
-	exc->RN(ax) = (unsigned long)message;
+#ifdef CONFIG_X86_32
+	exc->ecx = exc->err;
+	exc->edx = regs_addr;
+	exc->eax = (unsigned long)message;
+#else
+	exc->rdx = exc->err;
+	exc->rsi = regs_addr;
+	exc->rdi = (unsigned long)message;
+#endif
 
 	exc->sp -= sizeof(unsigned long);
 	*(unsigned long *)exc->sp = 0;
@@ -2617,8 +2674,13 @@ static void l4x_setup_stack_for_traps(l4_exc_regs_t *exc, struct pt_regs *regs,
 	memcpy((void *)exc->sp, regs, l4x_intra_regs_size);
 
 	/* do_<exception> functions are regparm(3), arguments go in regs */
-	exc->RN(ax) = exc->sp;
-	exc->RN(dx) = exc->err;
+#ifdef CONFIG_X86_32
+	exc->eax = exc->sp;
+	exc->edx = exc->err;
+#else
+	exc->rdi = exc->sp;
+	exc->rsi = exc->err;
+#endif
 
 	/* clear TF */
 	exc->flags &= ~256;
@@ -2751,6 +2813,10 @@ static int l4x_handle_lxsyscall(l4_exc_regs_t *exc)
 	const int l4x_intra_regs_size
 		= sizeof(struct pt_regs) - 2 * sizeof(unsigned long);
 
+#ifdef CONFIG_X86_64
+	LOG_printf("possibly FIRST SYSCALL: %lx, %p...\n", exc->err, pc);
+#endif
+
 	if (pc < (void *)_stext || pc > (void *)_etext)
 		return 1; /* Not for us */
 
@@ -2817,6 +2883,8 @@ static int l4x_handle_msr(l4_exc_regs_t *exc)
 			exc->RN(ax) = exc->RN(dx) = 0;
 		} else if (reg == MSR_K7_CLK_CTL) {
 			exc->RN(ax) = 0x20000000;
+		} else if (reg == MSR_K8_TSEG_ADDR) {
+			exc->RN(ax) = exc->RN(dx) = 0;
 		} else
 			LOG_printf("WARNING: Unknown rdmsr: %08lx at %p\n", reg, pc);
 
@@ -2834,8 +2902,8 @@ static inline void l4x_print_exception(l4_cap_idx_t t, l4_exc_regs_t *exc)
 	           "sp = "l4_addr_fmt" "
 	           "trapno = 0x%lx err/pfa = 0x%lx%s\n",
 	           l4util_idstr(t), exc->ip, exc->sp,
-		   exc->trapno,
-		   exc->trapno == 14 ? exc->pfa : exc->err,
+	           exc->trapno,
+	           exc->trapno == 14 ? exc->pfa : exc->err,
 	           exc->trapno == 14 ? (exc->err & 2) ? " w" : " r" : "");
 
 	if (l4x_debug_show_exceptions >= 2
@@ -2954,13 +3022,12 @@ asm(
 
 unsigned l4x_fmrx(unsigned long reg)
 {
-	static unsigned long fpsid_cached;
 	switch (reg) {
 		case FPEXC:   return l4x_fpu_get(smp_processor_id())->fpexc;
 		case FPSCR:   return fmrx(cr1);
-		case FPSID:   if (fpsid_cached)
-				      return fpsid_cached;
-			      return (fpsid_cached = fmrx(cr0));
+		case FPSID:   return fmrx(cr0);
+		case MVFR0:   return fmrx(cr7);
+		case MVFR1:   return fmrx(cr6);
 		case FPINST:  return l4x_fpu_get(smp_processor_id())->fpinst;
 		case FPINST2: return l4x_fpu_get(smp_processor_id())->fpinst2;
 		default: printk("Invalid fmrx-reg: %ld\n", reg);
@@ -3213,9 +3280,9 @@ static int l4x_default(l4_cap_idx_t *src_id, l4_msgtag_t *tag)
 	} else if (l4_msgtag_is_page_fault(*tag)) {
 		if (l4x_debug_show_exceptions)
 			LOG_printf("Page fault: addr = " l4_addr_fmt
-				   " pc = " l4_addr_fmt " (%s%s)\n",
-				   pfa, pc,
-				   pfa & 2 ? "rw" : "ro",
+			           " pc = " l4_addr_fmt " (%s%s)\n",
+			           pfa, pc,
+			           pfa & 2 ? "rw" : "ro",
 			           pfa & 1 ? ", T" : "");
 
 		if (l4x_handle_pagefault(pfa, pc, !!(pfa & 2))) {
@@ -3637,12 +3704,12 @@ void l4x_print_vm_area_maps(struct task_struct *p, unsigned long highlight)
 		struct file *file = vma->vm_file;
 		int flags = vma->vm_flags;
 
-		LOG_printf("%08lx - %08lx %c%c%c%c",
-		           vma->vm_start, vma->vm_end,
-		           flags & VM_READ ? 'r' : '-',
-			   flags & VM_WRITE ?  'w' : '-',
-			   flags & VM_EXEC ?  'x' : '-',
-			   flags & VM_MAYSHARE ?  's' : 'p');
+		printk("%08lx - %08lx %c%c%c%c",
+		       vma->vm_start, vma->vm_end,
+		       flags & VM_READ ? 'r' : '-',
+		       flags & VM_WRITE ?  'w' : '-',
+		       flags & VM_EXEC ?  'x' : '-',
+		       flags & VM_MAYSHARE ?  's' : 'p');
 
 		if (file) {
 			char buf[40];
@@ -3650,7 +3717,7 @@ void l4x_print_vm_area_maps(struct task_struct *p, unsigned long highlight)
 			char *s = buf;
 			char *p = d_path(&file->f_path, s, sizeof(buf));
 
-			LOG_printf(" %05lx", vma->vm_pgoff);
+			printk(" %05lx", vma->vm_pgoff);
 
 			if (!IS_ERR(p)) {
 				while (s <= p) {
@@ -3672,13 +3739,13 @@ void l4x_print_vm_area_maps(struct task_struct *p, unsigned long highlight)
 					}
 				}
 			}
-			LOG_printf(" %s", count ? buf : "Unknown");
+			printk(" %s", count ? buf : "Unknown");
 		}
 
 		if (   highlight >= vma->vm_start
 		    && highlight < vma->vm_end)
-			LOG_printf(" <====");
-		LOG_printf("\n");
+			printk(" <====");
+		printk("\n");
 		vma = vma->vm_next;
 	}
 	L4XV_U(f);
@@ -3710,6 +3777,9 @@ struct clock_event_device l4_clockevent = {
 	.irq		= 0,
 	.mult		= 1,
 };
+
+DEFINE_RAW_SPINLOCK(i8253_lock);
+EXPORT_SYMBOL(i8253_lock);
 
 void setup_pit_timer(void)
 {

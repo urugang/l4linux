@@ -59,6 +59,15 @@ static inline void vcpu_to_ptregs(l4_vcpu_state_t *v,
 	V2P(regs, sp,    &v->r, sp);
 #ifdef CONFIG_X86_32
 	V2P(regs, fs,    &v->r, fs);
+#else
+	V2P(regs, r8,    &v->r,  r8);
+	V2P(regs, r9,    &v->r,  r9);
+	V2P(regs, r10,   &v->r,  r10);
+	V2P(regs, r11,   &v->r,  r11);
+	V2P(regs, r12,   &v->r,  r12);
+	V2P(regs, r13,   &v->r,  r13);
+	V2P(regs, r14,   &v->r,  r14);
+	V2P(regs, r15,   &v->r,  r15);
 #endif
 	if (v->saved_state & L4_VCPU_F_IRQ)
 	        regs->flags |= X86_EFLAGS_IF;
@@ -84,6 +93,15 @@ static inline void ptregs_to_vcpu(l4_vcpu_state_t *v,
 	P2V(regs, sp,    &v->r, sp);
 #ifdef CONFIG_X86_32
 	P2V(regs, fs,    &v->r, fs);
+#else
+	P2V(regs, r8,    &v->r, r8);
+	P2V(regs, r9,    &v->r, r9);
+	P2V(regs, r10,   &v->r, r10);
+	P2V(regs, r11,   &v->r, r11);
+	P2V(regs, r12,   &v->r, r12);
+	P2V(regs, r13,   &v->r, r13);
+	P2V(regs, r14,   &v->r, r14);
+	P2V(regs, r15,   &v->r, r15);
 #endif
 	v->saved_state &= ~(L4_VCPU_F_IRQ | L4_VCPU_F_USER_MODE);
 	if (regs->flags & X86_EFLAGS_IF)
@@ -116,6 +134,15 @@ static inline void utcb_exc_to_ptregs(l4_exc_regs_t *exc, struct pt_regs *ptregs
 	UE2P(ptregs, sp,    exc, sp);
 #ifdef CONFIG_X86_32
 	ptregs->fs = exc->fs;
+#else
+	UE2P(ptregs, r8,    exc, r8);
+	UE2P(ptregs, r9,    exc, r9);
+	UE2P(ptregs, r10,   exc, r10);
+	UE2P(ptregs, r11,   exc, r11);
+	UE2P(ptregs, r12,   exc, r12);
+	UE2P(ptregs, r13,   exc, r13);
+	UE2P(ptregs, r14,   exc, r14);
+	UE2P(ptregs, r15,   exc, r15);
 #endif
 }
 #undef UE2P
@@ -135,6 +162,15 @@ static inline void ptregs_to_utcb_exc(struct pt_regs *ptregs, l4_exc_regs_t *exc
 	P2UE(exc, sp,        ptregs, sp);
 #ifdef CONFIG_X86_32
 	exc->fs = ptregs->fs;
+#else
+	P2UE(exc, r8,        ptregs, r8);
+	P2UE(exc, r9,        ptregs, r9);
+	P2UE(exc, r10,       ptregs, r10);
+	P2UE(exc, r11,       ptregs, r11);
+	P2UE(exc, r12,       ptregs, r12);
+	P2UE(exc, r13,       ptregs, r13);
+	P2UE(exc, r14,       ptregs, r14);
+	P2UE(exc, r15,       ptregs, r15);
 #endif
 }
 #undef P2UE

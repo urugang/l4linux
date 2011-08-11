@@ -5,12 +5,16 @@
 
 #undef FPSID
 #undef FPSCR
+#undef MVFR1
+#undef MVFR0
 #undef FPEXC
 #undef FPINST
 #undef FPINST2
 
 #define FPSID   0
 #define FPSCR   1
+#define MVFR1   6
+#define MVFR0   7
 #define FPEXC   8
 #define FPINST  9
 #define FPINST2 10

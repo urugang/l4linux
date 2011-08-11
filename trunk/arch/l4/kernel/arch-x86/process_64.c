@@ -51,6 +51,8 @@
 #include <asm/syscalls.h>
 #include <asm/debugreg.h>
 
+#include <asm/generic/stack_id.h>
+
 asmlinkage extern void ret_from_fork(void);
 
 DEFINE_PER_CPU(unsigned long, old_rsp);
@@ -156,7 +158,9 @@ void cpu_idle(void)
 void __show_regs(struct pt_regs *regs, int all)
 {
 	unsigned long cr0 = 0L, cr2 = 0L, cr3 = 0L, cr4 = 0L, fs, gs, shadowgs;
+#ifndef CONFIG_L4
 	unsigned long d0, d1, d2, d3, d6, d7;
+#endif
 	unsigned int fsindex, gsindex;
 	unsigned int ds, cs, es;
 
@@ -182,17 +186,28 @@ void __show_regs(struct pt_regs *regs, int all)
 	asm("movl %%fs,%0" : "=r" (fsindex));
 	asm("movl %%gs,%0" : "=r" (gsindex));
 
+#ifdef CONFIG_L4
+	gs = fs = shadowgs = ~0;
+#else
 	rdmsrl(MSR_FS_BASE, fs);
 	rdmsrl(MSR_GS_BASE, gs);
 	rdmsrl(MSR_KERNEL_GS_BASE, shadowgs);
+#endif
 
 	if (!all)
 		return;
 
+#ifdef CONFIG_L4
+	cr0 = ~0UL;
+	cr2 = ~0UL;
+	cr3 = ~0UL;
+	cr4 = ~0UL;
+#else
 	cr0 = read_cr0();
 	cr2 = read_cr2();
 	cr3 = read_cr3();
 	cr4 = read_cr4();
+#endif
 
 	printk(KERN_DEFAULT "FS:  %016lx(%04x) GS:%016lx(%04x) knlGS:%016lx\n",
 	       fs, fsindex, gs, gsindex, shadowgs);
@@ -201,6 +216,7 @@ void __show_regs(struct pt_regs *regs, int all)
 	printk(KERN_DEFAULT "CR2: %016lx CR3: %016lx CR4: %016lx\n", cr2, cr3,
 			cr4);
 
+#ifndef CONFIG_L4
 	get_debugreg(d0, 0);
 	get_debugreg(d1, 1);
 	get_debugreg(d2, 2);
@@ -209,6 +225,7 @@ void __show_regs(struct pt_regs *regs, int all)
 	get_debugreg(d6, 6);
 	get_debugreg(d7, 7);
 	printk(KERN_DEFAULT "DR3: %016lx DR6: %016lx DR7: %016lx\n", d3, d6, d7);
+#endif
 }
 
 void release_thread(struct task_struct *dead_task)
@@ -263,6 +280,10 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 	childregs = ((struct pt_regs *)
 			(THREAD_SIZE + task_stack_page(p))) - 1;
 	*childregs = *regs;
+
+#ifdef CONFIG_L4_VCPU
+	p->thread.regsp = childregs;
+#endif
 
 	childregs->ax = 0;
 	if (user_mode(regs))
@@ -320,6 +341,13 @@ out:
 		p->thread.io_bitmap_max = 0;
 	}
 
+#ifdef CONFIG_L4_VCPU
+	if (!err) {
+		l4x_stack_setup(p->stack, l4_utcb(),
+		                ((struct thread_info *)p->stack)->cpu);
+	}
+#endif
+
 	return err;
 }
 
@@ -338,7 +366,6 @@ start_thread_common(struct pt_regs *regs, unsigned long new_ip,
 	regs->cs		= _cs;
 	regs->ss		= _ss;
 	regs->flags		= X86_EFLAGS_IF;
-	set_fs(USER_DS);
 	/*
 	 * Free the old FP and other extended state
 	 */

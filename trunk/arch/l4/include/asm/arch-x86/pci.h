@@ -143,8 +143,6 @@ void default_teardown_msi_irqs(struct pci_dev *dev);
 #endif
 #endif
 
-void dma32_reserve_bootmem(void);
-
 void pcibios_resource_survey(void);
 
 /* implement the pci_ DMA API in terms of the generic device dma_ one */
