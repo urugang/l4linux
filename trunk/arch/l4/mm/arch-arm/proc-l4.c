@@ -21,6 +21,7 @@
 
 #include <asm/generic/memory.h>
 #include <asm/generic/setup.h>
+#include <asm/generic/tamed.h>
 
 void cpu_dcache_clean_area(void *addr, int sz)
 { l4_cache_clean_data((unsigned long)addr, (unsigned long)addr + sz - 1); }
@@ -46,9 +47,6 @@ void cpu_set_pte_ext(pte_t *pteptr, pte_t pteval, unsigned int ext)
 { l4x_cpu_set_pte_ext(pteptr, pteval, ext); }
 
 
-#ifdef CONFIG_L4_VCPU
-extern void l4x_global_halt(void);
-#endif
 /*
  * cpu_do_idle()
  * Cause the processor to idle

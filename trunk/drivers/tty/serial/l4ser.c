@@ -21,11 +21,11 @@
 #include <linux/serial_core.h>
 #include <linux/serial.h>
 
+#include <l4/re/env.h>
 #include <l4/sys/vcon.h>
 #include <l4/sys/factory.h>
 #include <l4/sys/icu.h>
-#include <l4/re/c/namespace.h>
-#include <l4/re/c/util/cap.h>
+#include <l4/sys/task.h>
 #include <asm/generic/setup.h>
 #include <asm/generic/cap_alloc.h>
 #include <asm/generic/util.h>
@@ -271,7 +271,7 @@ static int __init l4ser_init_port(int num, const char *name)
 	            l4_icu_bind(l4ser_port[num].vcon_cap, 0,
 	                        l4ser_port[num].vcon_irq_cap));
 	if ((l4_error(t))) {
-		L4XV_FN_v(l4re_util_cap_release(l4ser_port[num].vcon_irq_cap));
+		L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP, l4ser_port[num].vcon_irq_cap));
 		l4x_cap_free(l4ser_port[num].vcon_irq_cap);
 
 		// No interrupt, just output

@@ -13,11 +13,7 @@
 
 #include <asm/generic/util.h>
 
-#include <l4/sys/types.h>
-#include <l4/re/c/namespace.h>
-#include <l4/re/c/dataspace.h>
-#include <l4/re/c/rm.h>
-#include <l4/re/c/util/cap.h>
+#include <l4/sys/err.h>
 
 MODULE_AUTHOR("Adam Lackorzynski <adam@os.inf.tu-dresden.de");
 MODULE_DESCRIPTION("Character driver for L4Re dataspaces");

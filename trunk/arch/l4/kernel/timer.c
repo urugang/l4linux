@@ -17,9 +17,9 @@
 
 #include <l4/sys/factory.h>
 #include <l4/sys/irq.h>
+#include <l4/sys/task.h>
 #include <l4/log/log.h>
 #include <l4/re/env.h>
-#include <l4/re/c/util/cap.h>
 
 enum { PRIO_TIMER = CONFIG_L4_PRIO_IRQ_BASE + 1 };
 
@@ -65,17 +65,15 @@ static void L4_CV timer_thread(void *data)
 		int r = 0;
 
 		if (l4_ipc_error(t, u) == L4_IPC_RETIMEOUT) {
-			if (l4_error(l4_irq_trigger(irq_cap)) != -1)
+			if (l4_error(l4_irq_trigger_u(irq_cap, u)) != -1)
 				LOG_printf("IRQ timer trigger failed\n");
 
 			if (increment) {
 				next_to += increment;
 				to = l4_timeout(L4_IPC_TIMEOUT_0,
 				                l4_timeout_abs_u(next_to, 1, u));
-			} else {
+			} else
 				to = L4_IPC_NEVER;
-				increment = 0;
-			}
 			reply = 0;
 		} else if (l4_error(t) == L4_PROTO_TIMER) {
 			switch (v->mr[0]) {
@@ -170,7 +168,8 @@ static void timer_set_mode(enum clock_event_mode mode,
 	case CLOCK_EVT_MODE_PERIODIC:
 	case CLOCK_EVT_MODE_RESUME:
 		r = L4XV_FN_i(l4_error(l4timer_start(timer_srv, 0,
-		                       l4lx_kinfo->clock, increment)));
+		                                     l4lx_kinfo->clock,
+		                                     increment)));
 		if (r)
 			printk(KERN_WARNING "l4timer: start failed (%d)\n", r);
 		break;
@@ -278,7 +277,7 @@ static int __init l4x_timer_init_ret(void)
 out3:
 	l4x_unregister_irq(irq);
 out2:
-	L4XV_FN_v(l4re_util_cap_release(timer_irq_cap));
+	L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP, timer_irq_cap));
 out1:
 	l4x_cap_free(timer_irq_cap);
 	return r;

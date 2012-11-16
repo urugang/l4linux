@@ -1059,8 +1059,6 @@ void __init setup_arch(char **cmdline_p)
 
 	x86_init.timers.wallclock_init();
 
-	x86_platform.wallclock_init();
-
 #ifndef CONFIG_L4
 	mcheck_init();
 #endif

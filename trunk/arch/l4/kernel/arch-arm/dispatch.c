@@ -53,6 +53,8 @@
 #include <asm/l4x/upage.h>
 #include <asm/l4x/signal.h>
 
+
+
 //#define DEBUG_SYSCALL_PRINTFS
 
 #ifdef DEBUG_SYSCALL_PRINTFS
@@ -102,6 +104,9 @@ enum {
 
 #endif
 
+asmlinkage int syscall_trace_enter(struct pt_regs *regs, int scno);
+asmlinkage int syscall_trace_exit(struct pt_regs *regs, int scno);
+
 static DEFINE_PER_CPU(struct l4x_arch_cpu_fpu_state, l4x_cpu_fpu_state);
 
 struct l4x_arch_cpu_fpu_state *l4x_fpu_get(unsigned cpu)
@@ -133,9 +138,6 @@ static inline int l4x_msgtag_copy_ureg(l4_utcb_t *u)
 	return 0;
 }
 
-asmlinkage void syscall_trace(int why, struct pt_regs *regs, int scno);
-
-
 static inline int l4x_is_triggered_exception(l4_umword_t val)
 {
 	return (val & 0x00f00000) == 0x00500000;
@@ -160,7 +162,7 @@ static inline void l4x_arch_do_syscall_trace(struct task_struct *p,
                                              struct thread_struct *t)
 {
 	if (unlikely(test_tsk_thread_flag(p, TIF_SYSCALL_TRACE)))
-		syscall_trace(1, L4X_THREAD_REGSP(t), __NR_fork);
+		syscall_trace_exit(L4X_THREAD_REGSP(t), __NR_fork);
 }
 
 static inline int l4x_hybrid_check_after_syscall(l4_utcb_t *utcb)
@@ -181,9 +183,9 @@ static inline void l4x_dispatch_set_polling_flag(void)
 
 #ifdef CONFIG_L4_VCPU
 static inline void l4x_arch_task_start_setup(l4_vcpu_state_t *v,
-		                             struct task_struct *p)
+		                             struct task_struct *p, l4_cap_idx_t task_cap)
 #else
-static inline void l4x_arch_task_start_setup(struct task_struct *p)
+static inline void l4x_arch_task_start_setup(struct task_struct *p, l4_cap_idx_t task_cap)
 #endif
 {
 }
@@ -272,6 +274,7 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 	*(unsigned long *)(upage_addr + UPAGE_USER_TLS_OFFSET) = task_thread_info(next)->tp_value;
 #endif
 	if (has_tls_reg)
+		// remove this sometime later...
 		asm volatile("mcr p15, 0, %0, c13, c0, 2"
 		             : : "r" (task_thread_info(next)->tp_value));
 
@@ -323,6 +326,15 @@ unsigned long l4x_map_page_attr_to_l4(pte_t pte)
 }
 
 #ifdef CONFIG_L4_VCPU
+
+static inline void
+state_to_vcpu(l4_vcpu_state_t *vcpu, struct pt_regs *regs,
+              struct task_struct *p)
+{
+	ptregs_to_vcpu(vcpu, regs);
+	vcpu->r.tpidruro = task_thread_info(p)->tp_value;
+}
+
 static inline void vcpu_to_thread_struct(l4_vcpu_state_t *v,
                                          struct thread_struct *t)
 {
@@ -334,8 +346,7 @@ static inline void thread_struct_to_vcpu(l4_vcpu_state_t *v,
                                          struct thread_struct *t)
 {
 }
-#endif
-
+#else
 static inline void utcb_to_thread_struct(l4_utcb_t *utcb,
                                          struct thread_struct *t)
 {
@@ -344,12 +355,14 @@ static inline void utcb_to_thread_struct(l4_utcb_t *utcb,
 	t->error_code     = exc->err;
 	t->address        = exc->pfa;
 }
+#endif
 
 static inline void thread_struct_to_utcb(struct thread_struct *t,
                                          l4_utcb_t *utcb,
                                          unsigned int send_size)
 {
 	ptregs_to_utcb_exc(L4X_THREAD_REGSP(t), l4_utcb_exc_u(utcb));
+	l4_utcb_exc_u(utcb)->tpidruro = task_thread_info(current)->tp_value;
 #ifndef CONFIG_L4_VCPU
 	per_cpu(utcb_snd_size, smp_processor_id()) = send_size;
 #endif
@@ -375,8 +388,6 @@ static inline void l4x_print_regs(struct thread_struct *t, struct pt_regs *r)
 	printk("CPSR: %08lx Err: %08lx\n", r->ARM_cpsr, t->error_code);
 #undef R
 }
-
-//#include <linux/fs.h>
 
 static inline void call_system_call_args(syscall_t *sctbl,
                                          unsigned long syscall,
@@ -409,9 +420,12 @@ static inline void call_system_call_args(syscall_t *sctbl,
 		       IS_ERR(filename) ? "INVALID" : filename, arg1);
 		putname(filename);
 	}
-	if (0 && show_syscalls && syscall == 1) {
-		printk("exit: pid: %d(%s)\n", current->pid, current->comm);
-	}
+	if (0 && show_syscalls && (syscall == 1 || syscall == 248))
+		printk("exit: pid: %d(%s)\n",
+		       current->pid, current->comm);
+	if (0 && syscall == 26)
+		printk("ptrace: pid: %d(%s) req=%ld pid=%ld\n",
+		       current->pid, current->comm, arg1, arg2);
 	if (0 && show_syscalls && syscall == 2) {
 		printk("fork: pid: %d(%s)\n",
 		       current->pid, current->comm);
@@ -467,7 +481,8 @@ static inline void call_system_call_args(syscall_t *sctbl,
 	if (0 && show_syscalls && syscall == 54)
 		printk("ioctl: pid: %d(%s): %lx\n",
 		       current->pid, current->comm, arg1);
-
+	if (0 && show_syscalls && syscall == 114)
+		printk("wait4: pid: %d(%s): (%lx)\n", current->pid, current->comm, arg1);
 	if (0 && show_syscalls && syscall == 119)
 		printk("sigreturn: pid: %d(%s)\n", current->pid, current->comm);
 	if (0 && show_syscalls && syscall == 120)
@@ -499,34 +514,21 @@ static inline void call_system_call_args(syscall_t *sctbl,
 
 	if (likely(is_lx_syscall(syscall))
 	           && ((syscall_fn = sctbl[syscall]))) {
-		//if (unlikely(!current->user))
-		//	enter_kdebug("call_system_call_args: !current->user");
 
-		/* valid system call number.. */
-		if (likely(!test_tsk_thread_flag(current, TIF_SYSCALL_TRACE))) {
+		if (likely(!(current_thread_info()->flags & _TIF_SYSCALL_WORK))) {
 			regsp->ARM_r0 = syscall_fn(arg1, arg2, arg3, arg4, arg5, arg6);
 		} else {
-			syscall_trace(0, regsp, syscall);
+			syscall_trace_enter(regsp, syscall);
 			regsp->ARM_r0 = syscall_fn(arg1, arg2, arg3, arg4, arg5, arg6);
-			syscall_trace(1, regsp, syscall);
+			syscall_trace_exit(regsp, syscall);
 		}
 	} else
 		regsp->ARM_r0 = -ENOSYS;
 
 	/* ============================================================ */
 #ifdef DEBUG_SYSCALL_PRINTFS
-	if (0 && show_syscalls && syscall == 192) {
-		printk("mmap2 result: pid: %d(%s): %lx\n",
-		       current->pid, current->comm,
-		       regsp->ARM_r0);
-	}
-	if (0 && show_syscalls && syscall == 195) {
-		printk("stat64 result: pid: %d(%s): %lx\n",
-		       current->pid, current->comm,
-		       regsp->ARM_r0);
-	}
-	if (0 && show_syscalls && syscall == 65) {
-		printk("getpgrp result: pid: %d(%s): %lx\n",
+	if (0 && show_syscalls && syscall == 120) {
+		printk("syscall-120 result: pid: %d(%s): %lx\n",
 		       current->pid, current->comm,
 		       regsp->ARM_r0);
 	}
@@ -535,7 +537,8 @@ static inline void call_system_call_args(syscall_t *sctbl,
 #endif
 }
 
-static inline void dispatch_system_call(syscall_t *sctbl, struct task_struct *p,
+static inline void dispatch_system_call(syscall_t *sctbl,
+                                        struct task_struct *p,
                                         unsigned long syscall,
                                         struct pt_regs *regsp)
 {
@@ -543,8 +546,6 @@ static inline void dispatch_system_call(syscall_t *sctbl, struct task_struct *p,
 	local_irq_enable();
 	p->thread.regsp = regsp;
 #endif
-
-	//syscall_count++;
 
 	regsp->ARM_ORIG_r0 = regsp->ARM_r0;
 
@@ -561,12 +562,36 @@ static inline void dispatch_system_call(syscall_t *sctbl, struct task_struct *p,
 		                      regsp->ARM_r4, regsp->ARM_r5,
 		                      regsp);
 	}
+}
 
-	if (signal_pending(p))
-		l4x_do_signal(regsp, syscall);
+static inline void
+l4x_pre_iret_work(struct pt_regs *regsp, struct task_struct *p,
+                  unsigned long syscall, syscall_t *sctbl)
+{
+	unsigned long tifl;
 
-	if (need_resched())
-		schedule();
+check_work_pending:
+	tifl = current_thread_info()->flags;
+	if (tifl & _TIF_WORK_MASK)
+		goto work_pending;
+
+	goto no_work_pending;
+
+work_pending:
+	if (!do_work_pending(regsp, tifl, syscall))
+		goto no_work_pending;
+
+	syscall = __NR_restart_syscall - __NR_SYSCALL_BASE;
+
+	goto local_restart;
+
+no_work_pending:
+	return;
+
+local_restart:
+	dispatch_system_call(sctbl, p, syscall, regsp);
+
+	goto check_work_pending;
 }
 
 static char *l4x_arm_decode_error_code(unsigned long error_code)
@@ -752,6 +777,8 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 
 		dispatch_system_call(tbl, p, scno, regs);
 
+		l4x_pre_iret_work(regs, p, scno, tbl);
+
 		BUG_ON(p != current);
 
 #ifdef CONFIG_L4_VCPU
@@ -792,7 +819,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 			register unsigned long _insn  asm ("r7")  = insn;
 			register unsigned long _pc    asm ("r9")  = regs->ARM_pc + 4;
 			register unsigned long _regsp asm ("r8")  = (unsigned long)L4X_THREAD_REGSP(t);
-			register unsigned long _ti    asm ("r10") = (unsigned long) current_thread_info();
+			register unsigned long _ti    asm ("r10") = (unsigned long)current_thread_info();
 			asm volatile(
 #ifdef CONFIG_FRAME_POINTER
 			             "push    {fp}                   \t\n"

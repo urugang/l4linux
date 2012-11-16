@@ -1,7 +1,6 @@
 /*
  * Main & misc. file.
  */
-
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -33,7 +32,6 @@
 #include <l4/re/c/rm.h>
 #include <l4/re/c/debug.h>
 #include <l4/re/c/util/cap_alloc.h>
-#include <l4/re/c/util/cap.h>
 #include <l4/re/c/namespace.h>
 #include <l4/re/env.h>
 #include <l4/log/log.h>
@@ -239,7 +237,7 @@ static struct l4x_phys_virt_mem l4x_phys_virt_addrs[L4X_PHYS_VIRT_ADDRS_MAX_ITEM
 int l4x_phys_virt_addr_items;
 
 #ifdef CONFIG_L4_CONFIG_CHECKS
-static const unsigned long required_kernel_abi_version = 0;
+static const unsigned long required_kernel_abi_version = 1;
 static const char *required_kernel_features[] =
   {
   };
@@ -341,40 +339,10 @@ static void l4x_virt_to_phys_show(void)
 	}
 }
 
-#ifdef ARCH_arm
-static inline int l4x_arm_is_in_consistent_range(unsigned long address)
-{
-	extern unsigned long consistent_base;
-	return    consistent_base <= address
-	       && address < CONSISTENT_END;
-}
-
-int l4x_virt_addr_is_in_dma_range(unsigned long va, size_t sz)
-{
-#ifdef CONFIG_L4_DMAPOOL
-	return l4x_dmapool_is_in_virt_dma_space(va, sz);
-#else
-	return    l4x_arm_is_in_consistent_range(va)
-	       && l4x_arm_is_in_consistent_range(va + sz - 1);
-#endif
-}
-EXPORT_SYMBOL(l4x_virt_addr_is_in_dma_range);
-
-void l4x_arm_consistent_init(unsigned long base)
-{
-	int res = L4XV_FN_i(l4re_rm_reserve_area(&base, CONSISTENT_END - base,
-	                    0, 0));
-	if (res < 0) {
-		LOG_printf("%s: Error reserving DMA region: %d!\n", __func__, res);
-		l4x_exit_l4linux();
-	}
-}
-#endif
-
 int l4x_is_selfmapped_addr(unsigned long a)
 {
 #ifdef ARCH_arm
-	return l4x_arm_is_in_consistent_range(a);
+	return l4x_arm_is_selfmapped_addr(a);
 #else
 	return 0;
 #endif
@@ -668,10 +636,10 @@ out3:
 out2:
 	if (l4_is_valid_cap(*memcap)) {
 		l4re_ma_free(*memcap);
-		l4re_util_cap_release(*memcap);
+		l4_task_delete_obj(L4RE_THIS_TASK_CAP, *memcap);
 	}
 out1:
-	l4re_util_cap_release(*dscap);
+	l4_task_delete_obj(L4RE_THIS_TASK_CAP, *dscap);
 	L4XV_U(f);
 	l4x_cap_free(*dscap);
 	return ret;
@@ -681,18 +649,15 @@ EXPORT_SYMBOL(l4x_query_and_get_cow_ds);
 int l4x_detach_and_free_ds(l4_cap_idx_t dscap, void *addr)
 {
 	int r;
-	L4XV_V(f);
-	L4XV_L(f);
-	if ((r = l4re_rm_detach(addr))) {
+
+	if ((r = L4XV_FN_i(l4re_rm_detach(addr)))) {
 		LOG_printf("Failed to detach at %p (%d)\n", addr, r);
-		L4XV_U(f);
 		return r;
 	}
 
-	if ((r = l4_error(l4re_util_cap_release(dscap)))) {
+	if ((r = L4XV_FN_i(l4_error(l4_task_delete_obj(L4RE_THIS_TASK_CAP, dscap))))) {
 		LOG_printf("Failed to release/unmap cap: %d\n", r);
 	}
-	L4XV_U(f);
 
 	l4x_cap_free(dscap);
 	return 0;
@@ -703,24 +668,21 @@ int l4x_detach_and_free_cow_ds(l4_cap_idx_t memcap,
                                l4_cap_idx_t dscap, void *addr)
 {
 	int r;
-	L4XV_V(f);
-	L4XV_L(f);
-	if ((r = l4re_rm_detach(addr))) {
+
+	if ((r = L4XV_FN_i(l4re_rm_detach(addr)))) {
 		LOG_printf("Failed to detach at %p (%d)\n", addr, r);
-		L4XV_U(f);
 		return r;
 	}
 
-	if ((r = l4re_ma_free(memcap)))
+	if ((r = L4XV_FN_i(l4re_ma_free(memcap))))
 		LOG_printf("Failed to free mem: %d\n", r);
 
-	if ((r = l4_error(l4re_util_cap_release(dscap))))
+	if ((r = L4XV_FN_i(l4_error(l4_task_delete_obj(L4RE_THIS_TASK_CAP, dscap)))))
 		LOG_printf("Failed to release/unmap cap: %d\n", r);
 
-	if ((r = l4_error(l4re_util_cap_release(memcap))))
+	if ((r = L4XV_FN_i(l4_error(l4_task_delete_obj(L4RE_THIS_TASK_CAP, memcap)))))
 		LOG_printf("Failed to release/unmap cap: %d\n", r);
 
-	L4XV_U(f);
 	l4x_cap_free(dscap);
 	l4x_cap_free(memcap);
 	return 0;
@@ -999,7 +961,7 @@ static void l4x_map_below_mainmem(void)
 	LOG_flush();
 }
 
-static void l4x_setup_upage(void)
+static __init_refok void l4x_setup_upage(void)
 {
 	l4re_ds_t ds;
 
@@ -1092,6 +1054,31 @@ static void l4x_register_pointer_section(void *p_in_addr,
 	LOG_printf("%s: addr = %08lx size = %ld\n", __func__, addr, size);
 
 	l4x_register_region(ds, (void *)addr, allow_noncontig, tag);
+}
+
+/* Reserve some part of the virtual address space for vmalloc */
+static void __init l4x_reserve_vmalloc_space(void)
+{
+	unsigned long sz = (unsigned long)l4x_main_memory_start;
+	unsigned flags   = L4RE_RM_SEARCH_ADDR;
+
+#if defined(CONFIG_X86_64)
+	l4x_vmalloc_memory_start = VMALLOC_START;
+	flags &= ~L4RE_RM_SEARCH_ADDR;
+	sz = VMALLOC_END - VMALLOC_START + 1;
+#elif defined(CONFIG_X86_32)
+	sz = __VMALLOC_RESERVE;
+#elif defined(CONFIG_ARM)
+	sz = VMALLOC_SIZE << 20;
+#else
+#error Check this for your architecture
+#endif
+
+	if (l4re_rm_reserve_area(&l4x_vmalloc_memory_start,
+	                         sz, flags, PGDIR_SHIFT)) {
+		LOG_printf("l4x: Error reserving vmalloc memory area of %ldBytes!\n", sz);
+		l4x_exit_l4linux();
+	}
 }
 
 void __init l4x_setup_memory(char *cmdl,
@@ -1282,20 +1269,8 @@ void __init l4x_setup_memory(char *cmdl,
 	l4x_register_region(l4x_ds_mainmem, l4x_main_memory_start,
 	                    0, "Main memory");
 
-	/* Reserve some part of the virtual address space for vmalloc */
-	l4x_vmalloc_memory_start = (unsigned long)l4x_main_memory_start;
-	if (l4re_rm_reserve_area(&l4x_vmalloc_memory_start,
-#ifdef CONFIG_X86_32
-	                          __VMALLOC_RESERVE,
-#elif defined(CONFIG_X86_64)
-				  VMALLOC_END - VMALLOC_START + 1,
-#else
-	                          VMALLOC_SIZE << 20,
-#endif
-	                          L4RE_RM_SEARCH_ADDR, PGDIR_SHIFT)) {
-		LOG_printf("%s: Error reserving vmalloc memory area!\n", __func__);
-		l4x_exit_l4linux();
-	}
+	l4x_reserve_vmalloc_space();
+
 #ifdef ARCH_arm
 	{
 		extern void * /*__initdata*/ vmalloc_min;
@@ -1442,7 +1417,7 @@ static void l4x_create_ugate(l4_cap_idx_t forthread, unsigned cpu)
 void l4x_destroy_ugate(unsigned cpu)
 {
 	l4_msgtag_t t;
-	t = L4XV_FN(l4_msgtag_t, l4re_util_cap_release(l4x_user_gate[cpu]));
+	t = L4XV_FN(l4_msgtag_t, l4_task_delete_obj(L4RE_THIS_TASK_CAP, l4x_user_gate[cpu]));
 	if (l4_error(t))
 		l4x_printf("Error destroying user-gate%d\n", cpu);
 	l4x_cap_free(l4x_user_gate[cpu]);
@@ -1679,7 +1654,7 @@ void l4x_cpu_ipi_stop(unsigned cpu)
 		return;
 	}
 
-	t = L4XV_FN(l4_msgtag_t, l4re_util_cap_release(l4x_cpu_ipi_irqs[cpu]));
+	t = L4XV_FN(l4_msgtag_t, l4_task_delete_obj(L4RE_THIS_TASK_CAP, l4x_cpu_ipi_irqs[cpu]));
 	if (l4_error(t)) {
 		l4x_printf("Failed to unmap IPI IRQ%d\n", cpu);
 		return;
@@ -1721,7 +1696,7 @@ static L4_CV void __cpuinit __cpu_starter(void *data)
 
 static struct l4lx_thread_start_info_t l4x_cpu_bootup_state;
 
-void l4x_cpu_spawn(int cpu, struct task_struct *idle)
+void __cpuinit l4x_cpu_spawn(int cpu, struct task_struct *idle)
 {
 	char name[8];
 
@@ -1904,7 +1879,7 @@ static inline void l4x_repnop_init(void) {}
 #endif
 #endif
 
-static int l4x_cpu_virt_phys_map_init(const char *boot_command_line)
+static __init int l4x_cpu_virt_phys_map_init(const char *boot_command_line)
 {
 	l4_umword_t max_cpus = 1;
 	l4_sched_cpu_set_t cs = l4_sched_cpu_set(0, 0, 0);
@@ -1938,7 +1913,7 @@ static int l4x_cpu_virt_phys_map_init(const char *boot_command_line)
 			while (*p && *p != ' ') {
 
 				if (l4x_nr_cpus >= NR_CPUS) {
-					LOG_printf("ERROR: vCPU%d out of bounds\n", pcpu);
+					LOG_printf("ERROR: vCPU%d out of bounds\n", l4x_nr_cpus);
 					return 1;
 				}
 

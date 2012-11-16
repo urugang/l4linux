@@ -32,6 +32,7 @@ enum {
   L4X_USER_UTCB_SIZE = 12,
 };
 
+#ifndef CONFIG_L4_VCPU
 static inline l4_cap_idx_t l4x_user_pager_cap(unsigned cpu)
 {
 	return cpu ? (L4LX_USER_CAP_PAGER_BASE + (cpu << L4_CAP_SHIFT))
@@ -43,4 +44,5 @@ static inline l4_utcb_t *l4x_user_utcb_addr(unsigned cpu)
 	BUILD_BUG_ON(NR_CPUS * L4_UTCB_OFFSET > (1 << L4X_USER_UTCB_SIZE));
 	return (l4_utcb_t *)((unsigned long)L4X_USER_UTCB_ADDR + L4_UTCB_OFFSET * cpu);
 }
+#endif /* ! CONFIG_L4_VCPU */
 #endif /* ! __INCLUDE__ASM_L4__GENERIC__USER_H__ */

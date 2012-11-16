@@ -70,13 +70,7 @@ static inline void native_halt(void)
 
 #ifdef CONFIG_L4_TAMED
 
-extern void l4x_global_cli(void);
-extern void l4x_global_sti(void);
-extern unsigned long l4x_global_save_flags(void);
-extern void l4x_global_restore_flags(unsigned long flags);
-#ifdef CONFIG_L4_VCPU
-extern void l4x_global_halt(void);
-#endif
+#include <asm/generic/tamed.h>
 
 static inline notrace unsigned long arch_local_save_flags(void)
 {

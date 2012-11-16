@@ -126,11 +126,7 @@ static inline void arch_local_irq_disable(void)
 
 #include <asm/generic/irq.h>
 #include <asm/generic/vcpu.h>
-
-extern void l4x_global_cli(void);
-extern void l4x_global_sti(void);
-extern unsigned long l4x_global_save_flags(void);
-extern void l4x_global_restore_flags(unsigned long flags);
+#include <asm/generic/tamed.h>
 
 static inline unsigned long arch_local_save_flags(void)
 {

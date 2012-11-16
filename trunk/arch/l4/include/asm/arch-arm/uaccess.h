@@ -86,29 +86,6 @@ static inline void set_fs(mm_segment_t fs)
 		: "cc"); \
 	flag; })
 
-#else /* CONFIG_MMU */
-
-/*
- * uClinux has only one addr space, so has simplified address limits.
- */
-#define USER_DS			KERNEL_DS
-
-#define segment_eq(a,b)		(1)
-#define __addr_ok(addr)		(1)
-#define __range_ok(addr,size)	(0)
-#define get_fs()		(KERNEL_DS)
-
-static inline void set_fs(mm_segment_t fs)
-{
-}
-
-#define get_user(x,p)	__get_user(x,p)
-#define put_user(x,p)	__put_user(x,p)
-
-#endif /* CONFIG_MMU */
-
-#define access_ok(type,addr,size)	(__range_ok(addr,size) == 0)
-
 /*
  * Single-value transfer routines.  They automatically use the right
  * size if we just have the right pointer type.  Note that the functions
@@ -150,36 +127,124 @@ extern long __get_user_8(unsigned long long *val, const void *address);
 extern int __get_user_1(void *);
 extern int __get_user_2(void *);
 extern int __get_user_4(void *);
-extern int __get_user_bad(void);
 
-#define __get_user_x(__r2,__p,__e,__s,__i...)				\
+#define __GUP_CLOBBER_1	"lr", "cc"
+#ifdef CONFIG_CPU_USE_DOMAINS
+#define __GUP_CLOBBER_2	"ip", "lr", "cc"
+#else
+#define __GUP_CLOBBER_2 "lr", "cc"
+#endif
+#define __GUP_CLOBBER_4	"lr", "cc"
+
+#define __get_user_x(__r2,__p,__e,__l,__s)				\
 	   __asm__ __volatile__ (					\
 		__asmeq("%0", "r0") __asmeq("%1", "r2")			\
+		__asmeq("%3", "r1")					\
 		"bl	__get_user_" #__s				\
 		: "=&r" (__e), "=r" (__r2)				\
-		: "0" (__p)						\
-		: __i, "cc")
+		: "0" (__p), "r" (__l)					\
+		: __GUP_CLOBBER_##__s)
 
-#define get_user(x,p)							\
+#define __get_user_check(x,p)							\
 	({								\
+		unsigned long __limit = current_thread_info()->addr_limit - 1; \
 		register const typeof(*(p)) __user *__p asm("r0") = (p);\
 		register unsigned long __r2 asm("r2");			\
+		register unsigned long __l asm("r1") = __limit;		\
 		register int __e asm("r0");				\
 		switch (sizeof(*(__p))) {				\
 		case 1:							\
-			__get_user_x(__r2, __p, __e, 1, "lr");		\
-	       		break;						\
+			__get_user_x(__r2, __p, __e, __l, 1);		\
+			break;						\
 		case 2:							\
-			__get_user_x(__r2, __p, __e, 2, "r3", "lr");	\
+			__get_user_x(__r2, __p, __e, __l, 2);		\
 			break;						\
 		case 4:							\
-	       		__get_user_x(__r2, __p, __e, 4, "lr");		\
+			__get_user_x(__r2, __p, __e, __l, 4);		\
 			break;						\
 		default: __e = __get_user_bad(); break;			\
 		}							\
 		x = (typeof(*(p))) __r2;				\
 		__e;							\
 	})
+
+#define get_user(x,p)							\
+	({								\
+		might_fault();						\
+		__get_user_check(x,p);					\
+	 })
+
+extern int __put_user_1(void *, unsigned int);
+extern int __put_user_2(void *, unsigned int);
+extern int __put_user_4(void *, unsigned int);
+extern int __put_user_8(void *, unsigned long long);
+
+#define __put_user_x(__r2,__p,__e,__l,__s)				\
+	   __asm__ __volatile__ (					\
+		__asmeq("%0", "r0") __asmeq("%2", "r2")			\
+		__asmeq("%3", "r1")					\
+		"bl	__put_user_" #__s				\
+		: "=&r" (__e)						\
+		: "0" (__p), "r" (__r2), "r" (__l)			\
+		: "ip", "lr", "cc")
+
+#define __put_user_check(x,p)							\
+	({								\
+		unsigned long __limit = current_thread_info()->addr_limit - 1; \
+		register const typeof(*(p)) __r2 asm("r2") = (x);	\
+		register const typeof(*(p)) __user *__p asm("r0") = (p);\
+		register unsigned long __l asm("r1") = __limit;		\
+		register int __e asm("r0");				\
+		switch (sizeof(*(__p))) {				\
+		case 1:							\
+			__put_user_x(__r2, __p, __e, __l, 1);		\
+			break;						\
+		case 2:							\
+			__put_user_x(__r2, __p, __e, __l, 2);		\
+			break;						\
+		case 4:							\
+			__put_user_x(__r2, __p, __e, __l, 4);		\
+			break;						\
+		case 8:							\
+			__put_user_x(__r2, __p, __e, __l, 8);		\
+			break;						\
+		default: __e = __put_user_bad(); break;			\
+		}							\
+		__e;							\
+	})
+
+#define put_user(x,p)							\
+	({								\
+		might_fault();						\
+		__put_user_check(x,p);					\
+	 })
+
+#endif
+#else /* CONFIG_MMU */
+
+/*
+ * uClinux has only one addr space, so has simplified address limits.
+ */
+#define USER_DS			KERNEL_DS
+
+#define segment_eq(a,b)		(1)
+#define __addr_ok(addr)		(1)
+#define __range_ok(addr,size)	(0)
+#define get_fs()		(KERNEL_DS)
+
+static inline void set_fs(mm_segment_t fs)
+{
+}
+
+#define get_user(x,p)	__get_user(x,p)
+#define put_user(x,p)	__put_user(x,p)
+
+#endif /* CONFIG_MMU */
+
+#define access_ok(type,addr,size)	(__range_ok(addr,size) == 0)
+
+#define user_addr_max() \
+	(segment_eq(get_fs(), USER_DS) ? TASK_SIZE : ~0UL)
 
 /*
  * The "__xxx" versions of the user access functions do not verify the
@@ -190,6 +255,7 @@ extern int __get_user_bad(void);
  * error occurs, and leave it unchanged on success.  Note that these
  * versions are void (ie, don't return a value as such).
  */
+#if 0
 #define __get_user(x,ptr)						\
 ({									\
 	long __gu_err = 0;						\
@@ -208,6 +274,7 @@ do {									\
 	unsigned long __gu_addr = (unsigned long)(ptr);			\
 	unsigned long __gu_val;						\
 	__chk_user_ptr(ptr);						\
+	might_fault();							\
 	switch (sizeof(*(ptr))) {					\
 	case 1:	__get_user_asm_byte(__gu_val,__gu_addr,err);	break;	\
 	case 2:	__get_user_asm_half(__gu_val,__gu_addr,err);	break;	\
@@ -325,16 +392,16 @@ extern int __put_user_bad(void);
 ({									\
 	const register typeof(*(addr)) r0 asm("r0") = val;		\
 	const register unsigned long r2 asm("r2") = (unsigned long)addr;\
- 	register int ret asm("r0");					\
+	register int ret asm("r0");					\
 	__asm__ __volatile__ (						\
 		"bl __put_user_8"					\
 		: "=r" (ret)						\
 		: "0" (r0),						\
 		  "r" (r2)						\
-		);							\
+		: "memory", "cc", "r3", "lr", "ip");			\
 	ret;								\
 })
-	
+
 
 #define put_user(x,ptr)							\
 	({								\
@@ -379,6 +446,7 @@ do {									\
 	unsigned long __pu_addr = (unsigned long)(ptr);			\
 	__typeof__(*(ptr)) __pu_val = (x);				\
 	__chk_user_ptr(ptr);						\
+	might_fault();							\
 	switch (sizeof(*(ptr))) {					\
 	case 1: __put_user_asm_byte(__pu_val,__pu_addr,err);	break;	\
 	case 2: __put_user_asm_half(__pu_val,__pu_addr,err);	break;	\
@@ -520,30 +588,9 @@ static inline unsigned long clear_user(void __user *to, unsigned long n)
 }
 #endif
 
-extern long __must_check strncpy_from_user(char *dst, const char __user *src, long count);
-#if 0
-static inline long strncpy_from_user(char *dst, const char __user *src, long count)
-{
-	long res = -EFAULT;
-	if (access_ok(VERIFY_READ, src, 1))
-		res = __strncpy_from_user(dst, src, count);
-	return res;
-}
-#endif
+extern long strncpy_from_user(char *dest, const char __user *src, long count);
 
-#define strlen_user(s)	strnlen_user(s, ~0UL >> 1)
-
-extern long __must_check strnlen_user(const char __user *s, long n);
-#if 0
-static inline long strnlen_user(const char __user *s, long n)
-{
-	unsigned long res = 0;
-
-	if (__addr_ok(s))
-		res = __strnlen_user(s, n);
-
-	return res;
-}
-#endif
+extern __must_check long strlen_user(const char __user *str);
+extern __must_check long strnlen_user(const char __user *str, long n);
 
 #endif /* _ASMARM_UACCESS_H */

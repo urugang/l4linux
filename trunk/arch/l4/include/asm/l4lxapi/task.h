@@ -91,26 +91,23 @@ int l4lx_task_create_thread_in_task(l4_cap_idx_t thread, l4_cap_idx_t task,
 int l4lx_task_create_pager(l4_cap_idx_t task_no, l4_cap_idx_t pager);
 
 /**
- * \brief Terminate a task (and all its threads).
+ * \brief Terminate a task.
  * \ingroup task
  *
- * \param	task	Id of the task to delete.
- * \param	option	Delete options (currently only supported is
- *                          option=1: send exit signal to the events
- *                          server, option=0: send no exit signal to
- *                          events server)
+ * \param	task	Cap of the task to delete.
  *
- * \return	0 on error (task delete failed, threads are not deleted)
- *              != 0 on sucess:
- *                1 if the whole address space was deleted
- *                2 if just a thread was "deleted"
+ * \return	0 on success, <0 on error
  */
-enum {
-	L4LX_TASK_DELETE_SPACE  = 1,
-	L4LX_TASK_DELETE_THREAD = 2,
-};
-int l4lx_task_delete_thread(l4_cap_idx_t thread);
-int l4lx_task_delete_task(l4_cap_idx_t task, unsigned option);
+int l4lx_task_delete_task(l4_cap_idx_t task);
 
+/**
+ * \brief Terminate a thread.
+ * \ingroup task
+ *
+ * \param	task	Cap of the thread to delete.
+ *
+ * \return	0 on success, <0 on error
+ */
+int l4lx_task_delete_thread(l4_cap_idx_t thread);
 
 #endif /* ! __ASM_L4__L4LXAPI__TASK_H__ */

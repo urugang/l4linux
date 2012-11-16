@@ -21,7 +21,6 @@
 
 DECLARE_PER_CPU(struct thread_info *, l4x_current_ti);
 
-int l4x_task_delete(struct mm_struct *mm);
 void l4x_exit_thread(void);
 
 #endif /* ! __ASM_L4__GENERIC__TASK_H__ */

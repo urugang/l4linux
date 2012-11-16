@@ -33,7 +33,6 @@
 #include <l4/re/c/rm.h>
 #include <l4/re/c/namespace.h>
 #include <l4/re/c/util/cap_alloc.h>
-#include <l4/re/c/util/cap.h>
 #include <l4/re/c/event_buffer.h>
 #include <l4/re/c/video/view.h>
 #include <l4/re/c/video/goos.h>
@@ -795,6 +794,9 @@ l4fb_new_input_device(struct l4fb_screen *screen, l4_umword_t id)
 	COPY_BM(REL, rel);
 #undef COPY_BM
 
+	if (input->touchscreen && test_bit(BTN_MOUSE, dev->keybit))
+		set_bit(BTN_TOUCH, dev->keybit);
+
 	bitmap_copy(dev->propbit, sinfo.propbits,
 	            min(INPUT_PROP_MAX, L4RE_EVENT_PROP_MAX) + 1);
 
@@ -866,7 +868,7 @@ static int l4fb_input_setup(struct fb_info *info, struct l4fb_screen *screen)
 		return -ENOMEM;
 	err = request_threaded_irq(screen->irqnum, event_interrupt_ll,
 	                           event_interrupt_th,
-	                           IRQF_SAMPLE_RANDOM, "L4fbev", screen);
+	                           0, "L4fbev", screen);
 	if (err) {
 		dev_err(scr2dev(screen), "%s: request_threaded_irq failed: %d\n", __func__, err);
 		return err;
@@ -1019,56 +1021,49 @@ static void l4fb_refresh_func(unsigned long data)
 /* ============================================ */
 static int l4fb_fb_init(struct fb_info *fb, struct l4fb_screen *screen)
 {
-	int ret, input_avail = 0;
-	L4XV_V(f);
+	int ret;
 
 	if (verbose)
 		l4x_printf("Starting L4FB\n");
 
 	ret = -ENOMEM;
 
-	L4XV_L(f);
 	if (l4_is_invalid_cap(screen->ev_ds = l4x_cap_alloc()))
-		goto out_unlock;
+		return ret;
 
-	if (l4_is_invalid_cap(screen->ev_irq = l4x_cap_alloc())) {
-		l4x_cap_free(screen->ev_ds);
-		goto out_unlock;
-	}
+	if (l4_is_invalid_cap(screen->ev_irq = l4x_cap_alloc()))
+		goto out_free_ds;
 
-	if (l4re_event_get_buffer(screen->goos, screen->ev_ds)) {
+	if (L4XV_FN_i(l4re_event_get_buffer(screen->goos, screen->ev_ds))) {
 		l4x_printf("l4fb: INFO: No input available\n");
 
 		l4x_cap_free(screen->ev_ds);
 		l4x_cap_free(screen->ev_irq);
-	} else {
-		input_avail = 1;
-		ret = -ENOENT;
-		if (l4re_event_buffer_attach(&screen->ev_buf, screen->ev_ds, l4re_env()->rm))
-			goto out_unlock;
 
-		if (l4_error(l4_factory_create_irq(l4re_env()->factory, screen->ev_irq))) {
-			l4x_cap_free(screen->ev_ds);
-			l4x_cap_free(screen->ev_irq);
-			goto out_unlock;
-		}
-
-		if (l4_error(l4_icu_bind(screen->goos, 0, screen->ev_irq))) {
-			l4re_util_cap_release(screen->ev_irq);
-			l4x_cap_free(screen->ev_ds);
-			l4x_cap_free(screen->ev_irq);
-			goto out_unlock;
-		}
+		return 0;
 	}
 
-	L4XV_U(f);
+	ret = -ENOENT;
+	if (L4XV_FN_i(l4re_event_buffer_attach(&screen->ev_buf, screen->ev_ds, l4re_env()->rm)))
+		goto out_release_ds;
 
-	if (input_avail)
-		return l4fb_input_setup(fb, screen);
-	return 0;
+	if (L4XV_FN_i(l4_error(l4_factory_create_irq(l4re_env()->factory, screen->ev_irq))))
+		goto out_free_irq;
 
-out_unlock:
-	L4XV_U(f);
+	if (L4XV_FN_i(l4_error(l4_icu_bind(screen->goos, 0, screen->ev_irq))))
+		goto out_delete_irq;
+
+	return l4fb_input_setup(fb, screen);
+
+out_delete_irq:
+	L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP, screen->ev_irq));
+out_free_irq:
+	l4x_cap_free(screen->ev_irq);
+out_release_ds:
+	L4XV_FN_v(l4_task_release_cap(L4RE_THIS_TASK_CAP, screen->ev_ds));
+out_free_ds:
+	l4x_cap_free(screen->ev_ds);
+
 	return ret;
 }
 
@@ -1076,7 +1071,6 @@ out_unlock:
 
 static void l4fb_shutdown(struct l4fb_screen *screen)
 {
-	L4XV_V(f);
 	del_timer_sync(&screen->refresh_timer);
 
 	/* Also do not update anything anymore */
@@ -1087,37 +1081,29 @@ static void l4fb_shutdown(struct l4fb_screen *screen)
 		l4x_unregister_irq(screen->irqnum);
 	}
 
-	L4XV_L(f);
-	l4re_rm_detach((void *)screen->fb_addr);
+	L4XV_FN_v(l4re_rm_detach((void *)screen->fb_addr));
 
 	if (l4_is_valid_cap(screen->ev_irq)) {
-		l4re_util_cap_release(screen->ev_irq);
+		L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP, screen->ev_irq));
 		l4x_cap_free(screen->ev_irq);
 	}
 	if (l4_is_valid_cap(screen->ev_ds)) {
-		l4re_util_cap_release(screen->ev_ds);
+		L4XV_FN_v(l4_task_release_cap(L4RE_THIS_TASK_CAP, screen->ev_ds));
 		l4x_cap_free(screen->ev_ds);
 	}
-
-	L4XV_U(f);
 
 	if (screen->unmap_info.flexpages)
 		kfree(screen->unmap_info.flexpages);
 
 	l4fb_delete_all_views(screen);
 
-	if (screen->flags & F_l4re_video_goos_dynamic_buffers) {
-		L4XV_L(f);
-		l4re_video_goos_delete_buffer(screen->goos, 0);
-		L4XV_U(f);
-	}
+	if (screen->flags & F_l4re_video_goos_dynamic_buffers)
+		L4XV_FN_v(l4re_video_goos_delete_buffer(screen->goos, 0));
 
-	L4XV_L(f);
 	if (l4_is_valid_cap(screen->goos)) {
-		l4re_util_cap_release(screen->goos);
+		L4XV_FN_v(l4_task_release_cap(L4RE_THIS_TASK_CAP, screen->goos));
 		l4x_cap_free(screen->goos);
 	}
-	L4XV_U(f);
 
 	screen->flags = 0;
 	l4fb_init_screen(screen);

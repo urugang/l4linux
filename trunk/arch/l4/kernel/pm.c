@@ -28,7 +28,21 @@ struct wakeup_src {
 
 static DEFINE_SPINLOCK(list_lock);
 
-static int suspend_all_irq = 1;
+enum {
+	IRQ_TYPE_USER_SELECTED,
+	IRQ_TYPE_ALL_IRQS,
+	IRQ_TYPE_LX_INFRA,
+	IRQ_TYPE_TYPES,
+};
+
+static char *wakeup_irq_types[] = {
+	[IRQ_TYPE_USER_SELECTED] = "selected",
+	[IRQ_TYPE_ALL_IRQS]      = "all",
+	[IRQ_TYPE_LX_INFRA]      = "lx+selected",
+};
+
+
+static int suspend_irq_type = IRQ_TYPE_LX_INFRA;
 static int suspend_possible;
 
 #ifndef CONFIG_L4_VCPU
@@ -130,7 +144,7 @@ static void loop_over_irqs(int doattach)
 	struct wakeup_src *s;
 	l4_cap_idx_t t = l4x_cpu_thread_get_cap(smp_processor_id());
 
-	if (suspend_all_irq) {
+	if (suspend_irq_type == IRQ_TYPE_ALL_IRQS) {
 		for (i = 0; i < NR_IRQS; ++i) {
 			struct irq_desc *desc = irq_to_desc(i);
 			l4_cap_idx_t cap = get_int_cap(i);
@@ -147,7 +161,38 @@ static void loop_over_irqs(int doattach)
 				detach_from_irq(i, cap);
 		}
 	} else {
+		if (suspend_irq_type == IRQ_TYPE_LX_INFRA) {
+			for (i = 0; i < NR_IRQS; ++i) {
+				struct irq_data *data = irq_get_irq_data(i);
+				struct irq_desc *desc;
+				l4_cap_idx_t cap = get_int_cap(i);
+
+				if (l4_is_invalid_cap(cap))
+					continue;
+
+				if (!irqd_is_wakeup_set(data))
+					continue;
+
+				desc = irq_to_desc(i);
+				if (desc && desc->action &&
+				    (desc->action->flags & IRQF_NO_SUSPEND))
+					// still attached
+					continue;
+
+				if (doattach)
+					attach_to_irq(i, cap, t);
+				else
+					detach_from_irq(i, cap);
+			}
+		}
+
+		/* Do this always */
 		list_for_each_entry(s, &wakeup_srcs, list) {
+			struct irq_data *data = irq_get_irq_data(s->irq);
+			if (suspend_irq_type == IRQ_TYPE_LX_INFRA
+			    && irqd_is_wakeup_set(data))
+				continue; /* already done above */
+
 			if (doattach)
 				attach_to_irq(s->irq, s->irqcap, t);
 			else
@@ -183,9 +228,11 @@ static void l4x_pm_plat_wake(void)
 
 static int l4x_pm_plat_valid(suspend_state_t state)
 {
+#ifdef CONFIG_SUSPEND
 #ifdef CONFIG_L4_VCPU
-	if (suspend_possible || suspend_all_irq)
+	if (suspend_possible || suspend_irq_type)
 		return suspend_valid_only_mem(state);
+#endif
 #endif
 	return 0;
 }
@@ -250,10 +297,12 @@ static void l4x_virtual_mem_handle_pages(enum l4x_virtual_mem_type t)
 		 = list_entry(p, struct l4x_virtual_mem_struct, list);
 
 		if (t == L4X_VIRTUAL_MEM_TYPE_MAP) {
-			l4x_printf("map virtual %lx -> %lx\n", e->address, e->page);
+			if (0)
+				l4x_printf("map virtual %lx -> %lx\n", e->address, e->page);
 			l4lx_memory_map_virtual_page(e->address, e->page, 1);
 		} else {
-			l4x_printf("unmap virtual %lx\n", e->address);
+			if (0)
+				l4x_printf("unmap virtual %lx\n", e->address);
 			l4lx_memory_unmap_virtual_page(e->address);
 		}
 	}
@@ -269,7 +318,7 @@ static int l4x_pm_suspend(void)
 			continue;
 
 		// FIXME: destroy better, threads and task
-		if (!l4lx_task_delete_task(p->thread.user_thread_id, 1))
+		if (l4lx_task_delete_task(p->thread.user_thread_id))
 			l4x_printf("Error deleting %s(%d)\n", p->comm, p->pid);
 		if (l4lx_task_number_free(p->thread.user_thread_id))
 			l4x_printf("Error freeing %s(%d)\n", p->comm, p->pid);
@@ -370,29 +419,44 @@ static ssize_t wakeup_srcs_show(struct kobject *kobj,
 	return c;
 }
 
-static ssize_t wakeup_src_all_store(struct kobject *kobj,
-                                    struct kobj_attribute *attr,
-                                    const char *buf, size_t sz)
+static ssize_t wakeup_src_type_store(struct kobject *kobj,
+                                     struct kobj_attribute *attr,
+                                     const char *buf, size_t sz)
 {
-	unsigned v = simple_strtoul(buf, NULL, 0);
-	if (v & ~1u)
-		return -EINVAL;
-	suspend_all_irq = v;
+	int i = 0;
+	for (; i < IRQ_TYPE_TYPES; ++i) {
+		int l = strlen(wakeup_irq_types[i]);
+		if (sz < l)
+			l = sz;
+		if (!strncmp(buf, wakeup_irq_types[i], l)) {
+			suspend_irq_type = i;
+			break;
+		}
+	}
 	return sz;
 }
 
-static ssize_t wakeup_srcs_all_show(struct kobject *kobj,
+static ssize_t wakeup_src_type_show(struct kobject *kobj,
                                     struct kobj_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", suspend_all_irq);
+	int i = 0;
+	ssize_t s = 0;
+	for (; i < IRQ_TYPE_TYPES; ++i) {
+		const char *fmt = i == suspend_irq_type ? "%s[%s]" : "%s%s";
+		s += sprintf(buf + s, fmt, i ? " " : "",
+		             wakeup_irq_types[i]);
+
+	}
+	s += sprintf(buf + s, "\n");
+	return s;
 }
 
 static struct kobj_attribute wakeup_src_add_attr =
 	__ATTR(wakeup_irq_add,    0600, wakeup_srcs_show, wakeup_irq_add_store);
 static struct kobj_attribute wakeup_src_del_attr =
 	__ATTR(wakeup_irq_remove, 0600, wakeup_srcs_show, wakeup_irq_del_store);
-static struct kobj_attribute wakeup_src_all_attr =
-	__ATTR(wakeup_irq_all, 0600, wakeup_srcs_all_show, wakeup_src_all_store);
+static struct kobj_attribute wakeup_src_type_attr =
+	__ATTR(wakeup_irq_type, 0600, wakeup_src_type_show, wakeup_src_type_store);
 
 
 static __init int l4x_pm_init(void)
@@ -407,7 +471,7 @@ static __init int l4x_pm_init(void)
 	if (r)
 		printk(KERN_ERR "failed to create sysfs file: %d\n", r);
 
-	r = sysfs_create_file(power_kobj, &wakeup_src_all_attr.attr);
+	r = sysfs_create_file(power_kobj, &wakeup_src_type_attr.attr);
 	if (r)
 		printk(KERN_ERR "failed to create sysfs file: %d\n", r);
 

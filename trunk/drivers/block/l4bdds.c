@@ -18,11 +18,11 @@
 #include <asm/api/macros.h>
 #include <asm/generic/util.h>
 
-#include <l4/sys/types.h>
+#include <l4/sys/task.h>
+#include <l4/sys/err.h>
 #include <l4/re/c/namespace.h>
 #include <l4/re/c/dataspace.h>
 #include <l4/re/c/rm.h>
-#include <l4/re/c/util/cap.h>
 
 MODULE_AUTHOR("Adam Lackorzynski <adam@os.inf.tu-dresden.de");
 MODULE_DESCRIPTION("Block driver for L4Re dataspaces");

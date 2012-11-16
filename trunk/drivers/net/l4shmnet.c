@@ -316,7 +316,7 @@ static int l4x_l4shmc_open(struct net_device *netdev)
 	netif_carrier_off(netdev);
 
 	if ((err = request_irq(netdev->irq, l4x_l4shmc_interrupt,
-	                       IRQF_SAMPLE_RANDOM | IRQF_SHARED,
+	                       IRQF_SHARED,
 	                       netdev->name, netdev))) {
 		dev_err(&netdev->dev, "%s: request_irq(%d, ...) failed: %d\n",
 		        netdev->name, netdev->irq, err);

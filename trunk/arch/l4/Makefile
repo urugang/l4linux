@@ -83,6 +83,10 @@ ifeq ($(CONFIG_X86_32),y)
         #KBUILD_CFLAGS += -msoft-float -mregparm=3 -freg-struct-return
 	KBUILD_CFLAGS += -mregparm=3
 
+        # Never want PIC in a 32-bit kernel, prevent breakage with GCC built
+        # with nonstandard options
+        KBUILD_CFLAGS += -fno-pic
+
         # prevent gcc from keeping the stack 16 byte aligned
         KBUILD_CFLAGS += $(call cc-option,-mpreferred-stack-boundary=2)
 
@@ -104,6 +108,9 @@ else
 
         KBUILD_AFLAGS += -m64
         KBUILD_CFLAGS += -m64
+
+	# Use -mpreferred-stack-boundary=3 if supported.
+	KBUILD_CFLAGS += $(call cc-option,-mno-sse -mpreferred-stack-boundary=3)
 
         # FIXME - should be integrated in Makefile.cpu (Makefile_32.cpu)
         cflags-$(CONFIG_MK8) += $(call cc-option,-march=k8)
@@ -169,6 +176,10 @@ ifeq ($(BASEARCH),arm)
 ifeq ($(CONFIG_CPU_ENDIAN_BE8),y)
 LDFLAGS_vmlinux += --be8
 endif
+
+# Explicitly specifiy 32-bit ARM ISA since toolchain default can be -mthumb:
+KBUILD_CFLAGS   +=$(call cc-option,-marm,)
+
 # This selects which instruction set is used.
 # Note that GCC does not numerically define an architecture version
 # macro, but instead defines a whole series of macros which makes
