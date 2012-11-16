@@ -82,6 +82,8 @@
 
 #endif
 
+asmlinkage void __sched preempt_schedule_irq(void);
+
 static DEFINE_PER_CPU(struct l4x_arch_cpu_fpu_state, l4x_cpu_fpu_state);
 
 void l4x_fpu_set(int on_off)
@@ -155,9 +157,9 @@ static inline void l4x_dispatch_set_polling_flag(void)
 
 #ifdef CONFIG_L4_VCPU
 static inline void l4x_arch_task_start_setup(l4_vcpu_state_t *v,
-		                             struct task_struct *p)
+		                             struct task_struct *p, l4_cap_idx_t task_cap)
 #else
-static inline void l4x_arch_task_start_setup(struct task_struct *p)
+static inline void l4x_arch_task_start_setup(struct task_struct *p, l4_cap_idx_t task_cap)
 #endif
 {
 	// - remember GS in FS so that programs can find their UTCB
@@ -179,11 +181,7 @@ static inline void l4x_arch_task_start_setup(struct task_struct *p)
 		L4X_THREAD_REGSP(&p->thread)->fs = gs;
 
 	/* Setup LDTs */
-	if (p->mm && p->mm->context.size
-#ifdef CONFIG_L4_VCPU
-	    && !l4_is_invalid_cap(p->mm->context.task)
-#endif
-	    ) {
+	if (p->mm && p->mm->context.size) {
 		unsigned i;
 		L4XV_V(f);
 		L4XV_L(f);
@@ -193,7 +191,7 @@ static inline void l4x_arch_task_start_setup(struct task_struct *p)
 			int r;
 			if (sz > L4_TASK_LDT_X86_MAX_ENTRIES)
 				sz = L4_TASK_LDT_X86_MAX_ENTRIES;
-			r = fiasco_ldt_set(p->mm->context.task, p->mm->context.ldt,
+			r = fiasco_ldt_set(task_cap, p->mm->context.ldt,
 			                   sz, i, l4_utcb());
 			if (r)
 				LOG_printf("fiasco_ldt_set(%d, %d): failed %d\n",
@@ -371,6 +369,14 @@ unsigned long l4x_map_page_attr_to_l4(pte_t pte)
 }
 
 #ifdef CONFIG_L4_VCPU
+
+static inline void
+state_to_vcpu(l4_vcpu_state_t *vcpu, struct pt_regs *regs,
+              struct task_struct *p)
+{
+	ptregs_to_vcpu(vcpu, regs);
+}
+
 static inline void vcpu_to_thread_struct(l4_vcpu_state_t *v,
                                          struct thread_struct *t)
 {
@@ -389,7 +395,6 @@ static inline void thread_struct_to_vcpu(l4_vcpu_state_t *v,
 	v->r.gs = t->gs;
 #endif
 }
-
 #else
 static inline void utcb_to_thread_struct(l4_utcb_t *utcb,
                                          struct thread_struct *t)
@@ -401,6 +406,7 @@ static inline void utcb_to_thread_struct(l4_utcb_t *utcb,
 	t->error_code = exc->err;
 	t->cr2        = exc->pfa;
 }
+#endif
 
 static inline void thread_struct_to_utcb(struct thread_struct *t,
                                          l4_utcb_t *utcb,
@@ -413,7 +419,6 @@ static inline void thread_struct_to_utcb(struct thread_struct *t,
 	per_cpu(utcb_snd_size, smp_processor_id()) = send_size;
 #endif
 }
-#endif
 
 #ifndef CONFIG_L4_VCPU
 static int l4x_hybrid_begin(struct task_struct *p,
@@ -428,14 +433,12 @@ static inline void dispatch_system_call(struct task_struct *p,
 {
 	unsigned int syscall;
 	syscall_t syscall_fn = NULL;
+	int show_syscalls = 0;
 
 #ifdef CONFIG_L4_VCPU
 	local_irq_enable();
 	p->thread.regsp = regsp;
 #endif
-	//printk("dispatch_system_call\n");
-
-	//syscall_count++;
 
 	regsp->orig_ax = syscall = regsp->ax;
 	regsp->ax = -ENOSYS;
@@ -444,87 +447,131 @@ static inline void dispatch_system_call(struct task_struct *p,
 	ferret_histo_bin_inc(l4x_ferret_syscall_ctr, syscall);
 #endif
 
-#if 0
-	printk("Syscall %3d for %s(%d at %p): args: %lx,%lx,%lx\n",
-	           syscall, p->comm, p->pid, (void *)regsp->ip,
-		   regsp->bx, regsp->cx, regsp->dx);
-#endif
-#if 0
-	if (syscall == 11) {
+	if (show_syscalls)
+		printk("Syscall %3d for %s(%d at %p): args: %lx,%lx,%lx\n",
+		       syscall, p->comm, p->pid, (void *)regsp->ip,
+		       regsp->bx, regsp->cx, regsp->dx);
+
+	if (show_syscalls && syscall == 11) {
 		char *filename;
-		printk("execve: pid: %d(%s), " PRINTF_L4TASK_FORM ": ",
-		       p->pid, p->comm, PRINTF_L4TASK_ARG(p->thread.user_thread_id));
+		printk("execve: pid: %d(%s): ", p->pid, p->comm);
 		filename = getname((char *)regsp->bx);
 		printk("%s\n", IS_ERR(filename) ? "UNKNOWN" : filename);
 	}
-#endif
-#if 0
-	if (syscall == 120) {
+
+	if (show_syscalls && syscall == 120)
 		printk("Syscall %3d for %s(%d at %p): arg1 = %lx ebp=%lx\n",
 		       syscall, p->comm, p->pid, (void *)regsp->ip,
 		       regsp->bx, regsp->bp);
-	}
-#endif
 
-#if 0
-	if (syscall == 21)
+	if (show_syscalls && syscall == 21)
 		printk("Syscall %3d mount for %s(%d at %p): %lx %lx %lx %lx %lx %lx\n",
 		       syscall, p->comm, p->pid, (void *)regsp->ip,
 		       regsp->bx, regsp->cx, regsp->dx, regsp->si,
 		       regsp->di, regsp->bp);
-#endif
-#if 0
-	if (syscall == 5) {
+	if (show_syscalls && syscall == 5) {
 		char *filename = getname((char *)regsp->bx);
 		printk("open: pid: %d(%s): %s (%lx)\n",
 		       current->pid, current->comm,
 		       IS_ERR(filename) ? "UNKNOWN" : filename, regsp->bx);
 		putname(filename);
 	}
-#endif
 
-	if (!is_lx_syscall(syscall)) {
+	if (unlikely(!is_lx_syscall(syscall))) {
 		printk("Syscall %3d for %s(%d at %p): arg1 = %lx\n",
 		       syscall, p->comm, p->pid, (void *)regsp->ip,
 		       regsp->bx);
 		l4x_print_regs(&p->thread, regsp);
-		enter_kdebug("no syscall");
 	}
+
 	if (likely((is_lx_syscall(syscall))
 		   && ((syscall_fn = (syscall_t)sys_call_table[syscall])))) {
-		//if (!p->user)
-		//	enter_kdebug("dispatch_system_call: !p->user");
 
-		/* valid system call number.. */
-		if (unlikely(current_thread_info()->flags
-		             & (_TIF_SYSCALL_EMU
-		                | _TIF_SYSCALL_TRACE
-		                | _TIF_SECCOMP
-		                | _TIF_SYSCALL_AUDIT))) {
+		if (unlikely(current_thread_info()->flags & _TIF_WORK_SYSCALL_ENTRY))
 			syscall_trace_enter(regsp);
-			regsp->ax = syscall_fn(regsp->bx, regsp->cx,
-			                       regsp->dx, regsp->si,
-			                       regsp->di, regsp->bp);
+
+		regsp->ax = syscall_fn(regsp->bx, regsp->cx,
+		                       regsp->dx, regsp->si,
+		                       regsp->di, regsp->bp);
+
+		if (unlikely(current_thread_info()->flags & _TIF_WORK_SYSCALL_EXIT))
 			syscall_trace_leave(regsp);
-		} else {
-			regsp->ax = syscall_fn(regsp->bx, regsp->cx,
-			                       regsp->dx, regsp->si,
-			                       regsp->di, regsp->bp);
-		}
 	}
 
-	if (signal_pending(p))
-		l4x_do_signal(regsp, syscall);
+	if (show_syscalls)
+		printk("Syscall %3d for %s(%d at %p): return %lx/%ld\n",
+		       syscall, p->comm, p->pid, (void *)regsp->ip,
+		       regsp->ax, regsp->ax);
+#ifdef CONFIG_L4_VCPU
+	local_irq_disable();
+#endif
+}
 
-	if (need_resched())
-		schedule();
+static inline void
+l4x_pre_iret_work(struct pt_regs *regs, struct task_struct *p,
+                  unsigned long scno, void *dummy)
+{
+	unsigned long tifl;
 
-#if 0
-	printk("Syscall %3d for %s(%d at %p): return %lx/%ld\n",
-	       syscall, p->comm, p->pid, (void *)regsp->ip,
-	       regsp->ax, regsp->ax);
-	if (unlikely(syscall == -38))
-		enter_kdebug("no syscall");
+resume_userspace:
+	local_irq_disable();
+
+	tifl = current_thread_info()->flags;
+	if (tifl & _TIF_WORK_MASK)
+		goto work_pending;
+
+	goto restore_all;
+
+work_pending:
+	if (!(current_thread_info()->flags & _TIF_NEED_RESCHED))
+		goto work_notifysig;
+
+work_resched:
+	schedule();
+
+	local_irq_disable();
+
+	tifl = current_thread_info()->flags;
+	if (!(tifl & _TIF_WORK_MASK))
+		goto restore_all;
+	if (tifl & _TIF_NEED_RESCHED)
+		goto work_resched;
+
+work_notifysig:
+	local_irq_enable();
+
+	if ((regs->cs & SEGMENT_RPL_MASK) < USER_RPL)
+#ifdef CONFIG_PREEMPT
+		goto resume_kernel;
+#else
+		goto restore_all;
+#endif
+
+	do_notify_resume(regs, 0, tifl);
+	goto resume_userspace;
+
+restore_all:
+
+	return;
+
+#ifdef CONFIG_PREEMPT
+resume_kernel:
+	local_irq_disable();
+
+	if (current_thread_info()->preempt_count == 0)
+		goto restore_all;
+
+need_resched:
+	tifl = current_thread_info()->flags;
+	if (!(tifl & _TIF_NEED_RESCHED))
+		goto restore_all;
+
+	if (regs->flags & X86_EFLAGS_IF)
+		goto restore_all;
+
+	preempt_schedule_irq();
+
+	goto need_resched;
 #endif
 }
 
@@ -704,6 +751,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		regs->ip += 2;
 
 		dispatch_system_call(p, regs);
+		l4x_pre_iret_work(regs, p, 0, 0);
 
 		BUG_ON(p != current);
 

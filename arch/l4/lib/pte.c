@@ -1,5 +1,6 @@
 #include <linux/mm.h>
 #include <linux/spinlock.h>
+#include <linux/vmalloc.h>
 
 #include <asm/segment.h>
 #include <asm/pgtable.h>
@@ -19,6 +20,10 @@
 #include <l4/sys/kdebug.h>
 #include <l4/re/consts.h>
 
+#ifdef ARCH_arm
+#include <asm/l4x/dma.h>
+#endif
+
 static void l4x_flush_page(struct mm_struct *mm,
                            unsigned long address,
                            unsigned long vaddr,
@@ -30,22 +35,8 @@ static void l4x_flush_page(struct mm_struct *mm,
 	if (mm && mm->context.l4x_unmap_mode == L4X_UNMAP_MODE_SKIP)
 		return;
 
-	/* some checks:
-	 * options & ALL_SPACES:	address >= high_memory
-	 * otherwise:			address < high_memory
-	 * address > 0x80000000UL:	no flush operation
-	 */
-#ifdef THIS_CANNOT_HIT
-	if (options & L4_FP_ALL_SPACES) {
-		/* unmap page in all spaces, only allowed for vm pages */
-		if (address < (unsigned long)high_memory) {
-			printk("trying to flush physical page (%lx) "
-			       "from linux server", address);
-			enter_kdebug("phys + all_spaces");
-		}
-	} else
-#endif
-		if (address > 0x80000000UL) {
+	/* some checks: */
+	if (address > 0x80000000UL) {
 		unsigned long remap;
 		remap = find_ioremap_entry(address);
 
@@ -101,12 +92,18 @@ static void l4x_flush_page(struct mm_struct *mm,
 
 #ifdef ARCH_arm
 #define _PAGE_MAPPED L_PTE_MAPPED
+#define PF ""
+#else
+#define PF "l"
 #endif
 
-#define check_pte_mapped(old, newval)				\
+#define check_pte_mapped(old, newval, txt)			\
 do {								\
        if (pte_mapped(old) && !pte_mapped(newval)) {		\
-		printk("set_pte: old mapped, new one not\n");	\
+		printk("set_pte: " txt" old mapped, "		\
+		       "new one not: "				\
+		       "old=%" PF "x new=%" PF "x addr=%lx\n",	\
+		       pte_val(old), pte_val(newval), addr);	\
 		WARN_ON(1);					\
 		enter_kdebug("set_pte");			\
 		newval = __pte(pte_val(newval) | _PAGE_MAPPED); \
@@ -131,7 +128,6 @@ unsigned long l4x_set_pte(struct mm_struct *mm,
 
 	/* old was present && new not -> flush */
 	int flush_rights = L4_FPAGE_RWX;
-	L4XV_V(f);
 #if 0
 	if ((pte_val(old) & PAGE_MASK) != (pte_val(pteval) & PAGE_MASK))
 		printk("spte %x->%x\n", pte_val(old), pte_val(pteval));
@@ -152,28 +148,23 @@ unsigned long l4x_set_pte(struct mm_struct *mm,
 			/* Protection changed from r/w to ro
 			 * or page now clean -> remap */
 			flush_rights = L4_FPAGE_W;
-			check_pte_mapped(old, pteval);
+			check_pte_mapped(old, pteval, "RW->RO");
 		} else {
 			/* nothing changed, simply return */
-			check_pte_mapped(old, pteval);
+			check_pte_mapped(old, pteval, "NoChg");
 			return pte_val(pteval);
 		}
 	}
 
 	/* Ok, now actually flush or remap the page */
-	L4XV_L(f);
-	l4x_flush_page(mm, pte_val(old), addr, PAGE_SHIFT, flush_rights);
-	L4XV_U(f);
+	L4XV_FN_v(l4x_flush_page(mm, pte_val(old), addr, PAGE_SHIFT, flush_rights));
 	return pte_val(pteval);
 }
 
 void l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte_t pteval)
 {
-	L4XV_V(f);
-	L4XV_L(f);
 	/* Invalidate page */
-	l4x_flush_page(mm, pte_val(pteval), addr, PAGE_SHIFT, L4_FPAGE_RWX);
-	L4XV_U(f);
+	L4XV_FN_v(l4x_flush_page(mm, pte_val(pteval), addr, PAGE_SHIFT, L4_FPAGE_RWX));
 }
 
 
@@ -188,7 +179,17 @@ void l4x_vmalloc_map_vm_area(unsigned long address, unsigned long end)
 		enter_kdebug("map_vm_area: Unaligned address!");
 
 	for (; address < end; address += PAGE_SIZE) {
-		pte_t *ptep = lookup_pte(swapper_pg_dir, address);
+		pte_t *ptep;
+
+#ifdef ARCH_arm
+		unsigned long o;
+		if ((o = l4x_arm_is_selfmapped_addr(address))) {
+			address += o - PAGE_SIZE;
+			continue;
+		}
+#endif
+
+		ptep = lookup_pte(swapper_pg_dir, address);
 
 		if (!ptep || !pte_present(*ptep)) {
 			if (0)
@@ -215,6 +216,15 @@ void l4x_vmalloc_unmap_vm_area(unsigned long address, unsigned long end)
 		enter_kdebug("unmap_vm_area: Unaligned address!");
 
 	for (; address < end; address += PAGE_SIZE) {
+
+#ifdef ARCH_arm
+		unsigned long o;
+		if ((o = l4x_arm_is_selfmapped_addr(address))) {
+			address += o - PAGE_SIZE;
+			continue;
+		}
+#endif
+
 		/* check whether we are really flushing a vm page */
 		if (address < (unsigned long)high_memory
 #ifdef ARCH_arm

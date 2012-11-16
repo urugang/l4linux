@@ -13,9 +13,6 @@ static inline int l4x_dmapool_is_in_virt_dma_space(unsigned long va, size_t sz)
 }
 #endif
 
-
-void l4x_arm_consistent_init(unsigned long base);
-
-int l4x_virt_addr_is_in_dma_range(unsigned long va, size_t sz);
+unsigned long l4x_arm_is_selfmapped_addr(unsigned long a);
 
 #endif /* ! __ASM_L4__L4X_ARM__DMA_H__ */

@@ -137,7 +137,7 @@ EXPORT_SYMBOL(l4x_kvm_svm_run);
 int l4x_kvm_destroy_vm(struct kvm *kvm)
 {
 	printk("%s: cap = %08lx\n", __func__, kvm->arch.l4vmcap);
-	if (!l4lx_task_delete_task(kvm->arch.l4vmcap, 1)) {
+	if (l4lx_task_delete_task(kvm->arch.l4vmcap)) {
 		printk("%s: kvm task destruction failed cap=%08lx\n",
 		       __func__, kvm->arch.l4vmcap);
 		l4lx_task_number_free(kvm->arch.l4vmcap);

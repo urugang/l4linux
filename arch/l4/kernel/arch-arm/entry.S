@@ -317,19 +317,11 @@ __kuser_get_tls:				@ 0x0fe0
 	.word	0			@ 0xffff0ff0 software TLS value, then
 	.endr				@ pad up to __kuser_helper_version
 
-	// haha, non-virtualizable...
 	.text
 	.global kuser_tls_user_access_code
 kuser_tls_user_access_code:
-#ifdef CONFIG_L4_VCPU
-	mrc	p15, 0, r0, c13, c0, 2    @ tls-reg
+	mrc	p15, 0, r0, c13, c0, 3    @ tls-reg
 	usr_ret lr
-	.word	0
-#else
-	mrc	p15, 0, r0, c13, c0, 3    @ utcb-addr
-	ldr	r0, [r0, #(127*4)]        @ tcr-user[2]
-	usr_ret lr
-#endif
 	.previous
 
 __kuser_helper_version:				@ 0xffff0ffc

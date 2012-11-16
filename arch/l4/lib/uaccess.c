@@ -8,7 +8,7 @@
 /* #define DEBUG_PUT_USER */
 /* #define DEBUG_GET_USER */
 
-/* #define LOG_EFAULT */
+//#define LOG_EFAULT
 #ifdef LOG_EFAULT
 #include <l4/sys/kdebug.h>
 static void log_efault(const char *str, const void *address)
@@ -17,11 +17,9 @@ static void log_efault(const char *str, const void *address)
 				 (unsigned long)address);
 
 	printk("%s returning efault, address: %p, \n"
-	       "  task: %s (%p, " PRINTF_L4TASK_FORM
-	       "), pdir: %p, ptep: %p, pte: %lx\n",
+	       "  task: %s (%p), pdir: %p, ptep: %p, pte: %lx\n",
 	       str, address, current->comm, current,
-	       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
-	       current->mm->pgd, ptep, ptep ? pte_val(*ptep) : 0);
+	       current->mm->pgd, ptep, ptep ? (unsigned long)pte_val(*ptep) : 0);
 	enter_kdebug("log_efault");
 }
 #else

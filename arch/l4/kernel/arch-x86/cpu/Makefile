@@ -14,7 +14,7 @@ CFLAGS_common.o		:= $(nostackp)
 
 obj-y			:= intel_cacheinfo.o scattered.o topology.o
 obj-y			+= proc.o capflags.o powerflags.o common.o
-obj-y			+= vmware.o hypervisor.o sched.o mshyperv.o
+obj-y			+= vmware.o hypervisor.o mshyperv.o
 obj-y			+= rdrand.o
 obj-y			+= match.o
 
@@ -32,7 +32,9 @@ obj-$(CONFIG_PERF_EVENTS)		+= perf_event.o
 
 ifdef CONFIG_PERF_EVENTS
 obj-$(CONFIG_CPU_SUP_AMD)		+= perf_event_amd.o
-obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_p6.o perf_event_p4.o perf_event_intel_lbr.o perf_event_intel_ds.o perf_event_intel.o
+obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_p6.o perf_event_p4.o
+obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_lbr.o perf_event_intel_ds.o perf_event_intel.o
+obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_uncore.o
 endif
 
 #obj-$(CONFIG_X86_MCE)			+= mcheck/
@@ -81,5 +83,6 @@ perf_event_intel_ds-y  := $(b)/perf_event_intel_ds.o
 perf_event_intel_lbr-y := $(b)/perf_event_intel_lbr.o
 perf_event_intel-y     := $(b)/perf_event_intel.o
 perf_event_amd-y       := $(b)/perf_event_amd.o
+perf_event_intel_uncore-y:= $(b)/perf_event_intel_uncore.o
 rdrand-y               := $(b)/rdrand.o
 match-y                := $(b)/match.o

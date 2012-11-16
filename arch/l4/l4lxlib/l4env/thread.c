@@ -6,10 +6,10 @@
 #include <l4/sys/thread.h>
 #include <l4/sys/scheduler.h>
 #include <l4/sys/factory.h>
+#include <l4/sys/task.h>
 #include <l4/re/env.h>
 #include <l4/re/c/rm.h>
 #include <l4/log/log.h>
-#include <l4/re/c/util/cap.h>
 #include <l4/re/c/util/kumem_alloc.h>
 #include <l4/sys/debugger.h>
 
@@ -308,7 +308,7 @@ out_free_utcb:
 #endif
 	l4lx_thread_ku_alloc_free_u(utcb);
 out_rel_cap:
-	l4re_util_cap_release(l4cap);
+	l4_task_delete_obj(L4RE_THIS_TASK_CAP, l4cap);
 out_free_cap:
 	l4x_cap_free(l4cap);
 
@@ -353,7 +353,7 @@ void l4lx_thread_shutdown(l4lx_thread_t u, void *v, int do_cap_free)
 	if (v)
 		l4lx_thread_ku_alloc_free_v((l4_vcpu_state_t *)v);
 
-	l4re_util_cap_release(threadcap);
+	l4_task_delete_obj(L4RE_THIS_TASK_CAP, threadcap);
 	if (do_cap_free)
 		l4x_cap_free(threadcap);
 }

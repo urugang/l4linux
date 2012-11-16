@@ -24,14 +24,11 @@ int l4x_alloc_irq_desc_data(int irq)
 void l4x_irq_set_type_at_icu(unsigned irq, unsigned type)
 {
 	l4_msgtag_t t;
-	L4XV_V(f);
 
 	if (irq >= NR_IRQS_HW)
 		return;
 
-	L4XV_L(f);
-	t = l4_icu_set_mode(l4io_request_icu(), irq, type);
-	L4XV_U(f);
+	t = L4XV_FN(l4_msgtag_t, l4_icu_set_mode(l4io_request_icu(), irq, type));
 	if (l4_error(t))
 		printk("irq: l4-set-mode(%d) failed for irq %d\n", type, irq);
 }

@@ -19,7 +19,7 @@
 
 static inline void l4x_svm_vmcb_seg_dump(struct kvm_vcpu *vcpu, struct vmcb_seg *seg, char *name)
 {
-	vcpu_printf(vcpu, "%s: selector = %04x, attrib = %04x limit = %08x, attrib = %016llx\n",
+	kvm_err("%s: selector = %04x, attrib = %04x limit = %08x, attrib = %016llx\n",
 	            name, seg->selector, seg->attrib, seg->limit, seg->base);
 }
 
@@ -29,8 +29,8 @@ static inline void l4x_svm_vmcb_dump(struct kvm_vcpu *vcpu)
 	struct vmcb_control_area c = svm->vmcb->control;
 	struct vmcb_save_area s = svm->vmcb->save;
 
-	vcpu_printf(vcpu, "************************ vmcb_dump ************************\n");
-	vcpu_printf(vcpu, "****** save ****\n");
+	kvm_err("************************ vmcb_dump ************************\n");
+	kvm_err("****** save ****\n");
 	l4x_svm_vmcb_seg_dump(vcpu, &s.es, "es");
 	l4x_svm_vmcb_seg_dump(vcpu, &s.cs, "cs");
 	l4x_svm_vmcb_seg_dump(vcpu, &s.ss, "ss");
@@ -41,37 +41,37 @@ static inline void l4x_svm_vmcb_dump(struct kvm_vcpu *vcpu)
 	l4x_svm_vmcb_seg_dump(vcpu, &s.ldtr, "ldtr");
 	l4x_svm_vmcb_seg_dump(vcpu, &s.idtr, "idtr");
 	l4x_svm_vmcb_seg_dump(vcpu, &s.idtr, "tr");
-	vcpu_printf(vcpu, "cpl = %02x, efer = %016llx\n", s.cpl, s.efer);
-	vcpu_printf(vcpu, "cr0 = %016llx cr2 = %016llx\n", s.cr0, s.cr2);
-	vcpu_printf(vcpu, "cr3 = %016llx cr4 = %016llx\n", s.cr3, s.cr4);
-	vcpu_printf(vcpu, "dr6 = %016llx dr7 = %016llx\n", s.dr6, s.dr7);
-	vcpu_printf(vcpu, "rflags = %016llx, rip = %016llx\n", s.rflags, s.rip);
-	vcpu_printf(vcpu, "rsp = %016llx rax = %016llx\n", s.rsp, s.rax);
-	vcpu_printf(vcpu, "star = %016llx lstar = %016llx\n", s.star, s.lstar);
-	vcpu_printf(vcpu, "cstar = %016llx\n", s.cstar);
-	vcpu_printf(vcpu, "sfmask = %016llx kernel_gs_base = %016llx\n", s.sfmask, s.kernel_gs_base);
-	vcpu_printf(vcpu, "syse_cs = %016llx syse_esp = %016llx\n", s.sysenter_cs, s.sysenter_esp);
-	vcpu_printf(vcpu, "syse_eip = %016llx\n", s.sysenter_eip);
-	vcpu_printf(vcpu, "g_pat = %016llx dbgctl = %016llx\n", s.g_pat, s.dbgctl);
-	vcpu_printf(vcpu, "br_from = %016llx br_to = %016llx\n", s.br_from, s.br_to);
-	vcpu_printf(vcpu, "last_ex_from = %016llx last_ex_to = %016llx\n", s.last_excp_from, s.last_excp_to);
-	vcpu_printf(vcpu, "**** control ***\n");
-	vcpu_printf(vcpu, "inter_cr = %08x\n", c.intercept_cr);
-	vcpu_printf(vcpu, "inter_dr = %08x\n", c.intercept_dr);
-	vcpu_printf(vcpu, "inter_ex = %08x\n", c.intercept_exceptions);
-	vcpu_printf(vcpu, "inter = %016llx\n", c.intercept);
-	vcpu_printf(vcpu, "iopm_base_pa = %016llx msrpm_base_pa = %016llx\n", c.iopm_base_pa, c.msrpm_base_pa);
-	vcpu_printf(vcpu, "tsc_offset = %016llx\n", c.tsc_offset);
-	vcpu_printf(vcpu, "asid = %08x tlb_ctl = %02x\n", c.asid, c.tlb_ctl);
-	vcpu_printf(vcpu, "int_ctl = %08x int_v = %08x int_s = %08x\n", c.int_ctl, c.int_vector, c.int_state);
-	vcpu_printf(vcpu, "exit = %08x exit_hi = %08x\n", c.exit_code, c.exit_code_hi);
-	vcpu_printf(vcpu, "exit_i1 = %016llx exit_i2 = %016llx\n", c.exit_info_1, c.exit_info_2);
-	vcpu_printf(vcpu, "exit_int_i = %08x exit_int_i_err = %08x\n", c.exit_int_info, c.exit_int_info_err);
-	vcpu_printf(vcpu, "nested_ctl = %016llx\n", c.nested_ctl);
-	vcpu_printf(vcpu, "inj = %08x inj_err= %08x\n", c.event_inj, c.event_inj_err);
-	vcpu_printf(vcpu, "ncr3 = %016llx\n", c.nested_cr3);
-	vcpu_printf(vcpu, "lbr_ctl = %016llx\n", c.lbr_ctl);
-	vcpu_printf(vcpu, "*********************** end_of_dump ***********************\n");
+	kvm_err("cpl = %02x, efer = %016llx\n", s.cpl, s.efer);
+	kvm_err("cr0 = %016llx cr2 = %016llx\n", s.cr0, s.cr2);
+	kvm_err("cr3 = %016llx cr4 = %016llx\n", s.cr3, s.cr4);
+	kvm_err("dr6 = %016llx dr7 = %016llx\n", s.dr6, s.dr7);
+	kvm_err("rflags = %016llx, rip = %016llx\n", s.rflags, s.rip);
+	kvm_err("rsp = %016llx rax = %016llx\n", s.rsp, s.rax);
+	kvm_err("star = %016llx lstar = %016llx\n", s.star, s.lstar);
+	kvm_err("cstar = %016llx\n", s.cstar);
+	kvm_err("sfmask = %016llx kernel_gs_base = %016llx\n", s.sfmask, s.kernel_gs_base);
+	kvm_err("syse_cs = %016llx syse_esp = %016llx\n", s.sysenter_cs, s.sysenter_esp);
+	kvm_err("syse_eip = %016llx\n", s.sysenter_eip);
+	kvm_err("g_pat = %016llx dbgctl = %016llx\n", s.g_pat, s.dbgctl);
+	kvm_err("br_from = %016llx br_to = %016llx\n", s.br_from, s.br_to);
+	kvm_err("last_ex_from = %016llx last_ex_to = %016llx\n", s.last_excp_from, s.last_excp_to);
+	kvm_err("**** control ***\n");
+	kvm_err("inter_cr = %08x\n", c.intercept_cr);
+	kvm_err("inter_dr = %08x\n", c.intercept_dr);
+	kvm_err("inter_ex = %08x\n", c.intercept_exceptions);
+	kvm_err("inter = %016llx\n", c.intercept);
+	kvm_err("iopm_base_pa = %016llx msrpm_base_pa = %016llx\n", c.iopm_base_pa, c.msrpm_base_pa);
+	kvm_err("tsc_offset = %016llx\n", c.tsc_offset);
+	kvm_err("asid = %08x tlb_ctl = %02x\n", c.asid, c.tlb_ctl);
+	kvm_err("int_ctl = %08x int_v = %08x int_s = %08x\n", c.int_ctl, c.int_vector, c.int_state);
+	kvm_err("exit = %08x exit_hi = %08x\n", c.exit_code, c.exit_code_hi);
+	kvm_err("exit_i1 = %016llx exit_i2 = %016llx\n", c.exit_info_1, c.exit_info_2);
+	kvm_err("exit_int_i = %08x exit_int_i_err = %08x\n", c.exit_int_info, c.exit_int_info_err);
+	kvm_err("nested_ctl = %016llx\n", c.nested_ctl);
+	kvm_err("inj = %08x inj_err= %08x\n", c.event_inj, c.event_inj_err);
+	kvm_err("ncr3 = %016llx\n", c.nested_cr3);
+	kvm_err("lbr_ctl = %016llx\n", c.lbr_ctl);
+	kvm_err("*********************** end_of_dump ***********************\n");
 }
 
 #endif //__KVM_L4_H

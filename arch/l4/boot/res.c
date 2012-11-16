@@ -77,7 +77,6 @@ asm(
 	void func(void);
 #include <func_list.h>
 
-#include <stdio.h>
 #undef EF
 #define EF(func) \
 	else if (!strcmp(L4_stringify(func), funcname)) \

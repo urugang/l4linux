@@ -18,7 +18,6 @@
 #include <asm/generic/cap_alloc.h>
 
 #include <l4/re/c/util/cap_alloc.h>
-#include <l4/re/c/util/cap.h>
 #include <l4/re/consts.h>
 #include <l4/ankh/client-c.h>
 #include <l4/ankh/session.h>
@@ -162,7 +161,7 @@ static int l4x_net_open(struct net_device *netdev)
 	}
 
 	if ((err = request_irq(netdev->irq, l4x_net_interrupt,
-	                       IRQF_SAMPLE_RANDOM | IRQF_SHARED,
+	                       IRQF_SHARED,
 	                       netdev->name, netdev))) {
 		dev_err(&netdev->dev, "request_irq(%d, ...) failed: %d\n",
 		        netdev->irq, err);

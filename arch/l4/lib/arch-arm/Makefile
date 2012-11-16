@@ -24,6 +24,7 @@ lib-y	+= ../../../arm/lib/clearbit.o
 lib-y	+= ../../../arm/lib/findbit.o
 lib-y	+= ../../../arm/lib/changebit.o
 lib-y	+= ../../../arm/lib/delay.o
+lib-y	+= ../../../arm/lib/delay-loop.o
 lib-y	+= ../../../arm/lib/csumipv6.o
 lib-y	+= ../../../arm/lib/csumpartial.o
 lib-y	+= ../../../arm/lib/csumpartialcopy.o

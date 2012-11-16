@@ -104,8 +104,15 @@ int main(int argc, char **argv)
 		if (ph->p_type != PT_LOAD)
 			continue;
 
-		if (ph->p_vaddr & ~L4_PAGEMASK) {
+		if (ph->p_vaddr & ~L4_PAGEMASK
+		    || ph->p_paddr & ~L4_PAGEMASK) {
 			printf("lxldr: unaligned section\n");
+			continue;
+		}
+
+		if (ph->p_vaddr != ph->p_paddr) {
+			printf("lxldr: vaddr vs paddr mismatch ["FMT"/"FMT"]\n",
+			       ph->p_vaddr, ph->p_paddr);
 			continue;
 		}
 
@@ -123,28 +130,20 @@ int main(int argc, char **argv)
 				return 1;
 			}
 
-			map_addr = ph->p_vaddr;
+			map_addr = ph->p_paddr;
 			if (l4re_rm_attach((void **)&map_addr,
 			                    ph->p_memsz, L4RE_RM_EAGER_MAP,
 			                    ds, 0, 0)) {
 				printf("lxldr: failed attaching memory:"
 				       " "FMT" - "FMT"\n",
-				       ph->p_vaddr,
-				       ph->p_vaddr + ph->p_memsz - 1);
+				       ph->p_paddr,
+				       ph->p_paddr + ph->p_memsz - 1);
 				return 1;
 			}
-#if 0
-			printf("BSS copying %p -> %p (%lx), zero %p (%lx)\n",
-			(void *)ph->p_vaddr,
-			       (char *)image_vmlinux_start + ph->p_offset,
-			       ph->p_filesz,
-			       (void *)ph->p_vaddr + ph->p_filesz,
-			       ph->p_memsz - ph->p_filesz);
-#endif
-			memcpy((void *)ph->p_vaddr,
+			memcpy((void *)ph->p_paddr,
 			       (char *)image_vmlinux_start + ph->p_offset,
 			       ph->p_filesz);
-			memset((void *)ph->p_vaddr + ph->p_filesz, 0,
+			memset((void *)ph->p_paddr + ph->p_filesz, 0,
 			       ph->p_memsz - ph->p_filesz);
 			continue;
 		}
@@ -178,7 +177,7 @@ int main(int argc, char **argv)
 		if (r)
 			printf("l4dm_mem_copyin failed\n");
 
-		map_addr = ph->p_vaddr;
+		map_addr = ph->p_paddr;
 		if (l4re_rm_attach((void **)&map_addr,
 		                    ph->p_memsz, L4RE_RM_EAGER_MAP,
 		                    new_ds, 0, 0)) {

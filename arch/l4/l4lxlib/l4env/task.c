@@ -1,15 +1,11 @@
 /*
- *
  * Implementation of the API defined in asm/l4lxapi/task.h
- * for l4env.
- *
  */
 
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 
 #include <asm/l4lxapi/task.h>
-#include <asm/l4lxapi/generic/task_gen.h>
 #include <asm/l4lxapi/thread.h>
 
 #include <asm/api/config.h>
@@ -87,16 +83,14 @@ int l4lx_task_create(l4_cap_idx_t task)
 	l4_msgtag_t t;
 	l4_utcb_t *u = l4_utcb();
 	l4_fpage_t fp;
-	L4XV_V(f);
 
 	if (l4x_is_vcpu())
 		fp = l4_fpage_invalid();
 	else
 		fp = l4_fpage(L4X_USER_UTCB_ADDR, L4X_USER_UTCB_SIZE, 0);
 
-	L4XV_L(f);
-	t = l4_factory_create_task_u(l4re_env()->factory, task, fp, u);
-	L4XV_U(f);
+	t = L4XV_FN(l4_msgtag_t,
+	            l4_factory_create_task_u(l4re_env()->factory, task, fp, u));
 	return l4_error_u(t, u);
 }
 
@@ -104,32 +98,27 @@ static int l4lx_task_delete_obj(l4_cap_idx_t obj)
 {
 	l4_msgtag_t t;
 	l4_utcb_t *u = l4_utcb();
-	L4XV_V(f);
-	L4XV_L(f);
-	t = l4_task_unmap_u(L4RE_THIS_TASK_CAP,
-	                    l4_obj_fpage(obj, 0, L4_FPAGE_RWX),
-	                    L4_FP_DELETE_OBJ, u);
-	L4XV_U(f);
+
+	t = L4XV_FN(l4_msgtag_t,
+	            l4_task_unmap_u(L4RE_THIS_TASK_CAP,
+	                            l4_obj_fpage(obj, 0, L4_FPAGE_RWX),
+	                            L4_FP_DELETE_OBJ, u));
 	return l4_error_u(t, u);
 }
 
 int l4lx_task_delete_thread(l4_cap_idx_t thread)
 {
 	unsigned int r;
-	if (unlikely(r = l4lx_task_delete_obj(thread))) {
+	if (unlikely(r = l4lx_task_delete_obj(thread)))
 		printk("Failed to kill thread %lx %d\n", thread, r);
-		return 0;
-	}
-	return 1;
+	return r;
 }
 
 
-int l4lx_task_delete_task(l4_cap_idx_t task, unsigned foo)
+int l4lx_task_delete_task(l4_cap_idx_t task)
 {
 	unsigned int r;
-	if (unlikely(r = l4lx_task_delete_obj(task))) {
+	if (unlikely(r = l4lx_task_delete_obj(task)))
 		printk("Failed to kill task %lx: %d\n", task, r);
-		return 0;
-	}
-	return 1;
+	return r;
 }

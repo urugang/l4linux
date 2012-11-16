@@ -17,28 +17,22 @@
 #include <l4/sys/ipc.h>
 #include <l4/sys/task.h>
 
-int l4x_task_delete(struct mm_struct *mm)
+void destroy_context(struct mm_struct *mm)
 {
 	l4_cap_idx_t task_id;
 
+	destroy_context_origarch(mm);
+
 	if (!mm || !mm->context.task ||
 	    l4_is_invalid_cap(task_id = mm->context.task))
-		return 0;
+		return;
 
-	if (!l4lx_task_delete_task(task_id, 0))
+	if (l4lx_task_delete_task(task_id))
 		do_exit(9);
 
 	mm->context.task = L4_INVALID_CAP;
 
 	l4lx_task_number_free(task_id);
-
-	return 1;
-}
-
-void destroy_context(struct mm_struct *mm)
-{
-	destroy_context_origarch(mm);
-	l4x_task_delete(mm);
 }
 
 int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
@@ -51,7 +45,6 @@ int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 void l4x_exit_thread(void)
 {
 #ifndef CONFIG_L4_VCPU
-	int ret;
 	int i;
 
 	if (unlikely(current->thread.is_hybrid)) {
@@ -91,7 +84,7 @@ void l4x_exit_thread(void)
 		/* If task_delete fails we don't free the task number so that it
 		 * won't be used again. */
 
-		if (likely(ret = l4lx_task_delete_thread(thread_id))) {
+		if (likely(!l4lx_task_delete_thread(thread_id))) {
 			l4x_hybrid_remove(current);
 			current->thread.user_thread_ids[i] = L4_INVALID_CAP;
 			l4lx_task_number_free(thread_id);

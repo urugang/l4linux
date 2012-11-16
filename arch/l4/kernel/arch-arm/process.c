@@ -44,6 +44,7 @@
 #include <asm/generic/sched.h>
 #include <asm/generic/stack_id.h>
 #include <asm/generic/hybrid.h>
+#include <asm/generic/setup.h>
 
 #include <asm/l4lxapi/task.h>
 
@@ -261,11 +262,14 @@ void machine_shutdown(void)
 #ifdef CONFIG_SMP
 	smp_send_stop();
 #endif
+	local_irq_disable();
+	l4x_exit_l4linux();
 }
 
 void machine_halt(void)
 {
 	machine_shutdown();
+	local_irq_disable();
 	while (1);
 }
 
@@ -287,6 +291,7 @@ void machine_restart(char *cmd)
 
 	/* Whoops - the platform was unable to reboot. Tell the user! */
 	printk("Reboot failed -- System halted\n");
+	local_irq_disable();
 	while (1);
 }
 
@@ -411,7 +416,7 @@ void flush_thread(void)
 		if (l4_is_invalid_cap(thread_id))
 			continue;
 
-		if (!l4lx_task_delete_thread(thread_id))
+		if (l4lx_task_delete_thread(thread_id))
 			do_exit(9);
 
 		l4lx_task_number_free(thread_id);
