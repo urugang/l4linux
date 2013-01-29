@@ -1,5 +1,5 @@
-#ifndef __ASM_L4__ARCH_I386__UACCESS_H__
-#define __ASM_L4__ARCH_I386__UACCESS_H__
+#ifndef _ASM_X86_UACCESS_H
+#define _ASM_X86_UACCESS_H
 /*
  * User space memory access functions
  */
@@ -9,6 +9,7 @@
 #include <linux/string.h>
 #include <asm/asm.h>
 #include <asm/page.h>
+#include <asm/smap.h>
 
 #define VERIFY_READ 0
 #define VERIFY_WRITE 1
@@ -252,13 +253,13 @@ struct __large_struct { unsigned long buf[100]; };
  * uaccess_try and catch
  */
 #define uaccess_try	do {						\
-	int prev_err = current_thread_info()->uaccess_err;		\
 	current_thread_info()->uaccess_err = 0;				\
+	stac();								\
 	barrier();
 
 #define uaccess_catch(err)						\
+	clac();								\
 	(err) |= (current_thread_info()->uaccess_err ? -EFAULT : 0);	\
-	current_thread_info()->uaccess_err = prev_err;			\
 } while (0)
 
 
@@ -360,6 +361,9 @@ strncpy_from_user(char *dst, const char __user *src, long count);
 
 extern __must_check long strlen_user(const char __user *str);
 extern __must_check long strnlen_user(const char __user *str, long n);
+
+unsigned long __must_check clear_user(void __user *mem, unsigned long len);
+unsigned long __must_check __clear_user(void __user *mem, unsigned long len);
 
 /*
  * movsl can be slow when source and dest are not both 8-byte aligned

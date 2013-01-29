@@ -177,9 +177,6 @@ ifeq ($(CONFIG_CPU_ENDIAN_BE8),y)
 LDFLAGS_vmlinux += --be8
 endif
 
-# Explicitly specifiy 32-bit ARM ISA since toolchain default can be -mthumb:
-KBUILD_CFLAGS   +=$(call cc-option,-marm,)
-
 # This selects which instruction set is used.
 # Note that GCC does not numerically define an architecture version
 # macro, but instead defines a whole series of macros which makes
@@ -229,17 +226,20 @@ endif
 ifeq ($(CONFIG_THUMB2_KERNEL),y)
 AFLAGS_AUTOIT	:=$(call as-option,-Wa$(comma)-mimplicit-it=always,-Wa$(comma)-mauto-it)
 AFLAGS_NOWARN	:=$(call as-option,-Wa$(comma)-mno-warn-deprecated,-Wa$(comma)-W)
-CFLAGS_THUMB2	:=-mthumb $(AFLAGS_AUTOIT) $(AFLAGS_NOWARN)
-AFLAGS_THUMB2	:=$(CFLAGS_THUMB2) -Wa$(comma)-mthumb
+CFLAGS_ISA	:=-mthumb $(AFLAGS_AUTOIT) $(AFLAGS_NOWARN)
+AFLAGS_ISA	:=$(CFLAGS_ISA) -Wa$(comma)-mthumb
 # Work around buggy relocation from gas if requested:
 ifeq ($(CONFIG_THUMB2_AVOID_R_ARM_THM_JUMP11),y)
 CFLAGS_MODULE	+=-fno-optimize-sibling-calls
 endif
+else
+CFLAGS_ISA	:=$(call cc-option,-marm,)
+AFLAGS_ISA	:=$(CFLAGS_ISA)
 endif
 
 # Need -Uarm for gcc < 3.x
-KBUILD_CFLAGS	+=$(CFLAGS_ABI) $(CFLAGS_THUMB2) $(arch-y) $(tune-y) $(call cc-option,-mshort-load-bytes,$(call cc-option,-malignment-traps,)) -msoft-float -Uarm
-KBUILD_AFLAGS	+=$(CFLAGS_ABI) $(AFLAGS_THUMB2) $(arch-y) $(tune-y) -include asm/unified.h -msoft-float
+KBUILD_CFLAGS	+=$(CFLAGS_ABI) $(CFLAGS_ISA) $(arch-y) $(tune-y) $(call cc-option,-mshort-load-bytes,$(call cc-option,-malignment-traps,)) -msoft-float -Uarm
+KBUILD_AFLAGS	+=$(CFLAGS_ABI) $(AFLAGS_ISA) $(arch-y) $(tune-y) -include asm/unified.h -msoft-float
 
 # Never generate .eh_frame
 KBUILD_CFLAGS   += $(call cc-option,-fno-dwarf2-cfi-asm)
@@ -328,12 +328,14 @@ LDFLAGS_vmlinux  =  \
 
 KBUILD_CPPFLAGS	+= -Iarch/l4/include/asm/l4-arch \
 		   -Iarch/$(LINSRCARCH)/include/generated \
+		   -Iarch/$(LINSRCARCH)/include/generated/uapi \
 		   $(if $(PLATFORMNAME),-I$(src)/arch/l4/include/asm/mach-$(LINSRCARCH)/$(PLATFORMNAME)) \
 		   $(if $(PLATFORMNAME),-I$(src)/arch/l4/include/asm/plat-$(LINSRCARCH)/$(PLATFORMNAME)) \
 		   -I$(src)/arch/$(LINSRCARCH)/include \
 		   -Iarch/l4/include/asm/arch-$(LINSRCARCH) \
 		   -Iarch/l4/include/asm/orig-arch \
                    -Iarch/l4/include \
+		   -I$(src)/arch/$(LINSRCARCH)/include/uapi \
                    $(L4INC) $(L4_EXT_CFLAGS) \
 		   $(CPPFLAGS_SYSENTER-y) \
 		   $(L4BID_CPPFLAGS_SYSCALLS-y)
@@ -372,32 +374,32 @@ mtags:
 	sort tags > .tags.sorting && mv .tags.sorting tags )
 
 arch/l4/include/asm/l4-arch/asm:
-	@echo '  Creating asm-l4/l4-arch/asm symlink'
+	@echo '  LN      asm-l4/l4-arch/asm symlink'
 	$(Q)mkdir -p $(@D)
 	$(Q)ln -s $(src)/arch/l4/include/asm/arch-$(BASEARCH) $@
 
 arch/l4/include/asm/arch:
-	@echo '  Creating asm-l4/arch-$(BASEARCH)/arch -> asm/arch symlink'
+	@echo '  LN      asm-l4/arch-$(BASEARCH)/arch -> asm/arch symlink'
 	$(Q)mkdir -p $(@D)
 	$(Q)ln -s $(src)/arch/l4/include/asm/arch-$(BASEARCH)/arch $@
 
 arch/l4/include/asm/api:
-	@echo '  Creating asm-l4/api-$(BASEENV) -> asm/api symlink'
+	@echo '  LN      asm-l4/api-$(BASEENV) -> asm/api symlink'
 	$(Q)mkdir -p $(@D)
 	$(Q)ln -s $(src)/arch/l4/include/asm/api-$(BASEENV) $@
 
 arch/l4/include/asm/l4x:
-	@echo '  Creating asm-l4/l4x-$(BASEARCH) -> asm/l4x symlink'
+	@echo '  LN      asm-l4/l4x-$(BASEARCH) -> asm/l4x symlink'
 	$(Q)mkdir -p $(@D)
 	$(Q)ln -s $(src)/arch/l4/include/asm/l4x-$(BASEARCH) $@
 
 arch/l4/include/asm/l4lxapi/impl:
-	@echo '  Creating asm-l4/l4lxapi/impl symlink'
+	@echo '  LN      asm-l4/l4lxapi/impl symlink'
 	$(Q)mkdir -p $(@D)
 	$(Q)ln -s $(src)/arch/l4/l4lxlib/l4env $@
 
 arch/l4/include/asm/orig-arch:
-	@echo '  Creating asm-l4/orig-arch symlink'
+	@echo '  LN      asm-l4/orig-arch symlink'
 	$(Q)mkdir -p $@
 	$(Q)ln -s $(src)/arch/$(LINSRCARCH)/include/asm $@/asm-$(LINSRCARCH) 
 
@@ -417,7 +419,8 @@ symlink_files      = arch/l4/include/asm/api \
 
 symlink_dirs       = arch/l4/include/asm/orig-arch
 
-MRPROPER_FILES	  += $(symlink_files)
+MRPROPER_FILES	  += $(symlink_files) \
+		     $(wildcard vmlinuz*) $(wildcard l4linux*) ldrImage source
 MRPROPER_DIRS     += $(symlink_dirs)
 CLEAN_FILES	  += Makeconf.l4conf
 
@@ -426,7 +429,8 @@ ifneq ($(wildcard .config),)
 $(objtree)/Makeconf.l4conf: $(srctree)/arch/l4/Makefile.l4conf $(srctree)/arch/l4/Makefile
 	$(Q)$(if $(L4DIR),PWD=$(L4DIR),) $(MAKE) $(if $(L4DIR),-C $(L4DIR),) -f $< O=$(L4OBJ) OUTPUT=$@
 
-archprepare: print_instructions check_linux_config $(symlink_files) $(symlink_dirs) $(objtree)/Makeconf.l4conf
+archprepare: print_instructions check_linux_config $(symlink_files) $(symlink_dirs) \
+             $(objtree)/Makeconf.l4conf
 	$(Q)mkdir -p arch/$(BASEARCH)/lib
 
 endif # .config available
@@ -439,8 +443,6 @@ endif # config-targets == 1
 archclean:
 	$(Q)rm -rf $(objtree)/arch/i386
 	$(Q)rm -rf $(objtree)/arch/x86_64
-	$(Q)rm -rf $(objtree)/arch/arm
-	$(Q)rm -rf $(objtree)/arch/l4
 
 ifeq ($(BASEARCH),x86)
 # Syscall table generation
@@ -465,7 +467,7 @@ DIS_OPTS-arm-32 := PERF_EVENTS ARM_PATCH_PHYS_VIRT HIGHMEM X86_X32
 DIS_OPTS := HIGHMEM4G HIGHMEM64G PCI_GOANY PCI_GOBIOS \
             X86_MCE X86_MCE MTRR PARAVIRT KEXEC MCA SOFTWARE_SUSPEND APM \
 	    CPU_FREQ VM86 X86_DS X86_PTRACE_BTS HT_IRQ DMI \
-	    TRANSPARENT_HUGEPAGE COMPACTION X86_PAE ACPI \
+	    TRANSPARENT_HUGEPAGE COMPACTION X86_PAE ACPI X86_SMAP \
 	    $(DIS_OPTS-$(BASEARCH)-$(BITS))
 ENA_OPTS := $(ENA_OPTS-$(BASEARCH))
 

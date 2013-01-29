@@ -10,7 +10,6 @@
 #include <l4/re/env.h>
 #include <l4/re/c/rm.h>
 #include <l4/log/log.h>
-#include <l4/re/c/util/kumem_alloc.h>
 #include <l4/sys/debugger.h>
 
 #include <asm/l4lxapi/thread.h>
@@ -27,8 +26,6 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
-
-L4_EXTERNAL_FUNC(l4re_util_kumem_alloc);
 
 struct free_block_t {
 	l4_umword_t pad[L4_UTCB_GENERIC_DATA_SIZE - 1];
@@ -78,12 +75,33 @@ void l4lx_thread_utcb_alloc_init(void)
 	l4re_env()->first_free_utcb = ~0UL;
 }
 
+static int alloc_kumem(l4_addr_t *v, unsigned pages_order)
+{
+	// this is nearly l4re_util_kumem_alloc but does not start to look
+	// for free space at 0
+	int r;
+	unsigned sh = pages_order + L4_PAGESHIFT;
+
+	r = l4re_rm_reserve_area(v, (1 << pages_order) * L4_PAGESIZE,
+                                 L4RE_RM_RESERVED | L4RE_RM_SEARCH_ADDR,
+	                         sh);
+	if (r)
+		return r;
+
+	if ((r = l4_error(l4_task_add_ku_mem(L4_BASE_TASK_CAP,
+	                                     l4_fpage(*v, sh, L4_FPAGE_RW))))) {
+		l4re_rm_free_area(*v);
+		return r;
+	}
+
+	return 0;
+}
+
 static int get_more_kumem(unsigned order_pages, unsigned blk_sz,
                           struct free_list_t *fl)
 {
-	l4_addr_t kumem;
-	if (l4re_util_kumem_alloc(&kumem, order_pages,
-	                          L4_BASE_TASK_CAP, l4re_env()->rm))
+	l4_addr_t kumem = (l4_addr_t)l4_utcb();
+	if (alloc_kumem(&kumem, order_pages))
 		return 1;
 
 	add_mem_to_free_list(kumem, kumem + (1 << order_pages) * L4_PAGESIZE,
@@ -202,6 +220,9 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 	}
 
 
+	// the sub of 8 is x86 specific! fix this
+	stack_pointer = (char *)stack_pointer - sizeof(struct pt_regs) - 8;
+
 	sp_data = (l4_umword_t *)((char *)stack_pointer - stack_data_size);
 	memcpy(sp_data, stack_data, stack_data_size);
 
@@ -220,7 +241,9 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 	*(--sp) = 0;
 #endif
 
+#ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
 	l4_debugger_set_object_name(l4cap, l4lx_name);
+#endif
 
 	utcb = l4lx_thread_ku_alloc_alloc_u();
 	if (!utcb)
@@ -254,7 +277,6 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 #endif
 		if (l4_error(res))
 			goto out_free_vcpu;
-
 	}
 #endif
 

@@ -21,13 +21,13 @@ static inline void l4x_do_IRQ(int irq, struct thread_info *ctx)
 	local_irq_save(flags);
 	ctx->task = per_cpu(l4x_current_ti, cpu)->task;
 	ctx->preempt_count = per_cpu(l4x_current_ti, cpu)->preempt_count;
-	r = &per_cpu(l4x_current_ti, cpu)->task->thread.regs;
+	r = task_pt_regs(per_cpu(l4x_current_ti, cpu)->task);
 	old_cpu_state = l4x_get_cpu_mode(r);
 	l4x_set_cpu_mode(r, l4x_in_kernel() ? L4X_MODE_KERNEL : L4X_MODE_USER);
 #ifdef CONFIG_X86
-	do_IRQ(irq, &per_cpu(l4x_current_ti, cpu)->task->thread.regs);
+	do_IRQ(irq, task_pt_regs(per_cpu(l4x_current_ti, cpu)->task));
 #else
-	asm_do_IRQ(irq, &per_cpu(l4x_current_ti, cpu)->task->thread.regs);
+	handle_IRQ(irq, task_pt_regs(per_cpu(l4x_current_ti, cpu)->task));
 #endif
 	l4x_set_cpu_mode(r, old_cpu_state);
 	local_irq_restore(flags);
@@ -47,10 +47,10 @@ static inline void l4x_do_IPI(int vector, struct thread_info *ctx)
 	local_irq_save(flags);
 	ctx->task = per_cpu(l4x_current_ti, cpu)->task;
 	ctx->preempt_count = per_cpu(l4x_current_ti, cpu)->preempt_count;
-	r = &per_cpu(l4x_current_ti, cpu)->task->thread.regs;
+	r = task_pt_regs(per_cpu(l4x_current_ti, cpu)->task);
 	old_cpu_state = l4x_get_cpu_mode(r);
 	l4x_set_cpu_mode(r, l4x_in_kernel() ? L4X_MODE_KERNEL : L4X_MODE_USER);
-	l4x_smp_process_IPI(vector, &per_cpu(l4x_current_ti, cpu)->task->thread.regs);
+	l4x_smp_process_IPI(vector, task_pt_regs(per_cpu(l4x_current_ti, cpu)->task));
 	l4x_set_cpu_mode(r, old_cpu_state);
 	local_irq_restore(flags);
 

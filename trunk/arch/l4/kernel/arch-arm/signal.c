@@ -10,7 +10,6 @@
 #include <linux/errno.h>
 #include <linux/signal.h>
 #include <linux/personality.h>
-#include <linux/freezer.h>
 #include <linux/uaccess.h>
 #include <linux/tracehook.h>
 
@@ -19,8 +18,6 @@
 #include <asm/ucontext.h>
 #include <asm/unistd.h>
 #include <asm/vfp.h>
-
-#include <asm/l4x/signal.h>
 
 #include "signal.h"
 
@@ -672,10 +669,10 @@ do_work_pending(struct pt_regs *regs, unsigned int thread_flags, int syscall)
 /* Wrappers to put regs in place */
 asmlinkage int sys_sigreturn_wrapper(void)
 {
-	return sys_sigreturn(L4X_THREAD_REGSP(&current->thread));
+	return sys_sigreturn(task_pt_regs(current));
 }
 
 asmlinkage int sys_rt_sigreturn_wrapper(void)
 {
-	return sys_rt_sigreturn(L4X_THREAD_REGSP(&current->thread));
+	return sys_rt_sigreturn(task_pt_regs(current));
 }

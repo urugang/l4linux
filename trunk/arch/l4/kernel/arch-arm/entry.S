@@ -3,6 +3,22 @@
 #include <linux/linkage.h>
 #include <asm/api/config.h>
 
+#include "../../../arm/kernel/entry-header.S"
+
+ENTRY(ret_from_fork)
+	bl	schedule_tail
+	cmp	r5, #0
+	movne	r0, r4
+	adrne	lr, BSYM(1f)
+	movne	pc, r5
+1:	get_thread_info tsk
+#ifdef CONFIG_L4
+	b	syscall_exit
+#else
+	b	ret_slow_syscall
+#endif
+ENDPROC(ret_from_fork)
+
 	.global NR_syscalls
 	.equ NR_syscalls,0
 #define CALL(x) .equ NR_syscalls,NR_syscalls+1
@@ -28,35 +44,68 @@ ENTRY(sys_call_table)
 #undef ABI
 #undef OBSOLETE
 
-sys_mmap2:
-	b	sys_mmap_pgoff
-
-/* ---- */
 sys_fork_wrapper:
-	b	sys_fork
-
-sys_execve_wrapper:
-	b	sys_execve
+		add	r0, sp, #S_OFF
+		b	sys_fork
+ENDPROC(sys_fork_wrapper)
 
 sys_vfork_wrapper:
-	b	sys_vfork
+		add	r0, sp, #S_OFF
+		b	sys_vfork
+ENDPROC(sys_vfork_wrapper)
 
 sys_clone_wrapper:
-	b	sys_clone
+		add	ip, sp, #S_OFF
+		str	ip, [sp, #4]
+		b	sys_clone
+ENDPROC(sys_clone_wrapper)
+
+sys_sigreturn_wrapper_orig:
+		add	r0, sp, #S_OFF
+		mov	why, #0		@ prevent syscall restart handling
+		b	sys_sigreturn
+ENDPROC(sys_sigreturn_wrapper_orig)
+
+sys_rt_sigreturn_wrapper_orig:
+		add	r0, sp, #S_OFF
+		mov	why, #0		@ prevent syscall restart handling
+		b	sys_rt_sigreturn
+ENDPROC(sys_rt_sigreturn_wrapper_orig)
 
 sys_sigaltstack_wrapper:
-	b	do_sigaltstack
-
-sys_fstatfs64_wrapper:
-	teq     r1, #88
-	moveq   r1, #84
-	b	sys_fstatfs64
+		ldr	r2, [sp, #S_OFF + S_SP]
+		b	do_sigaltstack
+ENDPROC(sys_sigaltstack_wrapper)
 
 sys_statfs64_wrapper:
-	teq     r1, #88
-	moveq   r1, #84
-	b	sys_statfs64
+		teq	r1, #88
+		moveq	r1, #84
+		b	sys_statfs64
+ENDPROC(sys_statfs64_wrapper)
 
+sys_fstatfs64_wrapper:
+		teq	r1, #88
+		moveq	r1, #84
+		b	sys_fstatfs64
+ENDPROC(sys_fstatfs64_wrapper)
+
+/*
+ * Note: off_4k (r5) is always units of 4K.  If we can't do the requested
+ * offset, we return EINVAL.
+ */
+sys_mmap2:
+#if PAGE_SHIFT > 12
+		tst	r5, #PGOFF_MASK
+		moveq	r5, r5, lsr #PAGE_SHIFT - 12
+		streq	r5, [sp, #4]
+		beq	sys_mmap_pgoff
+		mov	r0, #-EINVAL
+		mov	pc, lr
+#else
+		str	r5, [sp, #4]
+		b	sys_mmap_pgoff
+#endif
+ENDPROC(sys_mmap2)
 
 #ifdef CONFIG_OABI_COMPAT
 

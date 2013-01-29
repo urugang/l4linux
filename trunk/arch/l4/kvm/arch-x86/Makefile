@@ -14,7 +14,7 @@ kvm-$(CONFIG_IOMMU_API)	+= $(addprefix ../../../../virt/kvm/, iommu.o)
 kvm-$(CONFIG_KVM_ASYNC_PF)	+= $(addprefix ../../../../virt/kvm/, async_pf.o)
 
 kvm-y			+= x86.o mmu.o $(b)/emulate.o $(b)/i8259.o $(b)/irq.o $(b)/lapic.o \
-			   $(b)/i8254.o $(b)/timer.o $(b)/cpuid.o $(b)/pmu.o
+			   $(b)/i8254.o $(b)/cpuid.o $(b)/pmu.o
 kvm-y			+= kvm-l4.o kvm_main.o
 kvm-intel-y		+= vmx.o
 kvm-amd-y		+= svm.o

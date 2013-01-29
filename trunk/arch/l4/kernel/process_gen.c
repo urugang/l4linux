@@ -41,6 +41,16 @@ int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 	return init_new_context_origarch(tsk, mm);
 }
 
+#ifndef CONFIG_L4_VCPU
+void l4x_init_thread_struct(struct task_struct *p)
+{
+	int i;
+	for (i = 0; i < NR_CPUS; i++)
+		p->thread.user_thread_ids[i] = L4_INVALID_CAP;
+	p->thread.user_thread_id = L4_INVALID_CAP;
+	p->thread.threads_up = 0;
+}
+#endif
 
 void l4x_exit_thread(void)
 {
@@ -73,7 +83,7 @@ void l4x_exit_thread(void)
 
 		/* check if we were a non-user thread (i.e., have no
 		   user-space partner) */
-		if (unlikely(l4_is_invalid_cap(thread_id)))
+		if (unlikely(l4_is_invalid_cap(thread_id) || !thread_id))
 			continue;
 
 #ifdef DEBUG

@@ -9,9 +9,6 @@
 
 #include <asm/api/config.h>
 
-#define COPY_THREAD_STACK_SIZE___FLAG_INKERNEL 0     // because 0 in fork.c
-#define COPY_THREAD_STACK_SIZE___FLAG_USER     0x49
-
 #ifdef CONFIG_SMP
 #include <asm/generic/smp.h>
 #define l4x_idle_task(cpu) l4x_cpu_idle_get(cpu)
@@ -22,5 +19,10 @@
 DECLARE_PER_CPU(struct thread_info *, l4x_current_ti);
 
 void l4x_exit_thread(void);
+#ifdef CONFIG_L4_VCPU
+static inline void l4x_init_thread_struct(struct task_struct *p) {}
+#else
+void l4x_init_thread_struct(struct task_struct *p);
+#endif
 
 #endif /* ! __ASM_L4__GENERIC__TASK_H__ */

@@ -145,11 +145,7 @@ void default_restore_msi_irqs(struct pci_dev *dev, int irq);
 #endif  /* __KERNEL__ */
 
 #ifdef CONFIG_X86_64
-#ifdef CONFIG_L4
 #include <asm/pci_64.h>
-#else
-#include "pci_64.h"
-#endif
 #endif
 
 void pcibios_resource_survey(void);

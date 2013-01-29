@@ -1,5 +1,5 @@
-#ifndef _I386_PGTABLE_H
-#define _I386_PGTABLE_H
+#ifndef _ASM_X86_PGTABLE_32_H
+#define _ASM_X86_PGTABLE_32_H
 
 #include <asm/pgtable_32_types.h>
 
@@ -118,6 +118,7 @@ do {						\
  * tables contain all the necessary information.
  */
 #define update_mmu_cache(vma, address, ptep) do { } while (0)
+#define update_mmu_cache_pmd(vma, address, pmd) do { } while (0)
 
 #endif /* !__ASSEMBLY__ */
 

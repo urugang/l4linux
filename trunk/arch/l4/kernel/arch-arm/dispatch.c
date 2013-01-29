@@ -143,14 +143,14 @@ static inline int l4x_is_triggered_exception(l4_umword_t val)
 	return (val & 0x00f00000) == 0x00500000;
 }
 
-static inline unsigned long regs_pc(struct thread_struct *t)
+static inline unsigned long regs_pc(struct task_struct *p)
 {
-	return L4X_THREAD_REGSP(t)->ARM_pc;
+	return task_pt_regs(p)->ARM_pc;
 }
 
-static inline unsigned long regs_sp(struct thread_struct *t)
+static inline unsigned long regs_sp(struct task_struct *p)
 {
-	return L4X_THREAD_REGSP(t)->ARM_sp;
+	return task_pt_regs(p)->ARM_sp;
 }
 
 static inline void l4x_arch_task_setup(struct thread_struct *t)
@@ -158,11 +158,10 @@ static inline void l4x_arch_task_setup(struct thread_struct *t)
 
 }
 
-static inline void l4x_arch_do_syscall_trace(struct task_struct *p,
-                                             struct thread_struct *t)
+static inline void l4x_arch_do_syscall_trace(struct task_struct *p)
 {
 	if (unlikely(test_tsk_thread_flag(p, TIF_SYSCALL_TRACE)))
-		syscall_trace_exit(L4X_THREAD_REGSP(t), __NR_fork);
+		syscall_trace_exit(task_pt_regs(p), __NR_fork);
 }
 
 static inline int l4x_hybrid_check_after_syscall(l4_utcb_t *utcb)
@@ -212,6 +211,7 @@ static DEFINE_PER_CPU(unsigned, utcb_snd_size);
 #endif
 
 
+#if 0
 asm(
 ".section .text				\n"
 ".global ret_from_fork			\n"
@@ -224,11 +224,12 @@ asm(
 #endif
 ".previous				\n"
 );
+#endif
 
 void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 {
 #ifdef CONFIG_L4_VCPU
-	l4_vcpu_state_t *vcpu = l4x_vcpu_state(smp_processor_id());
+	l4_vcpu_state_t *vcpu = this_cpu_read(l4x_vcpu_ptr);
 #endif
 	if (0)
 		l4x_printf("%s: cpu%d: %s(%d)[%ld] -> %s(%d)[%ld]\n     :: %p -> %p\n",
@@ -268,6 +269,7 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #ifndef CONFIG_L4_VCPU
 	per_cpu(l4x_current_ti, smp_processor_id())
 	  = (struct thread_info *)((unsigned long)next->stack & ~(THREAD_SIZE - 1));
+	BUILD_BUG_ON(ARRAY_SIZE(t->user_thread_ids) <= NR_CPUS);
 #endif /* VCPU */
 
 #ifdef CONFIG_L4_ARM_UPAGE_TLS
@@ -286,7 +288,7 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 
 #ifdef CONFIG_L4_VCPU
 	mb();
-	vcpu->entry_sp = task_thread_info(next)->cpu_context.extra[0];
+	vcpu->entry_sp = (unsigned long)task_pt_regs(next);
 
 #ifdef CONFIG_L4_DEBUG
 	if (next->mm && (vcpu->entry_sp <= (l4_umword_t)next->stack
@@ -348,20 +350,22 @@ static inline void thread_struct_to_vcpu(l4_vcpu_state_t *v,
 }
 #else
 static inline void utcb_to_thread_struct(l4_utcb_t *utcb,
+                                         struct task_struct *p,
                                          struct thread_struct *t)
 {
 	l4_exc_regs_t *exc = l4_utcb_exc_u(utcb);
-	utcb_exc_to_ptregs(exc, L4X_THREAD_REGSP(t));
+	utcb_exc_to_ptregs(exc, task_pt_regs(p));
 	t->error_code     = exc->err;
 	t->address        = exc->pfa;
 }
 #endif
 
-static inline void thread_struct_to_utcb(struct thread_struct *t,
+static inline void thread_struct_to_utcb(struct task_struct *p,
+                                         struct thread_struct *t,
                                          l4_utcb_t *utcb,
                                          unsigned int send_size)
 {
-	ptregs_to_utcb_exc(L4X_THREAD_REGSP(t), l4_utcb_exc_u(utcb));
+	ptregs_to_utcb_exc(task_pt_regs(p), l4_utcb_exc_u(utcb));
 	l4_utcb_exc_u(utcb)->tpidruro = task_thread_info(current)->tp_value;
 #ifndef CONFIG_L4_VCPU
 	per_cpu(utcb_snd_size, smp_processor_id()) = send_size;
@@ -414,11 +418,11 @@ static inline void call_system_call_args(syscall_t *sctbl,
 		       arg1, arg2, arg3, arg4, arg5, arg6);
 
 	if (0 && show_syscalls && syscall == 11) {
-		char *filename = getname((char *)arg1);
+		struct filename *fn = getname((char *)arg1);
 		printk("execve: pid: %d(%s) %d: %s (%08lx)\n",
 		       current->pid, current->comm, current_uid(),
-		       IS_ERR(filename) ? "INVALID" : filename, arg1);
-		putname(filename);
+		       IS_ERR(fn) ? "INVALID" : fn->name, arg1);
+		putname(fn);
 	}
 	if (0 && show_syscalls && (syscall == 1 || syscall == 248))
 		printk("exit: pid: %d(%s)\n",
@@ -439,40 +443,40 @@ static inline void call_system_call_args(syscall_t *sctbl,
 		       current->pid, current->comm, arg1, arg3);
 	}
 	if (0 && show_syscalls && syscall == 5) {
-		char *filename = getname((char *)arg1);
+		struct filename *fn = getname((char *)arg1);
 		printk("open: pid: %d(%s): %s (%lx)\n",
 		       current->pid, current->comm,
-		       IS_ERR(filename) ? "INVALID" : filename, arg1);
-		putname(filename);
+		       IS_ERR(fn) ? "INVALID" : fn->name, arg1);
+		putname(fn);
 	}
 	if (0 && show_syscalls && syscall == 12) {
-		char *f1 = getname((char *)arg1);
+		struct filename *fn = getname((char *)arg1);
 		printk("chdir: pid: %d(%s): %s\n",
 		       current->pid, current->comm,
-		       IS_ERR(f1) ? "INVALID" : f1);
-		putname(f1);
+		       IS_ERR(fn) ? "INVALID" : fn->name);
+		putname(fn);
 	}
 	if (0 && show_syscalls && syscall == 14) {
-		char *f1 = getname((char *)arg1);
+		struct filename *fn = getname((char *)arg1);
 		printk("mknod: pid: %d(%s): %s dev=%lx\n",
 		       current->pid, current->comm,
-		       IS_ERR(f1) ? "INVALID" : f1, arg3);
-		putname(f1);
+		       IS_ERR(fn) ? "INVALID" : fn->name, arg3);
+		putname(fn);
 	}
 	if (0 && show_syscalls && syscall == 39) {
-		char *filename = getname((char *)arg1);
+		struct filename *fn = getname((char *)arg1);
 		printk("mkdir: pid: %d(%s): %s (%lx)\n",
 		       current->pid, current->comm,
-		       IS_ERR(filename) ? "INVALID" : filename, arg1);
-		putname(filename);
+		       IS_ERR(fn) ? "INVALID" : fn->name, arg1);
+		putname(fn);
 	}
 	if (0 && show_syscalls && syscall == 21) {
-		char *f1 = getname((char *)arg1);
-		char *f2 = getname((char *)arg2);
+		struct filename *f1 = getname((char *)arg1);
+		struct filename *f2 = getname((char *)arg2);
 		printk("mount: pid: %d(%s): %s -> %s\n",
 		       current->pid, current->comm,
-		       IS_ERR(f1) ? "INVALID" : f1,
-		       IS_ERR(f2) ? "INVALID" : f2);
+		       IS_ERR(f1) ? "INVALID" : f1->name,
+		       IS_ERR(f2) ? "INVALID" : f2->name);
 		putname(f1);
 		putname(f2);
 	}
@@ -493,10 +497,10 @@ static inline void call_system_call_args(syscall_t *sctbl,
 		printk("mmap2 size: pid: %d(%s): %lx\n",
 		       current->pid, current->comm, arg2);
 	if (0 && show_syscalls && syscall == 195) {
-		char *path = getname((char *)arg1);
+		struct filename *path = getname((char *)arg1);
 		printk("stat64: pid: %d(%s): %s (%lx)\n",
 		       current->pid, current->comm,
-		       IS_ERR(path) ? "INVALID" : path, arg1);
+		       IS_ERR(path) ? "INVALID" : path->name, arg1);
 		putname(path);
 	}
 	if (0 && show_syscalls && syscall == 221) {
@@ -544,7 +548,6 @@ static inline void dispatch_system_call(syscall_t *sctbl,
 {
 #ifdef CONFIG_L4_VCPU
 	local_irq_enable();
-	p->thread.regsp = regsp;
 #endif
 
 	regsp->ARM_ORIG_r0 = regsp->ARM_r0;
@@ -642,7 +645,7 @@ unsigned int EmulateAll(unsigned int opcode);
 
 struct pt_regs *l4x_fp_get_user_regs(void)
 {
-	return L4X_THREAD_REGSP(&current->thread);
+	return task_pt_regs(current);
 }
 #endif
 
@@ -665,7 +668,6 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
                                          l4_vcpu_state_t *v,
                                          struct pt_regs *regs)
 {
-	//struct pt_regs *regs = L4X_THREAD_REGSP(t);
 	int handled = 0;
 
 #ifndef CONFIG_L4_VCPU
@@ -781,17 +783,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 
 		BUG_ON(p != current);
 
-#ifdef CONFIG_L4_VCPU
 		return 0;
-#else
-		if (likely(!t->restart))
-			/* fine, go send a reply and return to userland */
-			return 0;
-
-		/* Restart whole dispatch loop, also restarts thread */
-		t->restart = 0;
-		return 2;
-#endif
 
 #ifndef CONFIG_L4_VCPU
 	} else if (t->error_code == 0x00300000) {
@@ -818,7 +810,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 			register unsigned long _ret   asm ("r0");
 			register unsigned long _insn  asm ("r7")  = insn;
 			register unsigned long _pc    asm ("r9")  = regs->ARM_pc + 4;
-			register unsigned long _regsp asm ("r8")  = (unsigned long)L4X_THREAD_REGSP(t);
+			register unsigned long _regsp asm ("r8")  = (unsigned long)task_pt_regs(p);
 			register unsigned long _ti    asm ("r10") = (unsigned long)current_thread_info();
 			asm volatile(
 #ifdef CONFIG_FRAME_POINTER
@@ -947,10 +939,9 @@ go_away:
 	return 1; /* no reply -- no come back */
 }
 
-static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
+static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
+                                                       struct pt_regs *regs)
 {
-	struct pt_regs *regs = L4X_THREAD_REGSP(t);
-
 	if (0 && (regs->ARM_pc >= TASK_SIZE || l4x_l4pfa(t) >= TASK_SIZE))
 		printk("PC/PF>TS: PC=%08lx PF=%08lx LR=%08lx\n",
 		       regs->ARM_pc, l4x_l4pfa(t), regs->ARM_lr);

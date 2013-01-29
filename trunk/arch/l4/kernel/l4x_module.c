@@ -1,24 +1,16 @@
 #include <linux/module.h>
-#include <l4/log/log.h>
+#include <asm/generic/log.h>
 
 static int __init l4x_module_init(void)
 {
-	L4XV_V(f);
 	printk("Hi from the sample module\n");
-
-	L4XV_L(f);
-	LOG_printf("sample module: Also a warm welcome to the console\n");
-	L4XV_U(f);
-
+	l4x_printf("sample module: Also a warm welcome to the console\n");
 	return 0;
 }
 
 static void __exit l4x_module_exit(void)
 {
-	L4XV_V(f);
-	L4XV_L(f);
-	LOG_printf("Bye from sample module\n");
-	L4XV_U(f);
+	l4x_printf("Bye from sample module\n");
 }
 
 module_init(l4x_module_init);

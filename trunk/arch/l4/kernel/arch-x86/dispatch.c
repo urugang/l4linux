@@ -111,14 +111,14 @@ static inline int l4x_is_triggered_exception(l4_umword_t val)
 	return val == 0xff;
 }
 
-static inline unsigned long regs_pc(struct thread_struct *t)
+static inline unsigned long regs_pc(struct task_struct *p)
 {
-	return L4X_THREAD_REGSP(t)->ip;
+	return task_pt_regs(p)->ip;
 }
 
-static inline unsigned long regs_sp(struct thread_struct *t)
+static inline unsigned long regs_sp(struct task_struct *p)
 {
-	return L4X_THREAD_REGSP(t)->sp;
+	return task_pt_regs(p)->sp;
 }
 
 static inline void l4x_arch_task_setup(struct thread_struct *t)
@@ -128,11 +128,10 @@ static inline void l4x_arch_task_setup(struct thread_struct *t)
 #endif
 }
 
-static inline void l4x_arch_do_syscall_trace(struct task_struct *p,
-                                             struct thread_struct *t)
+static inline void l4x_arch_do_syscall_trace(struct task_struct *p)
 {
 	if (unlikely(current_thread_info()->flags & _TIF_WORK_SYSCALL_EXIT))
-		syscall_trace_leave(L4X_THREAD_REGSP(t));
+		syscall_trace_leave(task_pt_regs(p));
 }
 
 static inline int l4x_hybrid_check_after_syscall(l4_utcb_t *utcb)
@@ -171,14 +170,14 @@ static inline void l4x_arch_task_start_setup(struct task_struct *p, l4_cap_idx_t
 	//   another one (then it's the utcb one)
 #ifdef CONFIG_X86_32
 #ifdef CONFIG_L4_VCPU
-	unsigned int gs = l4x_vcpu_state(smp_processor_id())->r.gs;
+	unsigned int gs = v->r.gs;
 #else
 	unsigned int gs = l4_utcb_exc()->gs;
 #endif
 	unsigned int val = (gs & 0xffff) >> 3;
 	if (   val < l4x_fiasco_gdt_entry_offset
 	    || val > l4x_fiasco_gdt_entry_offset + 3)
-		L4X_THREAD_REGSP(&p->thread)->fs = gs;
+		task_pt_regs(p)->fs = gs;
 
 	/* Setup LDTs */
 	if (p->mm && p->mm->context.size) {
@@ -229,6 +228,7 @@ static inline void l4x_print_regs(struct thread_struct *t, struct pt_regs *r)
 }
 
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
+#if 0
 asm(
 ".section .text			\n"
 #ifdef CONFIG_L4_VCPU
@@ -250,6 +250,7 @@ asm(
 #endif
 ".previous			\n"
 );
+#endif
 
 #ifndef CONFIG_L4_VCPU
 void l4x_idle(void);
@@ -263,41 +264,22 @@ DEFINE_PER_CPU(struct thread_info *, l4x_current_proc_run);
 static DEFINE_PER_CPU(unsigned, utcb_snd_size);
 #endif
 
-static void l4x_setup_next_exec(struct task_struct *p, unsigned long f)
-{
-	unsigned long *sp = (unsigned long *)
-	                     ((unsigned long)p->stack + THREAD_SIZE);
-
-	BUG_ON(current == p);
-
-	/* setup stack of p to come out in f on next switch_to() */
-	*--sp = 0;
-	*--sp = f;
-
-	p->thread.sp = (unsigned long)sp;
-}
-
-void l4x_setup_user_dispatcher_after_fork(struct task_struct *p)
-{
-	l4x_setup_next_exec(p, (unsigned long)ret_from_fork);
-}
-
 #include <asm/generic/stack_id.h>
 
-void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
+__notrace_funcgraph struct task_struct *
+__switch_to(struct task_struct *prev, struct task_struct *next)
 {
 	int cpu = smp_processor_id();
 	fpu_switch_t fpu;
 
 #ifdef CONFIG_L4_VCPU
-	l4_vcpu_state_t *vcpu = l4x_vcpu_state(cpu);
+	l4_vcpu_state_t *vcpu = this_cpu_read(l4x_vcpu_ptr);
 #endif
-#if 0
-	LOG_printf("%s: cpu%d: %s(%d)[%ld] -> %s(%d)[%ld]\n",
-	           __func__, cpu,
-	           prev->comm, prev->pid, prev->state,
-	           next->comm, next->pid, next->state);
-#endif
+	if (0)
+		LOG_printf("%s: cpu%d: %s(%d)[%ld] -> %s(%d)[%ld]\n",
+		           __func__, cpu,
+		           prev->comm, prev->pid, prev->state,
+		           next->comm, next->pid, next->state);
 #ifdef CONFIG_L4_VCPU
 	TBUF_LOG_SWITCH(fiasco_tbuf_log_3val("SWITCH", (unsigned long)prev->stack, (unsigned long)next->stack, next->thread.sp0));
 #else
@@ -307,8 +289,8 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 	fpu = switch_fpu_prepare(prev, next, cpu);
 
 #ifndef CONFIG_L4_VCPU
-	per_cpu(l4x_current_ti, cpu)
-	  = (struct thread_info *)((unsigned long)next->stack & ~(THREAD_SIZE - 1));
+	this_cpu_write(l4x_current_ti,
+	               (struct thread_info *)((unsigned long)next->stack & ~(THREAD_SIZE - 1)));
 #endif
 
 	if (unlikely(task_thread_info(prev)->flags & _TIF_WORK_CTXSW_PREV ||
@@ -328,19 +310,20 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #endif
 
 #ifdef CONFIG_L4_VCPU
-	vcpu->entry_sp = next->thread.sp0;
-	if (next->mm && prev->mm != next->mm)
-		vcpu->user_task = next->mm->context.task;
+	vcpu->entry_sp = (unsigned long)task_pt_regs(next);
 #endif
 
 #ifdef CONFIG_X86_32
-#ifdef CONFIG_L4_VCPU
-	if (next->mm)
-#else
-	if (next->mm && !l4_is_invalid_cap(next->mm->context.task))
+	if (next->mm
+#ifndef CONFIG_L4_VCPU
+	    && !l4_is_invalid_cap(next->thread.user_thread_id)
+	    && next->thread.user_thread_id
 #endif
+	    )
 		load_TLS(&next->thread, 0);
 #endif
+
+	return prev;
 }
 
 static inline void l4x_pte_add_access_and_mapped(pte_t *ptep)
@@ -397,10 +380,11 @@ static inline void thread_struct_to_vcpu(l4_vcpu_state_t *v,
 }
 #else
 static inline void utcb_to_thread_struct(l4_utcb_t *utcb,
+                                         struct task_struct *p,
                                          struct thread_struct *t)
 {
 	l4_exc_regs_t *exc = l4_utcb_exc_u(utcb);
-	utcb_exc_to_ptregs(exc, L4X_THREAD_REGSP(t));
+	utcb_exc_to_ptregs(exc, task_pt_regs(p));
 	t->gs         = exc->gs;
 	t->trap_nr    = exc->trapno;
 	t->error_code = exc->err;
@@ -408,13 +392,16 @@ static inline void utcb_to_thread_struct(l4_utcb_t *utcb,
 }
 #endif
 
-static inline void thread_struct_to_utcb(struct thread_struct *t,
+static inline void thread_struct_to_utcb(struct task_struct *p,
+                                         struct thread_struct *t,
                                          l4_utcb_t *utcb,
                                          unsigned int send_size)
 {
 	l4_exc_regs_t *exc = l4_utcb_exc_u(utcb);
-	ptregs_to_utcb_exc(L4X_THREAD_REGSP(t), exc);
+	ptregs_to_utcb_exc(task_pt_regs(p), exc);
+#ifdef CONFIG_X86_32
 	exc->gs   = t->gs;
+#endif
 #ifndef CONFIG_L4_VCPU
 	per_cpu(utcb_snd_size, smp_processor_id()) = send_size;
 #endif
@@ -437,7 +424,6 @@ static inline void dispatch_system_call(struct task_struct *p,
 
 #ifdef CONFIG_L4_VCPU
 	local_irq_enable();
-	p->thread.regsp = regsp;
 #endif
 
 	regsp->orig_ax = syscall = regsp->ax;
@@ -453,10 +439,11 @@ static inline void dispatch_system_call(struct task_struct *p,
 		       regsp->bx, regsp->cx, regsp->dx);
 
 	if (show_syscalls && syscall == 11) {
-		char *filename;
+		struct filename *fn;
 		printk("execve: pid: %d(%s): ", p->pid, p->comm);
-		filename = getname((char *)regsp->bx);
-		printk("%s\n", IS_ERR(filename) ? "UNKNOWN" : filename);
+		fn = getname((char *)regsp->bx);
+		printk("%s\n", IS_ERR(fn) ? "UNKNOWN" : fn->name);
+		putname(fn);
 	}
 
 	if (show_syscalls && syscall == 120)
@@ -470,11 +457,11 @@ static inline void dispatch_system_call(struct task_struct *p,
 		       regsp->bx, regsp->cx, regsp->dx, regsp->si,
 		       regsp->di, regsp->bp);
 	if (show_syscalls && syscall == 5) {
-		char *filename = getname((char *)regsp->bx);
+		struct filename *fn = getname((char *)regsp->bx);
 		printk("open: pid: %d(%s): %s (%lx)\n",
 		       current->pid, current->comm,
-		       IS_ERR(filename) ? "UNKNOWN" : filename, regsp->bx);
-		putname(filename);
+		       IS_ERR(fn) ? "UNKNOWN" : fn->name, regsp->bx);
+		putname(fn);
 	}
 
 	if (unlikely(!is_lx_syscall(syscall))) {
@@ -507,7 +494,7 @@ static inline void dispatch_system_call(struct task_struct *p,
 #endif
 }
 
-static inline void
+static void
 l4x_pre_iret_work(struct pt_regs *regs, struct task_struct *p,
                   unsigned long scno, void *dummy)
 {
@@ -755,18 +742,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 
 		BUG_ON(p != current);
 
-#ifdef CONFIG_L4_VCPU
 		return 0;
-#else
-		if (likely(!t->restart))
-			/* fine, go send a reply and return to userland */
-			return 0;
-
-		/* Restart whole dispatch loop, also restarts thread */
-		t->restart = 0;
-		return 2;
-#endif
-
 	} else if (r_trapno(t, v) == 7) {
 		do_device_not_available(regs, -1);
 		return 0;
@@ -813,7 +789,8 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	return 1; /* no reply -- no come back */
 }
 
-static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t)
+static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
+                                                       struct pt_regs *regs)
 {
 	return 0; // not for us
 }

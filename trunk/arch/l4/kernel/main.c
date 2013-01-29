@@ -158,11 +158,6 @@ L4_EXTERNAL_FUNC(l4rtc_get_seconds_since_1970);
 #endif
 
 unsigned long upage_addr;
-l4_vcpu_state_t *l4x_vcpu_states[NR_CPUS];
-EXPORT_SYMBOL(l4x_vcpu_states);
-
-l4_utcb_t *l4x_utcbs[NR_CPUS];
-EXPORT_SYMBOL(l4x_utcbs);
 
 #ifdef CONFIG_X86
 struct desc_struct cpu_gdt_table[GDT_ENTRIES];
@@ -202,10 +197,9 @@ extern void start_kernel(void);
 l4_cap_idx_t l4x_start_thread_id __nosavedata = L4_INVALID_CAP;
 l4_cap_idx_t l4x_start_thread_pager_id __nosavedata = L4_INVALID_CAP;
 
-static l4re_ds_t l4x_ds_mainmem __nosavedata;
-static l4re_ds_t l4x_ds_isa_dma __nosavedata;
+enum { NUM_DS_MAINMEM = 10 };
+static l4re_ds_t l4x_ds_mainmem[NUM_DS_MAINMEM] __nosavedata;
 static void *l4x_main_memory_start;
-static void *l4x_isa_dma_memory_start;
 unsigned long l4x_vmalloc_memory_start;
 l4_kernel_info_t *l4lx_kinfo;
 l4_cap_idx_t l4x_user_gate[NR_CPUS];
@@ -226,15 +220,12 @@ struct l4x_phys_virt_mem {
 	l4_size_t size; /* size of chunk in Bytes */
 };
 
-#define L4X_PHYS_VIRT_ADDRS_MAX_ITEMS 20
+enum { L4X_PHYS_VIRT_ADDRS_MAX_ITEMS = 50 };
 
 /* Default memory size */
-unsigned long l4x_mainmem_size = CONFIG_L4_MEMSIZE << 20;
-//unsigned long l4x_isa_dma_size   = 2 << 20;
-unsigned long l4x_isa_dma_size   = 0;
+static unsigned long l4x_mainmem_size = CONFIG_L4_MEMSIZE << 20;
 
 static struct l4x_phys_virt_mem l4x_phys_virt_addrs[L4X_PHYS_VIRT_ADDRS_MAX_ITEMS] __nosavedata;
-int l4x_phys_virt_addr_items;
 
 #ifdef CONFIG_L4_CONFIG_CHECKS
 static const unsigned long required_kernel_abi_version = 1;
@@ -316,22 +307,50 @@ static void l4x_server_loop(void);
 
 static void l4x_v2p_init(void)
 {
-	l4x_phys_virt_addr_items = 0;
 }
 
 void l4x_v2p_add_item(l4_addr_t phys, void *virt, l4_size_t size)
 {
-	if (l4x_phys_virt_addr_items == L4X_PHYS_VIRT_ADDRS_MAX_ITEMS)
-		panic("v2p filled up!");
+	unsigned i = 0;
 
-	l4x_phys_virt_addrs[l4x_phys_virt_addr_items++]
-		= (struct l4x_phys_virt_mem){.phys = phys, .virt = virt, .size = size};
+	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
+		if (l4x_phys_virt_addrs[i].size)
+			continue;
+
+		l4x_phys_virt_addrs[i]
+			= (struct l4x_phys_virt_mem){.phys = phys, .virt = virt, .size = size};
+		break;
+	}
+
+	if (i == L4X_PHYS_VIRT_ADDRS_MAX_ITEMS)
+		LOG_printf("v2p filled up!\n");
+}
+
+unsigned long l4x_v2p_del_item(void *virt)
+{
+	unsigned i = 0;
+
+	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
+		unsigned long r;
+
+		if (!l4x_phys_virt_addrs[i].size
+		    || l4x_phys_virt_addrs[i].virt != virt)
+			continue;
+
+		r = l4x_phys_virt_addrs[i].size;
+		l4x_phys_virt_addrs[i].size = 0;
+		l4x_phys_virt_addrs[i].phys = 0;
+		l4x_phys_virt_addrs[i].virt = NULL;
+		return r;
+	}
+
+	return 0;
 }
 
 static void l4x_virt_to_phys_show(void)
 {
 	int i;
-	for (i = 0; i < l4x_phys_virt_addr_items; i++) {
+	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
 		printk("v = %08lx  p = %08lx   sz = %zx\n",
 		       (unsigned long)l4x_phys_virt_addrs[i].virt,
 		       l4x_phys_virt_addrs[i].phys,
@@ -339,32 +358,15 @@ static void l4x_virt_to_phys_show(void)
 	}
 }
 
-int l4x_is_selfmapped_addr(unsigned long a)
-{
-#ifdef ARCH_arm
-	return l4x_arm_is_selfmapped_addr(a);
-#else
-	return 0;
-#endif
-}
-
-
 unsigned long l4x_virt_to_phys(volatile void * address)
 {
 	int i;
 
-	if (l4x_is_selfmapped_addr((unsigned long)address)) {
-		pte_t *pte;
-		pte = lookup_pte(swapper_pg_dir, (unsigned long)address);
-		if (pte)
-			address = (void *)((pte_val(*pte) & PAGE_MASK)
-				           | ((unsigned long)address & ~PAGE_MASK));
-	}
-
-	for (i = 0; i < l4x_phys_virt_addr_items; i++) {
-		if (l4x_phys_virt_addrs[i].virt <= address &&
-		    address < l4x_phys_virt_addrs[i].virt
-		              + l4x_phys_virt_addrs[i].size)
+	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
+		if (l4x_phys_virt_addrs[i].size
+		    && l4x_phys_virt_addrs[i].virt <= address
+		    && address < l4x_phys_virt_addrs[i].virt
+		                 + l4x_phys_virt_addrs[i].size)
 			return (address - l4x_phys_virt_addrs[i].virt)
 			       + l4x_phys_virt_addrs[i].phys;
 	}
@@ -387,10 +389,11 @@ void *l4x_phys_to_virt(unsigned long address)
 {
 	int i;
 
-	for (i = 0; i < l4x_phys_virt_addr_items; i++) {
-		if (l4x_phys_virt_addrs[i].phys <= address &&
-		    address < l4x_phys_virt_addrs[i].phys
-		              + l4x_phys_virt_addrs[i].size) {
+	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
+		if (l4x_phys_virt_addrs[i].size
+		    && l4x_phys_virt_addrs[i].phys <= address
+		    && address < l4x_phys_virt_addrs[i].phys
+		                 + l4x_phys_virt_addrs[i].size) {
 			return (address - l4x_phys_virt_addrs[i].phys)
 			       + l4x_phys_virt_addrs[i].virt;
 		}
@@ -474,6 +477,8 @@ unsigned l4x_x86_utcb_get_orig_segment(void)
 #else
 static inline void l4x_x86_utcb_save_orig_segment(void) {}
 #endif
+
+DEFINE_PER_CPU(l4_vcpu_state_t *, l4x_vcpu_ptr);
 
 L4_CV l4_utcb_t *l4_utcb_wrap(void)
 {
@@ -767,6 +772,7 @@ void l4x_printf(const char *fmt, ...)
 	L4XV_FN_v(LOG_vprintf(fmt, list));
 	va_end(list);
 }
+EXPORT_SYMBOL(l4x_printf);
 
 /* ---------------------------------------------------------------- */
 
@@ -875,7 +881,7 @@ static void l4x_mbm_request_ghost(l4re_ds_t *ghost_ds)
 	/* Write a certain value in to the page so that we can
 	 * easily recognize it */
 	for (i = 0; i < L4_PAGESIZE; i += sizeof(i))
-		*(unsigned int *)((unsigned long)addr + i) = 0xcafeface;
+		*(unsigned int *)((unsigned long)addr + i) = 0xf4f4f4f4;
 
 	/* Detach it again */
 	if (l4re_rm_detach(addr)) {
@@ -1083,23 +1089,39 @@ static void __init l4x_reserve_vmalloc_space(void)
 
 void __init l4x_setup_memory(char *cmdl,
                              unsigned long *main_mem_start,
-                             unsigned long *main_mem_size,
-                             unsigned long *isa_dma_mem_start,
-                             unsigned long *isa_dma_mem_size)
+                             unsigned long *main_mem_size)
 {
 	int res;
 	char *memstr;
 	char *memtypestr;
-	unsigned long memory_area_size;
+	void *a;
 	l4_addr_t memory_area_id = 0;
-	l4_addr_t memory_area_addr;
-	//l4_size_t poolsize, poolfree;
 	l4_uint32_t dm_flags = L4RE_MA_CONTINUOUS | L4RE_MA_PINNED;
+	int i;
+	unsigned long mem_chunk_sz[10];
+	unsigned num_mem_chunk = 0;
 
 	/* See if we find a mem=xxx option in the command line */
-	if ((memstr = strstr(cmdl, "mem="))
-	    && (res = memparse(memstr + 4, &memstr)))
-		l4x_mainmem_size = res;
+	if ((memstr = strstr(cmdl, "mem="))) {
+		l4x_mainmem_size = 0;
+		memstr += 4;
+		while (1) {
+			res = memparse(memstr, &memstr);
+			if (res) {
+				mem_chunk_sz[num_mem_chunk++] = res;
+				l4x_mainmem_size += res;
+			}
+
+			if (num_mem_chunk == ARRAY_SIZE(mem_chunk_sz))
+				break;
+
+			if (*memstr == ',' || *memstr == '+')
+				memstr++;
+			else
+				break;
+		}
+	} else
+		mem_chunk_sz[num_mem_chunk++] = l4x_mainmem_size;
 
 	if ((memtypestr = strstr(cmdl, "l4memtype="))) {
 		memtypestr += 9;
@@ -1126,125 +1148,68 @@ void __init l4x_setup_memory(char *cmdl,
 		} while (*memtypestr == ',');
 	}
 
-	if ((l4x_mainmem_size % L4_SUPERPAGESIZE) == 0) {
-		LOG_printf("%s: Forcing superpages for main memory\n", __func__);
-		/* force ds-mgr to allocate superpages */
-		dm_flags |= L4RE_MA_SUPER_PAGES;
-	}
+	for (i = 0; i < num_mem_chunk; ++i) {
+		l4_uint32_t f = dm_flags;
 
-	/* Allocate main memory */
-	if (l4_is_invalid_cap(l4x_ds_mainmem = l4re_util_cap_alloc())) {
-		LOG_printf("%s: Out of caps\n", __func__);
-		l4x_exit_l4linux();
-	}
-	LOG_printf("l4re_global_env: %p\n", l4re_global_env);
-	if (l4re_ma_alloc(l4x_mainmem_size, l4x_ds_mainmem, dm_flags)) {
-		LOG_printf("%s: Can't get main memory of %ldMB!\n",
-		           __func__, l4x_mainmem_size >> 20);
-		l4re_debug_obj_debug(l4re_env()->mem_alloc, 0);
-		l4x_exit_l4linux();
-	}
-
-#if 0
-	/* if there's a '+' at the end of the mem=-option try to get
-	 * more memory */
-	if (memstr && *memstr == '+') {
-		unsigned long chunksize = 64 << 20;
-
-		while (chunksize > (4 << 20)) {
-			if ((res = l4dm_mem_resize(&l4x_ds_mainmem,
-						   l4x_mainmem_size
-			                           + chunksize)))
-				chunksize >>= 1; /* failed */
+		if ((mem_chunk_sz[i] % L4_SUPERPAGESIZE) == 0) {
+			if (num_mem_chunk == 1)
+				LOG_printf("L4x: Setting superpages for main memory\n");
 			else
-				l4x_mainmem_size += chunksize;
+				LOG_printf("L4x: Setting superpages for memory chunk %d\n", i + 1);
+			/* force ds-mgr to allocate superpages */
+			f |= L4RE_MA_SUPER_PAGES;
 		}
+
+		/* Allocate main memory */
+		if (l4_is_invalid_cap(l4x_ds_mainmem[i] = l4re_util_cap_alloc())) {
+			LOG_printf("%s: Out of caps\n", __func__);
+			l4x_exit_l4linux();
+		}
+
+		if (l4re_ma_alloc(mem_chunk_sz[i], l4x_ds_mainmem[i], f)) {
+			LOG_printf("%s: Can't get main memory of %ldkiB!\n",
+				   __func__, mem_chunk_sz[i] >> 10);
+			l4re_debug_obj_debug(l4re_env()->mem_alloc, 0);
+			l4x_exit_l4linux();
+		}
+
+		if (num_mem_chunk > 1)
+			LOG_printf("L4x: Memory chunk %ldkiB\n",
+			           mem_chunk_sz[i] >> 10);
 	}
-#endif
 
 	LOG_printf("Main memory size: %ldMB\n", l4x_mainmem_size >> 20);
+
+	// just to avoid strange things are going on
 	if (l4x_mainmem_size < (4 << 20)) {
 		LOG_printf("Not enough main memory - aborting!\n");
 		l4x_exit_l4linux();
 	}
 
-	memory_area_size = l4x_mainmem_size;
-
-#ifdef CONFIG_ZONE_DMA
-	/* Try to get ISA DMA memory */
-
-	/* See if we find a memisadma=xxx option in the command line */
-	if ((memstr = strstr(cmdl, "memisadma="))) {
-		LOG_printf("'memisadma' currently not supported\n");
-		//l4x_isa_dma_size = memparse(memstr + 10, &memstr);
-	}
-
-#if 0
-	/** In the default config dm_phys prints out messages if
-	 ** the allocation fails, so query the size separately to
-	 ** not disturb users with error messages */
-	if (l4x_isa_dma_size
-	    && (res = l4dm_memphys_poolsize(L4DM_MEMPHYS_ISA_DMA9,
-	                                    &poolsize, &poolfree))) {
-		LOG_printf("Cannot query ISA DMA pool size: %s(%d)\n",
-		           l4sys_errtostr(res), res);
-		l4x_exit_l4linux();
-	}
-	if (l4x_isa_dma_size
-	    && poolfree >= l4x_isa_dma_size
-	    && !l4dm_memphys_open(L4DM_MEMPHYS_ISA_DMA9,
-	                          L4DM_MEMPHYS_ANY_ADDR9,
-	                          l4x_isa_dma_size, L4_PAGESIZE,
-	                          L4DM_CONTIGUOUS9, "L4Linux ISA DMA memory",
-	                          &l4x_ds_isa_dma)) {
-		LOG_printf("Got %lukB of ISA DMA memory.\n",
-		           l4x_isa_dma_size >> 10);
-		memory_area_size += l4_round_size(l4x_isa_dma_size, L4_LOG2_SUPERPAGESIZE);
-	} else
-#endif
-#endif
-		l4x_ds_isa_dma = L4_INVALID_CAP;
-
 	/* Get contiguous region in our virtual address space to put
 	 * the dataspaces in */
-	if (l4re_rm_reserve_area(&memory_area_id, memory_area_size,
+	if (l4re_rm_reserve_area(&memory_area_id, l4x_mainmem_size,
 	                         L4RE_RM_SEARCH_ADDR,
 	                         L4_SUPERPAGESHIFT)) {
 		LOG_printf("Error reserving memory area\n");
 		l4x_exit_l4linux();
 	}
-	memory_area_addr = memory_area_id;
 
-	/* Attach data spaces to local address space */
-	/** First: the ISA DMA memory */
-#ifdef CONFIG_ZONE_DMA
-#if 0
-	if (!l4_is_invalid_cap(l4x_ds_isa_dma)) {
-		l4x_isa_dma_memory_start = (void *)memory_area_addr;
-		l4x_main_memory_start =
-			(void *)(l4x_isa_dma_memory_start
-		                 + l4_round_size(l4x_isa_dma_size, L4_LOG2_SUPERPAGESIZE));
-		if ((res = l4rm_area_attach_to_region(&l4x_ds_isa_dma,
-	                                              memory_area_id,
-	                                              l4x_isa_dma_memory_start,
-	                                              l4x_isa_dma_size, 0,
-	                                              L4DM_RW | L4RM_MAP))) {
-			LOG_printf("Error attaching to ISA DMA memory: %s(%d)\n",
-				   l4sys_errtostr(res), res);
+	l4x_main_memory_start = (void *)memory_area_id;
+
+	a = l4x_main_memory_start;
+	for (i = 0; i < num_mem_chunk; ++i) {
+		if (l4re_rm_attach(&a, mem_chunk_sz[i],
+				   L4RE_RM_IN_AREA | L4RE_RM_EAGER_MAP,
+				   l4x_ds_mainmem[i], 0,
+				   MAX_ORDER + PAGE_SHIFT)) {
+			LOG_printf("Error attaching to L4Linux main memory\n");
 			l4x_exit_l4linux();
 		}
-	} else
-#endif
-#endif
-		l4x_main_memory_start = (void *)memory_area_addr;
+		l4x_register_region(l4x_ds_mainmem[i], a,
+	                            0, "Main memory");
 
-	/** Second: the main memory */
-	if (l4re_rm_attach(&l4x_main_memory_start, l4x_mainmem_size,
-	                   L4RE_RM_IN_AREA | L4RE_RM_EAGER_MAP,
-	                   l4x_ds_mainmem, 0,
-	                   MAX_ORDER + PAGE_SHIFT)) {
-		LOG_printf("Error attaching to L4Linux main memory\n");
-		l4x_exit_l4linux();
+		a = (char *)a + mem_chunk_sz[i];
 	}
 
 	/* Release area ... make possible hole available again */
@@ -1255,19 +1220,6 @@ void __init l4x_setup_memory(char *cmdl,
 
 	*main_mem_start = (unsigned long)l4x_main_memory_start;
 	*main_mem_size  = l4x_mainmem_size;
-
-	if (l4_is_invalid_cap(l4x_ds_isa_dma))
-		*isa_dma_mem_start = *isa_dma_mem_size = 0;
-	else {
-		*isa_dma_mem_start = (unsigned long)l4x_isa_dma_memory_start;
-		*isa_dma_mem_size  = l4x_isa_dma_size;
-	}
-
-	if (!l4_is_invalid_cap(l4x_ds_isa_dma))
-		l4x_register_region(l4x_ds_isa_dma, l4x_isa_dma_memory_start,
-		                      0, "ISA DMA memory");
-	l4x_register_region(l4x_ds_mainmem, l4x_main_memory_start,
-	                    0, "Main memory");
 
 	l4x_reserve_vmalloc_space();
 
@@ -1382,13 +1334,6 @@ static int l4x_sanity_check_kuser_cmpxchg(void)
 
 #endif
 
-unsigned long l4x_get_isa_dma_memory_end(void)
-{
-	if (l4x_isa_dma_memory_start)
-		return (unsigned long)l4x_isa_dma_memory_start + l4x_isa_dma_size;
-	return 0;
-}
-
 static void l4x_create_ugate(l4_cap_idx_t forthread, unsigned cpu)
 {
 	l4_msgtag_t r;
@@ -1452,24 +1397,20 @@ static void l4x_cpu_thread_set(int cpu, l4lx_thread_t tid)
 
 #ifdef CONFIG_SMP
 
+#include <l4/sys/ktrace.h>
+
 #ifdef CONFIG_X86
 void l4x_load_percpu_gdt_descriptor(struct desc_struct *gdt)
 {
 #ifdef CONFIG_X86_32
 	long r;
-#ifdef CONFIG_L4_VCPU
+	int nr = IS_ENABLED(CONFIG_L4_VCPU) ? 2 : 0;
+
 	if ((r = fiasco_gdt_set(L4_INVALID_CAP,
-	                        &gdt[GDT_ENTRY_PERCPU], 8, 2, l4_utcb())) < 0)
+	                        &gdt[GDT_ENTRY_PERCPU], 8, nr, l4_utcb())) < 0)
 		LOG_printf("GDT setting failed: %ld\n", r);
 	asm("mov %0, %%fs"
-	    : : "r" ((l4x_fiasco_gdt_entry_offset + 2) * 8 + 3) : "memory");
-#else
-	if ((r = fiasco_gdt_set(l4x_cap_current(),
-	                        &gdt[GDT_ENTRY_PERCPU], 8, 0, l4_utcb())) < 0)
-		LOG_printf("GDT setting failed: %ld\n", r);
-	asm("mov %0, %%fs"
-	    : : "r" (l4x_fiasco_gdt_entry_offset * 8 + 3) : "memory");
-#endif
+	    : : "r" ((l4x_fiasco_gdt_entry_offset + nr) * 8 + 3) : "memory");
 #endif
 }
 #endif
@@ -1589,8 +1530,8 @@ void l4x_cpu_ipi_setup(unsigned cpu)
 	char s[14];
 	L4XV_V(f);
 
-	snprintf(s, sizeof(s), "l4lx.ipi%d", cpu);
-	s[sizeof(s)-1] = 0;
+	snprintf(s, sizeof(s), "ipi%d", cpu);
+	s[sizeof(s) - 1] = 0;
 
 	l4x_cpu_ipi_irqs[cpu] = L4_INVALID_CAP;
 
@@ -1623,6 +1564,8 @@ void l4x_cpu_ipi_setup(unsigned cpu)
 	}
 
 #ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
+	snprintf(s, sizeof(s), "l4lx.ipi%d", cpu);
+	s[sizeof(s) - 1] = 0;
 	l4_debugger_set_object_name(c, s);
 #endif
 
@@ -1673,21 +1616,23 @@ static L4_CV void __cpuinit __cpu_starter(void *data)
 	int cpu = *(int *)data;
 
 	current_thread_info()->cpu = cpu;
+	l4x_stack_set(current_thread_info(), l4_utcb());
 	l4x_create_ugate(l4x_cap_current(), cpu);
 	l4lx_thread_pager_change(l4x_cap_current(), l4x_start_thread_id);
 
 #ifdef CONFIG_L4_VCPU
-	l4x_vcpu_init(l4x_vcpu_states[cpu]);
+	l4x_vcpu_init(per_cpu(l4x_vcpu_ptr, cpu));
 #endif
 
-	local_irq_disable();
 #ifdef ARCH_x86
 	l4x_load_percpu_gdt_descriptor(get_cpu_gdt_table(cpu));
 	l4x_stack_set((struct thread_info *)(stack_start & ~(THREAD_SIZE - 1)),
 	              l4_utcb());
+	l4x_global_cli();
 	asm volatile ("movl (stack_start), %esp; jmp *(initial_code)");
 #endif
 #ifdef ARCH_arm
+	l4x_global_cli();
 	l4x_arm_secondary_start_kernel();
 #endif
 	panic("CPU startup failed");
@@ -1730,7 +1675,7 @@ void __cpuinit l4x_cpu_spawn(int cpu, struct task_struct *idle)
 	                                &cpu, sizeof(cpu),
 	                                l4x_cpu_thread_caps[cpu],
 	                                CONFIG_L4_PRIO_SERVER_PROC,
-	                                &l4x_vcpu_states[cpu],
+	                                per_cpu_ptr(&l4x_vcpu_ptr, cpu),
 	                                name, &l4x_cpu_bootup_state));
 	l4x_printf("l4x_cpu_threads[%d] = %p\n", cpu, l4x_cpu_threads[cpu]);
 }
@@ -2021,9 +1966,6 @@ static L4_CV void __init cpu0_startup(void *data)
 	ti->cpu = 0;
 	l4x_stack_set(ti, l4_utcb());
 
-#ifdef CONFIG_L4_VCPU
-	l4x_vcpu_init(l4x_vcpu_states[0]);
-#endif
 	l4x_create_ugate(cpu0id, 0);
 	l4lx_thread_pager_change(cpu0id, l4x_start_thread_id);
 
@@ -2032,16 +1974,11 @@ static L4_CV void __init cpu0_startup(void *data)
 	             "movl %%eax, %%fs  \n"  // fs == ds for percpu
 		     : : : "eax", "memory");
 #endif
+#ifdef CONFIG_L4_VCPU
+	l4x_vcpu_init(this_cpu_read(l4x_vcpu_ptr));
+#endif
 	*ti = (struct thread_info) INIT_THREAD_INFO(init_task);
 	ti->task->stack = ti;
-
-#ifdef CONFIG_L4_VCPU
-#ifdef CONFIG_X86_32
-	ti->task->thread.regsp = task_pt_regs_v(ti->task);
-#else
-	ti->task->thread.regsp = task_pt_regs(ti->task);
-#endif
-#endif
 
 	panic_blink = l4x_blink;
 
@@ -2051,6 +1988,9 @@ static L4_CV void __init cpu0_startup(void *data)
 #endif
 
 	local_irq_disable();
+#ifdef CONFIG_X86
+	setup_clear_cpu_cap(X86_FEATURE_SEP);
+#endif
 #ifdef CONFIG_X86_32
 	i386_start_kernel();
 #elif defined(CONFIG_X86_64)
@@ -2456,7 +2396,7 @@ int __init_refok L4_CV main(int argc, char **argv)
 	                             NULL, 0,
 	                             l4re_util_cap_alloc(),
 	                             CONFIG_L4_PRIO_SERVER_PROC,
-	                             &l4x_vcpu_states[0],
+	                             per_cpu_ptr(&l4x_vcpu_ptr, 0),
 	                             "cpu0", &si);
 
 	if (!l4lx_thread_is_valid(main_id))
@@ -2490,56 +2430,33 @@ int __init_refok L4_CV main(int argc, char **argv)
 
 #ifdef CONFIG_X86
 
-#if 0
-/*
- * System calls that need a pt_regs pointer.
- */
-#define PTREGSCALL(name)					\
-long ptregs_##name(void);					\
-long sys_##name(struct pt_regs *regs);				\
-long ptregs_##name(void)					\
-{								\
-	return sys_##name(L4X_THREAD_REGSP(&current->thread));	\
-}
-
-PTREGSCALL(iopl)
-PTREGSCALL(fork)
-PTREGSCALL(vfork)
-PTREGSCALL(execve)
-PTREGSCALL(sigaltstack)
-PTREGSCALL(sigreturn)
-PTREGSCALL(rt_sigreturn)
-PTREGSCALL(vm86)
-PTREGSCALL(vm86old)
-#endif
-
 #include <asm/syscalls.h>
 
 #define PTREGSCALL0(name)                                       \
 long ptregs_##name(void)                                        \
 {                                                               \
-	struct pt_regs *r = L4X_THREAD_REGSP(&current->thread); \
+	struct pt_regs *r = task_pt_regs(current);              \
 	return sys_##name(r);                                   \
 }
 
 #define PTREGSCALL1(name, t1)                                   \
 long ptregs_##name(void)                                        \
 {                                                               \
-	struct pt_regs *r = L4X_THREAD_REGSP(&current->thread); \
+	struct pt_regs *r = task_pt_regs(current);              \
 	return sys_##name((t1)r->bx, r);                        \
 }
 
 #define PTREGSCALL2(name, t1, t2)                               \
 long ptregs_##name(void)                                        \
 {                                                               \
-	struct pt_regs *r = L4X_THREAD_REGSP(&current->thread); \
+	struct pt_regs *r = task_pt_regs(current);              \
 	return sys_##name((t1)r->bx, (t2)r->cx, r);             \
 }
 
 #define PTREGSCALL3(name, t1, t2, t3)                           \
 long ptregs_##name(void)                                        \
 {                                                               \
-	struct pt_regs *r = L4X_THREAD_REGSP(&current->thread); \
+	struct pt_regs *r = task_pt_regs(current)               \
 	return sys_##name((t1)r->bx, (t2)r->cx, (t3)r->dx, r);  \
 }
 
@@ -2548,7 +2465,6 @@ long ptregs_##name(void)                                        \
 PTREGSCALL1(iopl, unsigned int)
 PTREGSCALL0(fork)
 PTREGSCALL0(vfork)
-PTREGSCALL3(execve, const char __user *, const char __user *const __user *, const char __user *const __user *)
 PTREGSCALL2(sigaltstack, const stack_t __user *, stack_t __user *)
 PTREGSCALL0(sigreturn)
 PTREGSCALL0(rt_sigreturn)
@@ -2557,7 +2473,7 @@ PTREGSCALL1(vm86old, struct vm86_struct __user *)
 
 long ptregs_clone(void)
 {
-	struct pt_regs *r = L4X_THREAD_REGSP(&current->thread);
+	struct pt_regs *r = task_pt_regs(current);
 	return sys_clone(r->bx, r->cx, (void __user *)r->dx,
 	                 (void __user *)r->di, r);
 }
@@ -2806,7 +2722,7 @@ static int l4x_handle_lxsyscall(l4_exc_regs_t *exc)
 		return 1; /* Not a valid system call number */
 
 	ti = (struct thread_info *)(exc->sp & ~(THREAD_SIZE - 1));
-	regsp = L4X_THREAD_REGSP(&ti->task->thread);
+	regsp = task_pt_regs(ti->task);
 
 	utcb_exc_to_ptregs(exc, regsp);
 	l4x_set_kernel_mode(regsp);
@@ -2817,16 +2733,7 @@ static int l4x_handle_lxsyscall(l4_exc_regs_t *exc)
 	exc->sp -= l4x_intra_regs_size;
 	memcpy((void *)exc->sp, regsp, l4x_intra_regs_size);
 
-#ifdef CONFIG_L4_VCPU
-	if (syscall == __NR_execve)
-		LOG_printf("internal __NR_execve called\n");
-#else
-	/* eax has the function, see in_kernel_int80_helper */
-	if (syscall == __NR_execve)
-		exc->RN(ax) = (unsigned long)l4_kernelinternal_execve;
-	else
-#endif
-		exc->RN(ax) = (unsigned long)sys_call_table[syscall];
+	exc->RN(ax) = (unsigned long)sys_call_table[syscall];
 
 	/* Set PC to helper */
 	exc->ip = (unsigned long)in_kernel_int80_helper;
@@ -3162,6 +3069,7 @@ static struct l4x_exception_func_struct l4x_exception_func_list[] = {
 	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_msr },
 	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_clisti },
 	{ .trap_mask = 0x4000, .for_vcpu = 0, .f = l4x_handle_ioport },
+	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_ioport },
 #endif
 #ifdef ARCH_arm
 	{ .trap_mask = ~0UL,   .for_vcpu = 1, .f = l4x_handle_arm_exception },
@@ -3184,13 +3092,6 @@ static inline int l4x_handle_pagefault(unsigned long pfa, unsigned long ip,
 	addr = pfa;
 	if (unlikely(addr < L4_PAGESIZE))
 		return 0; // will trigger an Ooops
-
-	if (unlikely(l4x_is_selfmapped_addr(pfa))) {
-		/* We would need to go and find the source of the mapping
-		 * now */
-		LOG_printf("page-fault: self-mapped region at %08lx\n", pfa);
-		return 0;
-	}
 
 	size = 1;
 	r = l4re_rm_find(&addr, &size, &offset, &flags, &ds);

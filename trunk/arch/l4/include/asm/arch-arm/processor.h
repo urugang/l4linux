@@ -37,13 +37,6 @@ struct debug_info {
 #endif
 };
 
-// same in x86...
-#ifdef CONFIG_L4_VCPU
-#define L4X_THREAD_REGSP(t)  (t)->regsp
-#else
-#define L4X_THREAD_REGSP(t)  (&(t)->regs)
-#endif
-
 struct thread_struct {
 							/* fault info	  */
 	unsigned long		address;
@@ -53,31 +46,20 @@ struct thread_struct {
 #ifndef CONFIG_L4_VCPU
 	l4_cap_idx_t user_thread_id;
 	l4_cap_idx_t user_thread_ids[8]; //[NR_CPUS];
-	l4_cap_idx_t cloner;
-	unsigned int  start_cpu;
 	unsigned long threads_up;
 	unsigned int initial_state_set : 1;
 	unsigned int started : 1;
-	unsigned int restart : 1;
 #endif
 	unsigned int is_hybrid : 1;
 	unsigned int hybrid_sc_in_prog : 1;
 #ifdef CONFIG_L4_VCPU
 	l4_cap_idx_t		hyb_user_thread_id;
 #endif
-#ifdef CONFIG_L4_VCPU
-	struct pt_regs          *regsp;
-#else
-	struct pt_regs regs;
-#endif
-
 							/* debugging	  */
 	struct debug_info	debug;
 };
 
 #define INIT_THREAD  {	}
-
-extern void start_thread(struct pt_regs *regs, unsigned long ip, unsigned long sp);
 
 #ifdef CONFIG_MMU
 #define nommu_start_thread(regs) do { } while (0)
@@ -85,7 +67,7 @@ extern void start_thread(struct pt_regs *regs, unsigned long ip, unsigned long s
 #define nommu_start_thread(regs) regs->ARM_r10 = current->mm->start_data
 #endif
 
-#define start_thread_arm_orig(regs,pc,sp)					\
+#define start_thread(regs,pc,sp)					\
 ({									\
 	unsigned long *stack = (unsigned long *)sp;			\
 	memset(regs->uregs, 0, sizeof(regs->uregs));			\
@@ -98,9 +80,9 @@ extern void start_thread(struct pt_regs *regs, unsigned long ip, unsigned long s
 	regs->ARM_cpsr |= PSR_ENDSTATE;					\
 	regs->ARM_pc = pc & ~1;		/* pc */			\
 	regs->ARM_sp = sp;		/* sp */			\
-	regs->ARM_r2 = stack[2];	/* r2 (envp) */			\
-	regs->ARM_r1 = stack[1];	/* r1 (argv) */			\
-	regs->ARM_r0 = stack[0];	/* r0 (argc) */			\
+	get_user(regs->ARM_r2, &stack[2]);	/* r2 (envp) */		\
+	get_user(regs->ARM_r1, &stack[1]);	/* r1 (argv) */		\
+	get_user(regs->ARM_r0, &stack[0]);	/* r0 (argc) */		\
 	nommu_start_thread(regs);					\
 })
 
@@ -118,15 +100,8 @@ unsigned long get_wchan(struct task_struct *p);
 #define cpu_relax()			barrier()
 #endif
 
-/*
- * Create a new kernel thread
- */
-extern int kernel_thread(int (*fn)(void *), void *arg, unsigned long flags);
-
-#define task_pt_regs_v(p) \
-	((struct pt_regs *)(THREAD_START_SP + task_stack_page(p)) - 1)
 #define task_pt_regs(p) \
-	(L4X_THREAD_REGSP(&p->thread))
+	((struct pt_regs *)(THREAD_START_SP + task_stack_page(p)) - 1)
 
 #define KSTK_EIP(tsk)	task_pt_regs(tsk)->ARM_pc
 #define KSTK_ESP(tsk)	task_pt_regs(tsk)->ARM_sp

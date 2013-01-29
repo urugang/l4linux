@@ -23,7 +23,6 @@ obj-y				+= pci-iommu_table.o
 obj-y				+= resource.o
 obj-y				+= head$(BITS).o
 obj-y				+= probe_roms.o
-obj-$(CONFIG_X86_32)		+= sys_i386_32.o
 obj-y			+= syscall_$(BITS).o
 obj-$(CONFIG_X86_64)	+= vsyscall_64.o
 obj-$(CONFIG_X86_64)	+= vsyscall_emu_64.o
@@ -42,12 +41,13 @@ obj-$(CONFIG_X86_MPPARSE)	+= mpparse.o
 obj-$(CONFIG_SMP)		+= smp.o smpboot.o setup_percpu.o
 obj-$(CONFIG_HPET_TIMER)	+= hpet.o
 
-# Make sure this is linked after any other paravirt_ops structs: see head.S
-obj-$(CONFIG_PARAVIRT)		+= paravirt.o
+obj-$(CONFIG_X86_CHECK_BIOS_CORRUPTION) += check.o
 
-obj-$(CONFIG_SWIOTLB)		+= pci-swiotlb.o
-obj-$(CONFIG_OF)                += devicetree.o
+obj-$(CONFIG_SWIOTLB)			+= pci-swiotlb.o
+obj-$(CONFIG_OF)			+= devicetree.o
+obj-$(CONFIG_UPROBES)			+= uprobes.o
 
+obj-$(CONFIG_PERF_EVENTS)		+= perf_regs.o
 
 ###
 # 64 bit specific files
@@ -62,7 +62,6 @@ ldt-y		:= $(b)/ldt.o
 module-y	:= $(b)/module.o
 pci-nommu-y	:= $(b)/pci-nommu.o
 pci-dma-y	:= $(b)/pci-dma.o
-sys_i386_32-y	:= $(b)/sys_i386_32.o
 topology-y	:= $(b)/topology.o
 amd_nb-y	+= $(b)/amd_nb.o
 stacktrace-y	+= $(b)/stacktrace.o
@@ -94,6 +93,7 @@ vsmp_64-y	+= $(b)/vsmp_64.o
 x8664_ksyms_64-y += $(b)/x8664_ksyms_64.o
 vsyscall_emu_64-y += $(b)/vsyscall_emu_64.o
 nmi-y           += $(b)/nmi.o
+perf_regs-y     += $(b)/perf_regs.o
 
 # we have our own versions of destroy_context and init_new_context,
 # so rename the original one

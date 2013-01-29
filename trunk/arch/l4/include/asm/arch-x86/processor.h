@@ -31,9 +31,7 @@ struct mm_struct;
 #include <linux/err.h>
 #include <linux/irqflags.h>
 
-#include <asm/api/config.h>
 #include <l4/sys/types.h>
-#include <l4/util/util.h>
 
 /*
  * We handle most unaligned accesses in hardware.  On the other hand
@@ -427,7 +425,6 @@ DECLARE_INIT_PER_CPU(irq_stack_union);
 
 DECLARE_PER_CPU(char *, irq_stack_ptr);
 DECLARE_PER_CPU(unsigned int, irq_count);
-extern unsigned long kernel_eflags;
 extern asmlinkage void ignore_sysret(void);
 #else	/* X86_64 */
 #ifdef CONFIG_CC_STACKPROTECTOR
@@ -450,12 +447,6 @@ extern void free_thread_xstate(struct task_struct *);
 extern struct kmem_cache *task_xstate_cachep;
 
 struct perf_event;
-
-#ifdef CONFIG_L4_VCPU
-#define L4X_THREAD_REGSP(t)  (t)->regsp
-#else
-#define L4X_THREAD_REGSP(t)  (&(t)->regs)
-#endif
 
 struct thread_struct {
 	/* Cached TLS descriptors: */
@@ -481,22 +472,14 @@ struct thread_struct {
 #ifndef CONFIG_L4_VCPU
 	l4_cap_idx_t		user_thread_id;		/* L4 Thread ID of the process */
 	l4_cap_idx_t		user_thread_ids[NR_CPUS];
-	l4_cap_idx_t		cloner;			/* ID of the one who did clone(CLONE_VM) */
-	unsigned int		start_cpu;
 	unsigned long		threads_up;
 	unsigned int		initial_state_set : 1;	/* 1 if initial state was set */
 	unsigned int		started : 1;		/* set if created successfully */
-	unsigned int		restart : 1;		/* restart - for exec */
 #endif
 	unsigned int		is_hybrid : 1;		/* set if hybrid task */
 	unsigned int		hybrid_sc_in_prog : 1;	/* l4 syscall in progress  */
 #ifdef CONFIG_L4_VCPU
 	l4_cap_idx_t		hyb_user_thread_id;
-#endif
-#ifndef CONFIG_L4_VCPU
-	struct pt_regs		regs;
-#else
-	struct pt_regs		*regsp;
 #endif
 	/* Save middle states of ptrace breakpoints */
 	struct perf_event	*ptrace_bps[HBP_NUM];
@@ -510,7 +493,7 @@ struct thread_struct {
 	unsigned long		error_code;
 	/* floating point and extended processor state */
 	struct fpu		fpu;
-#ifdef CONFIG_X86_32__NO_NEED
+#ifdef CONFIG_X86_32
 	/* Virtual 86 mode info */
 	struct vm86_struct __user *vm86_info;
 	unsigned long		screen_bitmap;
@@ -620,11 +603,6 @@ typedef struct {
 	unsigned long		seg;
 } mm_segment_t;
 
-
-/*
- * create a kernel thread without removing it from tasklists
- */
-extern int kernel_thread(int (*fn)(void *), void *arg, unsigned long flags);
 
 /* Free all resources held by a thread. */
 extern void release_thread(struct task_struct *);
@@ -791,6 +769,8 @@ static inline void update_debugctlmsr(unsigned long debugctlmsr)
 	wrmsrl(MSR_IA32_DEBUGCTLMSR, debugctlmsr);
 }
 
+extern void set_task_blockstep(struct task_struct *task, bool on);
+
 /*
  * from system description table in BIOS. Mostly for MCA use, but
  * others may find it useful:
@@ -857,8 +837,7 @@ static inline void spin_lock_prefetch(const void *x)
 #define STACK_TOP		TASK_SIZE
 #define STACK_TOP_MAX		STACK_TOP
 
-#define INIT_THREAD { }
-#define INIT_THREAD_ORIG  {							  \
+#define INIT_THREAD  {							  \
 	.sp0			= sizeof(init_stack) + (long)&init_stack, \
 	.vm86_info		= NULL,					  \
 	.sysenter_cs		= __KERNEL_CS,				  \
@@ -900,16 +879,11 @@ extern unsigned long thread_saved_pc(struct task_struct *tsk);
  * "struct pt_regs" is possible, but they may contain the
  * completely wrong values.
  */
-#define task_pt_regs_v(task)                                           \
+#define task_pt_regs(task)                                             \
 ({                                                                     \
        struct pt_regs *__regs__;                                       \
        __regs__ = (struct pt_regs *)(KSTK_TOP(task_stack_page(task))-8); \
        __regs__ - 1;                                                   \
-})
-#define task_pt_regs(task)                                             \
-({                                                                     \
-       struct pt_regs *__regs__;                                       \
-       __regs__ = L4X_THREAD_REGSP(&(task)->thread);                                \
 })
 
 #define KSTK_ESP(task)		(task_pt_regs(task)->sp)

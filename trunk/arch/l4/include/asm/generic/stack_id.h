@@ -6,6 +6,8 @@ enum {
 	L4X_UTCB_TCR_PRIO = 1,
 };
 
+#include <linux/percpu.h>
+
 #include <asm/thread_info.h>
 #include <asm/generic/vcpu.h>
 
@@ -50,7 +52,7 @@ static inline l4_utcb_t *l4x_utcb_current(void)
 static inline
 l4_vcpu_state_t *l4x_vcpu_state_current(void)
 {
-	return l4x_vcpu_states[current_thread_info()->cpu];
+	return this_cpu_read(l4x_vcpu_ptr);
 }
 #endif
 
