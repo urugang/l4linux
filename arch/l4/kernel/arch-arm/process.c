@@ -31,9 +31,9 @@
 #include <linux/random.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/cpuidle.h>
+#include <linux/leds.h>
 
 #include <asm/cacheflush.h>
-#include <asm/leds.h>
 #include <asm/processor.h>
 #include <asm/thread_notify.h>
 #include <asm/stacktrace.h>
@@ -47,8 +47,6 @@
 #include <asm/generic/setup.h>
 
 #include <asm/l4lxapi/task.h>
-
-#include <l4/sys/kdebug.h>
 
 #ifdef CONFIG_CC_STACKPROTECTOR
 #include <linux/stackprotector.h>
@@ -68,8 +66,6 @@ static const char *isa_modes[] = {
 };
 
 extern void setup_mm_for_reboot(void);
-
-int thread_create_user(struct task_struct *p, int fork);
 
 static volatile int hlt_counter;
 
@@ -205,7 +201,7 @@ void cpu_idle(void)
 	while (1) {
 		tick_nohz_idle_enter();
 		rcu_idle_enter();
-		leds_event(led_idle_start);
+		ledtrig_cpu(CPU_LED_IDLE_START);
 		while (!need_resched()) {
 #ifdef CONFIG_HOTPLUG_CPU
 			if (cpu_is_offline(smp_processor_id()))
@@ -236,7 +232,7 @@ void cpu_idle(void)
 			} else
 				local_irq_enable();
 		}
-		leds_event(led_idle_end);
+		ledtrig_cpu(CPU_LED_IDLE_END);
 		rcu_idle_exit();
 		tick_nohz_idle_exit();
 		schedule_preempt_disabled();
@@ -425,7 +421,6 @@ void flush_thread(void)
 	current->thread.started = 0;
 	current->thread.threads_up = 0;
 	current->thread.user_thread_id = L4_INVALID_CAP;
-	current->thread.cloner = L4_INVALID_CAP;
 #endif
 }
 
@@ -433,70 +428,29 @@ void release_thread(struct task_struct *dead_task)
 {
 }
 
-extern void kernel_thread_helper(void);
-
-#ifndef CONFIG_L4_VCPU
-/*
- * Create the kernel context for a new process.  Our main duty here is
- * to fill in p->thread, the arch-specific part of the process'
- * task_struct */
-static int l4x_thread_create(struct task_struct *p, unsigned long clone_flags,
-                             int inkernel)
-{
-	struct thread_struct *t = &p->thread;
-	int i;
-
-	/* first, allocate task id for  client task */
-	if (!inkernel && clone_flags & CLONE_VM) /* is this a user process and vm-cloned? */
-		t->cloner = current->mm->context.task;
-	else
-		t->cloner = L4_INVALID_CAP;
-
-	for (i = 0; i < NR_CPUS; i++)
-		p->thread.user_thread_ids[i] = L4_INVALID_CAP;
-	p->thread.user_thread_id = L4_INVALID_CAP;
-	p->thread.threads_up = 0;
-
-	l4x_stack_set(p->stack, l4_utcb());
-
-	/* if creating a kernel-internal thread, return at this point */
-	if (inkernel) {
-		task_thread_info(p)->cpu_context.pc = (unsigned long)kernel_thread_helper;
-		return 0;
-	}
-
-	/* Fix up stack pointer from copy_thread */
-	task_thread_info(p)->cpu_context.sp
-	   = (unsigned long)p->stack + THREAD_SIZE;
-
-	return 0;
-}
-#endif
-
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
 
 int
 copy_thread(unsigned long clone_flags, unsigned long stack_start,
-	    unsigned long stk_sz___used_for_inkernel_process_flag, struct task_struct *p, struct pt_regs *regs)
+	    unsigned long stk_sz, struct task_struct *p, struct pt_regs *regs)
 {
 	struct thread_info *thread = task_thread_info(p);
-	struct pt_regs *childregs;
-
-#ifdef CONFIG_L4_VCPU
-	p->thread.regsp = task_pt_regs_v(p);
-#else
-	if (unlikely(stk_sz___used_for_inkernel_process_flag == COPY_THREAD_STACK_SIZE___FLAG_INKERNEL))
-		childregs = (void *)thread + THREAD_START_SP - sizeof(*regs);
-	else
-#endif
-		childregs = task_pt_regs(p);
-	*childregs = *regs;
-	childregs->ARM_r0 = 0;
-	childregs->ARM_sp = stack_start;
+	struct pt_regs *childregs = task_pt_regs(p);
 
 	memset(&thread->cpu_context, 0, sizeof(struct cpu_context_save));
-	thread->cpu_context.sp = (unsigned long)childregs;
+
+	if (likely(regs)) {
+		*childregs = *regs;
+		childregs->ARM_r0 = 0;
+		childregs->ARM_sp = stack_start;
+	} else {
+		memset(childregs, 0, sizeof(struct pt_regs));
+		thread->cpu_context.r4 = stk_sz;
+		thread->cpu_context.r5 = stack_start;
+		childregs->ARM_cpsr = SVC_MODE;
+	}
 	thread->cpu_context.pc = (unsigned long)ret_from_fork;
+	thread->cpu_context.sp = (unsigned long)childregs;
 
 	clear_ptrace_hw_breakpoint(p);
 
@@ -505,14 +459,10 @@ copy_thread(unsigned long clone_flags, unsigned long stack_start,
 
 	thread_notify(THREAD_NOTIFY_COPY, thread);
 
-#ifdef CONFIG_L4_VCPU
-	thread->cpu_context.extra[0] = (unsigned long) (childregs+0);
+	l4x_init_thread_struct(p);
+
 	l4x_stack_set(p->stack, l4_utcb());
 	return 0;
-#else
-	/* create the user task */
-	return l4x_thread_create(p, clone_flags, stk_sz___used_for_inkernel_process_flag == COPY_THREAD_STACK_SIZE___FLAG_INKERNEL);
-#endif
 }
 
 /*
@@ -538,101 +488,6 @@ int dump_fpu (struct pt_regs *regs, struct user_fp *fp)
 	return used_math != 0;
 }
 EXPORT_SYMBOL(dump_fpu);
-
-/*
- * Shuffle the argument into the correct register before calling the
- * thread function.  r4 is the thread argument, r5 is the pointer to
- * the thread function, and r6 points to the exit function.
- */
-
-asm(	".pushsection .text\n"
-"	.align\n"
-"	.type	kernel_thread_helper, #function\n"
-"kernel_thread_helper:\n"
-#ifndef CONFIG_L4_VCPU
-"	bl	schedule_tail\n" // (everything) questionable??
-"	ldmia	sp, {r0 - r9}\n"
-// XXX: Correct stack pointer?
-//"	add	sp, sp, 12..\n"
-#endif
-#ifdef CONFIG_TRACE_IRQFLAGS
-"	bl	trace_hardirqs_on\n"
-#endif
-"	msr	cpsr_c, r7\n"
-"	mov	r0, r4\n"
-"	mov	lr, r6\n"
-"	mov	pc, r5\n"
-"	.size	kernel_thread_helper, . - kernel_thread_helper\n"
-"	.popsection");
-
-#ifdef CONFIG_ARM_UNWIND
-extern void kernel_thread_exit(long code);
-asm(	".pushsection .text\n"
-"	.align\n"
-"	.type	kernel_thread_exit, #function\n"
-"kernel_thread_exit:\n"
-"	.fnstart\n"
-"	.cantunwind\n"
-"	bl	do_exit\n"
-"	nop\n"
-"	.fnend\n"
-"	.size	kernel_thread_exit, . - kernel_thread_exit\n"
-"	.popsection");
-#else
-#define kernel_thread_exit	do_exit
-#endif
-
-/*
- * Create a kernel thread.
- */
-pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
-{
-	struct pt_regs regs;
-
-	memset(&regs, 0, sizeof(regs));
-
-	regs.ARM_r4 = (unsigned long)arg;
-	regs.ARM_r5 = (unsigned long)fn;
-	regs.ARM_r6 = (unsigned long)kernel_thread_exit;
-	regs.ARM_r7 = SVC_MODE | PSR_ENDSTATE | PSR_ISETSTATE;
-#ifdef CONFIG_L4_VCPU
-	regs.ARM_pc = (unsigned long)kernel_thread_helper;
-	regs.ARM_cpsr = regs.ARM_r7 | PSR_I_BIT;
-#endif
-
-	return do_fork(flags|CLONE_VM|CLONE_UNTRACED, 0, &regs, COPY_THREAD_STACK_SIZE___FLAG_INKERNEL, NULL, NULL);
-}
-EXPORT_SYMBOL(kernel_thread);
-
-void start_thread(struct pt_regs *regs, unsigned long pc,
-		  unsigned long sp)
-{
-	//printk("%s %d regs=%p pc%lx sp%lx\n", __func__, __LINE__, regs, pc, sp); 
-
-	unsigned long *stack = (unsigned long *)sp;
-	set_fs(USER_DS);
-	memset(regs->uregs, 0, sizeof(regs->uregs));
-	regs->ARM_cpsr = USR_MODE;
-	if (elf_hwcap & HWCAP_THUMB && pc & 1)
-		regs->ARM_cpsr |= PSR_T_BIT;
-	regs->ARM_cpsr |= PSR_ENDSTATE;
-	regs->ARM_pc   = pc & ~1;
-	regs->ARM_sp   = sp;
-	//regs->ARM_r2 = stack[2];
-	//regs->ARM_r1 = stack[1];
-	//regs->ARM_r0 = stack[0];
-	get_user(regs->ARM_r2, &stack[2]);
-	get_user(regs->ARM_r1, &stack[1]);
-	get_user(regs->ARM_r0, &stack[0]);
-
-#ifndef CONFIG_L4_VCPU
-	current->thread.restart = 1;
-#endif
-
-	if (pc > TASK_SIZE)
-		force_sig(SIGSEGV, current);
-}
-EXPORT_SYMBOL(start_thread);
 
 unsigned long get_wchan(struct task_struct *p)
 {

@@ -56,15 +56,11 @@
 #include <asm/debugreg.h>
 #include <asm/switch_to.h>
 
-#include <asm/api/macros.h>
-
-#include <asm/generic/sched.h>
-#include <asm/generic/upage.h>
-#include <asm/generic/assert.h>
-#include <asm/generic/task.h>
 #include <asm/generic/stack_id.h>
+#include <asm/generic/task.h>
 
-#include <asm/l4lxapi/task.h>
+asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
+asmlinkage void ret_from_kernel_thread(void) __asm__("ret_from_kernel_thread");
 
 /*
  * Return saved PC of a blocked thread.
@@ -132,163 +128,71 @@ void __show_regs(struct pt_regs *regs, int all)
 #endif
 }
 
-#if 0
-/*
- * Create a kernel thread
- */
-int kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
-{
-	struct pt_regs regs;
-#ifdef CONFIG_L4_VCPU
-	unsigned ds, cs;
-	asm volatile ("mov %%ds, %0; mov %%cs, %1\n" : "=r"(ds), "=r"(cs));
-#endif
-
-	memset(&regs, 0, sizeof(regs));
-
-	regs.bx = (unsigned long) fn;
-	regs.dx = (unsigned long) arg;
-
-#ifdef CONFIG_L4_VCPU
-	regs.ds = ds;
-	regs.ds = ds;
-	regs.es = ds;
-#ifdef CONFIG_SMP
-	regs.fs = (l4x_fiasco_gdt_entry_offset + 2) * 8 + 3;
-#else
-	regs.fs = ds;
-#endif
-#else
-	regs.ds = __USER_DS;
-	regs.es = __USER_DS;
-	regs.fs = __KERNEL_PERCPU;
-	regs.gs = __KERNEL_STACK_CANARY;
-#endif
-	regs.orig_ax = -1;
-#ifdef CONFIG_L4_VCPU
-	regs.ip = (unsigned long) kernel_thread_helper;
-	regs.cs = (cs & ~3) | get_kernel_rpl();
-#else
-	regs.cs = __KERNEL_CS | get_kernel_rpl();
-#endif
-	regs.flags = X86_EFLAGS_IF | X86_EFLAGS_SF | X86_EFLAGS_PF | 0x2;
-
-	/* Ok, create the new process.. */
-	return do_fork(flags | CLONE_VM | CLONE_UNTRACED, 0, &regs, COPY_THREAD_STACK_SIZE___FLAG_INKERNEL, NULL, NULL);
-}
-EXPORT_SYMBOL(kernel_thread);
-#endif
-
 void release_thread(struct task_struct *dead_task)
 {
-	//outstring("release_thread\n");
-	//printk("%s %d(%s)\n", __func__, current->pid, current->comm);
+	BUG_ON(dead_task->mm);
+	release_vm86_irqs(dead_task);
 }
 
-/* defined in kernel/sched.c -- other archs only use this in ASM */
-asmlinkage void schedule_tail(struct task_struct *prev);
-
-#ifndef CONFIG_L4_VCPU
-/* helpers for copy_thread() */
-void ret_kernel_thread_start(void);
-
-asm(".section .text\n"
-    ".align 4\n"
-    "ret_kernel_thread_start: \n\t"
-    "call kernel_thread_start \n\t"
-    ".previous");
-
-void kernel_thread_start(struct task_struct *p)
+int copy_thread(unsigned long clone_flags, unsigned long sp,
+	unsigned long arg,
+	struct task_struct *p, struct pt_regs *regs)
 {
-	struct pt_regs *r = &current->thread.regs;
-	int (*func)(void *) = (void *)r->si;
+	struct pt_regs *childregs = task_pt_regs(p);
+	struct task_struct *tsk;
+	int err;
 
-	schedule_tail(p);
-	do_exit(func((void *)r->di));
-}
+	if (0)
+	printk("%s %d: clone_flags=%lx sp=%lx arg=%lx p=%p regs=%p\n",
+	       __func__, __LINE__, clone_flags, sp,
+	       arg, p, regs);
 
-/*
- * Create the kernel context for a new process.  Our main duty here is
- * to fill in p->thread, the arch-specific part of the process'
- * task_struct */
-static int l4x_thread_create(struct task_struct *p, unsigned long clone_flags,
-                             int inkernel)
-{
-	struct thread_struct *t = &p->thread;
-	int i;
 
-	/* first, allocate task id for  client task */
-	if (!inkernel && clone_flags & CLONE_VM) /* is this a user process and vm-cloned? */
-		t->cloner = current->mm->context.task;
-	else
-		t->cloner = L4_INVALID_CAP;
+	p->thread.sp = (unsigned long) childregs;
+	p->thread.sp0 = (unsigned long) (childregs+1);
 
-	for (i = 0; i < NR_CPUS; i++)
-		p->thread.user_thread_ids[i] = L4_INVALID_CAP;
-	p->thread.user_thread_id = L4_INVALID_CAP;
-	p->thread.threads_up = 0;
+	if (0)
+	printk("%s %d childregs=%p irqs-off=%d sp=%lx\n", __func__, __LINE__,
+	        childregs, irqs_disabled(), p->thread.sp0); 
 
 	l4x_stack_set(p->stack, l4_utcb());
 
-	/* if creating a kernel-internal thread, return at this point */
-	if (inkernel) {
-		/* compute pointer to end of stack */
-		unsigned long *sp = (unsigned long *)
-		       ((unsigned long)p->stack + sizeof(union thread_union));
-		/* switch_to will expect the new program pointer
-		 * on the stack */
-		*(--sp) = (unsigned long) ret_kernel_thread_start;
-
-		t->sp = (unsigned long) sp;
+	if (unlikely(!regs)) {
+		/* kernel thread */
+		memset(childregs, 0, sizeof(struct pt_regs));
+		p->thread.ip = (unsigned long) ret_from_kernel_thread;
+		task_user_gs(p) = __KERNEL_STACK_CANARY;
+		childregs->ds = __USER_DS;
+		childregs->es = __USER_DS;
+		childregs->fs = __KERNEL_PERCPU;
+		childregs->bx = sp;	/* function */
+		childregs->bp = arg;
+		childregs->orig_ax = -1;
+		childregs->cs = __KERNEL_CS | get_kernel_rpl();
+		childregs->flags = X86_EFLAGS_IF | X86_EFLAGS_BIT1;
+		p->fpu_counter = 0;
+		p->thread.io_bitmap_ptr = NULL;
+		memset(p->thread.ptrace_bps, 0, sizeof(p->thread.ptrace_bps));
 		return 0;
 	}
-
-	l4x_setup_user_dispatcher_after_fork(p);
-	return 0;
-}
-#endif /* !vcpu */
-
-int copy_thread(unsigned long clone_flags, unsigned long sp,
-	unsigned long stack_size___used_for_inkernel_process_flag,
-	struct task_struct *p, struct pt_regs *regs)
-{
-	struct pt_regs *childregs;
-	struct task_struct *tsk = current;
-	int err;
-
-#ifdef CONFIG_L4_VCPU
-	asmlinkage void ret_from_fork(void);
-	p->thread.regsp = task_pt_regs_v(p);
-#endif
-
-	childregs = task_pt_regs(p);
 	*childregs = *regs;
 	childregs->ax = 0;
 	childregs->sp = sp;
 
-	childregs->flags |= 0x200;	/* sanity: set EI flag */
-	childregs->flags &= 0x1ffff;
-
-#ifdef CONFIG_L4_VCPU
-	p->thread.sp = (unsigned long) childregs;
-	p->thread.sp0 = (unsigned long) (childregs+0);
-
-	p->thread.sp -= sizeof(long);
-	*(unsigned long *)p->thread.sp = 0;
-	p->thread.sp -= sizeof(long);
-	*(unsigned long *)p->thread.sp = (unsigned long)&ret_from_fork;
-#endif
-	//p->thread.ip = (unsigned long) ret_from_fork;
-
-	//task_user_gs(p) = get_user_gs(regs);
+	p->thread.ip = (unsigned long) ret_from_fork;
+	task_user_gs(p) = get_user_gs(regs);
 
 	p->fpu_counter = 0;
 	p->thread.io_bitmap_ptr = NULL;
 	tsk = current;
 	err = -ENOMEM;
 
+#ifdef CONFIG_L4
 	/* Copy segment registers */
 	p->thread.gs = tsk->thread.gs;
+
+	l4x_init_thread_struct(p);
+#endif
 
 	memset(p->thread.ptrace_bps, 0, sizeof(p->thread.ptrace_bps));
 
@@ -315,14 +219,6 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 		kfree(p->thread.io_bitmap_ptr);
 		p->thread.io_bitmap_max = 0;
 	}
-
-#ifndef CONFIG_L4_VCPU
-	/* create the user task */
-	if (!err) {
-		l4x_stack_set(p->stack, l4_utcb());
-		err = l4x_thread_create(p, clone_flags, stack_size___used_for_inkernel_process_flag == COPY_THREAD_STACK_SIZE___FLAG_INKERNEL);
-	}
-#endif
 	return err;
 }
 
@@ -339,75 +235,131 @@ start_thread(struct pt_regs *regs, unsigned long new_ip, unsigned long new_sp)
 #ifdef CONFIG_L4_VCPU
 	regs->ds                = ds;
 	regs->es                = ds;
-	regs->ss                = ds;
+	regs->ss		= ds;
 	regs->cs                = cs;
 #else
-	//regs->ds		= __USER_DS;
-	//regs->es		= __USER_DS;
-	//regs->ss		= __USER_DS;
-	//regs->cs		= __USER_CS;
+#if 0
+	regs->ds		= __USER_DS;
+	regs->es		= __USER_DS;
+	regs->ss		= __USER_DS;
+	regs->cs		= __USER_CS;
+#endif
 #endif
 	regs->ip		= new_ip;
 	regs->sp		= new_sp;
+	regs->flags		= X86_EFLAGS_IF;
 	/*
-	 * Free the old FP and other extended state
+	 * force it to the iret return path by making it look as if there was
+	 * some work pending.
 	 */
-	free_thread_xstate(current);
+	set_thread_flag(TIF_NOTIFY_RESUME);
 
 	current->thread.gs = 0;
-
-#ifndef CONFIG_L4_VCPU
-	current->thread.restart = 1;
-#endif
-
-	if (new_ip > TASK_SIZE)
-		force_sig(SIGSEGV, current);
 }
-EXPORT_SYMBOL(start_thread);
+EXPORT_SYMBOL_GPL(start_thread);
 
-#ifndef CONFIG_L4_VCPU
-/* kernel-internal execve() */
-asmlinkage int
-l4_kernelinternal_execve(const char * file,
-                         const char * const * argv,
-                         const char * const * envp)
+
+#ifndef CONFIG_L4
+/*
+ *	switch_to(x,y) should switch tasks from x to y.
+ *
+ * We fsave/fwait so that an exception goes off at the right time
+ * (as a call from the fsave or fwait in effect) rather than to
+ * the wrong process. Lazy FP saving no longer makes any sense
+ * with modern CPU's, and this simplifies a lot of things (SMP
+ * and UP become the same).
+ *
+ * NOTE! We used to use the x86 hardware context switching. The
+ * reason for not using it any more becomes apparent when you
+ * try to recover gracefully from saved state that is no longer
+ * valid (stale segment register values in particular). With the
+ * hardware task-switch, there is no way to fix up bad state in
+ * a reasonable manner.
+ *
+ * The fact that Intel documents the hardware task-switching to
+ * be slow is a fairly red herring - this code is not noticeably
+ * faster. However, there _is_ some room for improvement here,
+ * so the performance issues may eventually be a valid point.
+ * More important, however, is the fact that this allows us much
+ * more flexibility.
+ *
+ * The return value (in %ax) will be the "prev" task after
+ * the task-switch, and shows up in ret_from_fork in entry.S,
+ * for example.
+ */
+__notrace_funcgraph struct task_struct *
+__switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 {
-	int ret;
-	struct thread_struct *t = &current->thread;
+	struct thread_struct *prev = &prev_p->thread,
+				 *next = &next_p->thread;
+	int cpu = smp_processor_id();
+	struct tss_struct *tss = &per_cpu(init_tss, cpu);
+	fpu_switch_t fpu;
 
-	ASSERT(l4_is_invalid_cap(t->user_thread_id));
+	/* never put a printk in __switch_to... printk() calls wake_up*() indirectly */
 
-	/* we are going to become a real user task now, so prepare a real
-	 * pt_regs structure. */
-	/* Enable Interrupts, Set IOPL (needed for X, hwclock etc.) */
-	t->regs.flags = 0x3200; /* XXX hardcoded */
+	fpu = switch_fpu_prepare(prev_p, next_p, cpu);
 
-	/* do_execve() will create the user task for us in start_thread()
-	   and call set_fs(USER_DS) in flush_thread. I know this sounds
-	   strange but there are places in the kernel (kernel/kmod.c) which
-	   call execve with parameters inside the kernel. They set fs to
-	   KERNEL_DS before calling execve so we can't set it back to
-	   USER_DS before execve had a chance to look at the name of the
-	   executable. */
+	/*
+	 * Reload esp0.
+	 */
+	load_sp0(tss, next);
 
-	ASSERT(segment_eq(get_fs(), KERNEL_DS));
-	ret = do_execve(file, argv, envp, &t->regs);
+	/*
+	 * Save away %gs. No need to save %fs, as it was saved on the
+	 * stack on entry.  No need to save %es and %ds, as those are
+	 * always kernel segments while inside the kernel.  Doing this
+	 * before setting the new TLS descriptors avoids the situation
+	 * where we temporarily have non-reloadable segments in %fs
+	 * and %gs.  This could be an issue if the NMI handler ever
+	 * used %fs or %gs (it does not today), or if the kernel is
+	 * running inside of a hypervisor layer.
+	 */
+	lazy_save_gs(prev->gs);
 
-	if (ret < 0) {
-		/* we failed -- become a kernel thread again */
-		if (!l4_is_invalid_cap(t->user_thread_id))
-			l4lx_task_number_free(t->user_thread_id);
-		set_fs(KERNEL_DS);
-		t->user_thread_id = L4_INVALID_CAP;
-		return -1;
-	}
+	/*
+	 * Load the per-thread Thread-Local Storage descriptor.
+	 */
+	load_TLS(next, cpu);
 
-	l4x_user_dispatcher();
+	/*
+	 * Restore IOPL if needed.  In normal use, the flags restore
+	 * in the switch assembly will handle this.  But if the kernel
+	 * is running virtualized at a non-zero CPL, the popf will
+	 * not restore flags, so it must be done in a separate step.
+	 */
+	if (get_kernel_rpl() && unlikely(prev->iopl != next->iopl))
+		set_iopl_mask(next->iopl);
 
-	/* not reached */
-	return 0;
+	/*
+	 * Now maybe handle debug registers and/or IO bitmaps
+	 */
+	if (unlikely(task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV ||
+		     task_thread_info(next_p)->flags & _TIF_WORK_CTXSW_NEXT))
+		__switch_to_xtra(prev_p, next_p, tss);
+
+	/*
+	 * Leave lazy mode, flushing any hypercalls made here.
+	 * This must be done before restoring TLS segments so
+	 * the GDT and LDT are properly updated, and must be
+	 * done before math_state_restore, so the TS bit is up
+	 * to date.
+	 */
+	arch_end_context_switch(next_p);
+
+	/*
+	 * Restore %gs if needed (which is common)
+	 */
+	if (prev->gs | next->gs)
+		lazy_load_gs(next->gs);
+
+	switch_fpu_finish(next_p, fpu);
+
+	this_cpu_write(current_task, next_p);
+
+	return prev_p;
 }
-#endif
+#endif /* ! L4 */
 
 #define top_esp                (THREAD_SIZE - sizeof(unsigned long))
 #define top_ebp                (THREAD_SIZE - 2*sizeof(unsigned long))
@@ -423,15 +375,6 @@ unsigned long get_wchan(struct task_struct *p)
 	sp = p->thread.sp;
 	if (!stack_page || sp < stack_page || sp > top_esp+stack_page)
 		return 0;
-
-	/* L4Linux has a different layout in switch_to(), but
-	 *  the only difference is that we push a return
-	 *  address after ebp. So we simply adjust the esp to
-	 *  reflect that. And we leave the different name for
-	 *  esp to catch direct usage of thread data. */
-
-	sp += 4;/* add 4 to remove return address */
-
 	/* include/asm-i386/system.h:switch_to() pushes bp last. */
 	bp = *(unsigned long *) sp;
 	do {

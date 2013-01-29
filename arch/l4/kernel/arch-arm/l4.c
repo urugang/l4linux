@@ -10,6 +10,8 @@
 #include <asm/mach/irq.h>
 #include <asm/mach/time.h>
 
+#include <asm/setup.h>
+
 #include <asm/l4lxapi/irq.h>
 #include <asm/api/config.h>
 #include <asm/generic/irq.h>
@@ -25,6 +27,7 @@ static void __init l4x_mach_map_io(void)
 
 static void __init l4x_mach_fixup(struct tag *tags, char **cmdline, struct meminfo *mi)
 {
+	*cmdline = boot_command_line;
 }
 
 #ifdef CONFIG_DEBUG_LL
@@ -122,12 +125,28 @@ static void __init l4x_setup_outer_cache(void)
 }
 #endif
 
+static struct {
+	struct tag_header hdr1;
+	struct tag_core   core;
+	struct tag_header hdr2;
+	struct tag_mem32  mem;
+	struct tag_header hdr3;
+} l4x_atag __initdata = {
+	{ tag_size(tag_core), ATAG_CORE },
+	{ 1, PAGE_SIZE, 0xff },
+	{ tag_size(tag_mem32), ATAG_MEM },
+	{ 0 },
+	{ 0, ATAG_NONE }
+};
+
 static void __init l4x_mach_init(void)
 {
+	l4x_atag.mem.start = PAGE_SIZE;
+	l4x_atag.mem.size  = 0xbf000000 - PAGE_SIZE;
+
 #ifdef CONFIG_OUTER_CACHE
 	l4x_setup_outer_cache();
 #endif
-
 
 	l4x_arm_devices_init();
 }
@@ -143,8 +162,11 @@ struct sys_timer l4x_mach_timer = {
 	.init		= l4x_timer_init,
 };
 
+extern struct smp_operations l4x_smp_ops;
+
 MACHINE_START(L4, "L4")
-	.atag_offset    = 0,
+	.atag_offset    = (unsigned long)&l4x_atag - PAGE_OFFSET,
+	.smp		= smp_ops(l4x_smp_ops),
 	.fixup		= l4x_mach_fixup,
 	.map_io		= l4x_mach_map_io,
 	.init_irq	= l4x_mach_init_irq,

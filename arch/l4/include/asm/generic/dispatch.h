@@ -19,7 +19,6 @@
 void l4x_idle(void);
 void l4x_suspend_user(struct task_struct *p, int cpu);
 void l4x_wakeup_idler(int cpu);
-void l4x_setup_user_dispatcher_after_fork(struct task_struct *p);
 asmlinkage void l4x_user_dispatcher(void);
 #else
 int l4x_vcpu_handle_kernel_pf(unsigned long pfa, unsigned long ip, int wr);

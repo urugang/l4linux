@@ -14,12 +14,12 @@ int l4x_deliver_signal(int exception_nr, int errcode)
 	info.si_signo = SIGSEGV;
 	info.si_errno = 0;
 	info.si_code  = SEGV_MAPERR;
-	info.si_addr  = (void __user *)L4X_THREAD_REGSP(&current->thread)->ip;
+	info.si_addr  = (void __user *)task_pt_regs(current)->ip;
 
 	force_sig_info(SIGSEGV, &info, current);
 
 	if (signal_pending(current)) {
-		do_signal(L4X_THREAD_REGSP(&current->thread));
+		do_signal(task_pt_regs(current));
 		return 1;
 	}
 
@@ -33,12 +33,12 @@ int l4x_deliver_signal(int exception_nr, int errcode)
 	info.si_signo = SIGSEGV;
 	info.si_errno = 0;
 	info.si_code  = SEGV_MAPERR;
-	info.si_addr  = (void __user *)L4X_THREAD_REGSP(&current->thread)->ARM_pc;
+	info.si_addr  = (void __user *)task_pt_regs(current)->ARM_pc;
 
 	force_sig_info(SIGSEGV, &info, current);
 
 	if (signal_pending(current)) {
-		do_signal(L4X_THREAD_REGSP(&current->thread), 0);
+		do_signal(task_pt_regs(current), 0);
 		return 1;
 	}
 

@@ -149,6 +149,11 @@ void __glue(_CACHE, _flush_kern_cache_all)(void)
 	l4_cache_dma_coherent_full();
 }
 
+void __glue(_CACHE, _flush_kern_cache_louis)(void)
+{
+	l4_cache_dma_coherent_full();
+}
+
 void __glue(_CACHE, _coherent_kern_range)(unsigned long start, unsigned long end)
 {
 	l4_cache_coherent(start, end);

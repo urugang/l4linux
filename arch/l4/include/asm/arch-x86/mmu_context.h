@@ -37,6 +37,12 @@ static inline void enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 			     struct task_struct *tsk)
 {
+#ifdef CONFIG_L4_VCPU
+	if (likely(prev != next)) {
+		l4_vcpu_state_t *vcpu = this_cpu_read(l4x_vcpu_ptr);
+		vcpu->user_task = next->context.task;
+	}
+#endif
 #ifdef __L4LINUX_DOES_NOT_SWITCH_CONTEXTS__
 	unsigned cpu = smp_processor_id();
 

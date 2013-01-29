@@ -7,7 +7,9 @@ obj-y		:= process.o sys_arm.o time.o traps.o stacktrace.o \
 		   ptrace.o entry.o dispatch.o mach_setup.o io.o elf.o \
 		   return_address.o head.o opcodes.o sched_clock.o
 
-obj-$(CONFIG_DEPRECATED_PARAM_STRUCT) += compat.o
+obj-$(CONFIG_ATAGS)		+= atags_parse.o
+obj-$(CONFIG_ATAGS_PROC)	+= atags_proc.o
+obj-$(CONFIG_DEPRECATED_PARAM_STRUCT) += atags_compat.o
 
 obj-$(CONFIG_CPU_IDLE)				+= cpuidle.o
 obj-$(CONFIG_SMP)				+= smp.o smp_tlb.o platsmp.o
@@ -43,6 +45,8 @@ sched_clock-y   := ../../../arm/kernel/sched_clock.o
 devtree-y       := ../../../arm/kernel/devtree.o
 topology-y      := ../../../arm/kernel/topology.o
 opcodes-y       := ../../../arm/kernel/opcodes.o
+atags_parse-y   := ../../../arm/kernel/atags_parse.o
+atags_proc-y    := ../../../arm/kernel/atags_proc.o
 
 KBUILD_CPPFLAGS	+= -I$(srctree)/arch/arm/kernel
 

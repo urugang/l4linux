@@ -10,26 +10,17 @@
 
 char * __init l4x_memory_setup(void)
 {
-	unsigned long mem_start, mem_size, isa_start, isa_size;
+	unsigned long mem_start, mem_size;
 	unsigned long textbegin = (unsigned long)&_stext;
 
-	l4x_setup_memory(boot_command_line, &mem_start, &mem_size,
-	                 &isa_start, &isa_size);
+	l4x_setup_memory(boot_command_line, &mem_start, &mem_size);
 
 	max_pfn_mapped = (mem_start + mem_size + ((1 << 12) - 1)) >> 12;
 
 	e820.nr_map = 0;
 
         /* minimum 2 pages required */
-	if (isa_size) {
-		e820_add_region(0, isa_start,
-		                E820_UNUSABLE);
-		e820_add_region(isa_start, isa_size, E820_RAM);
-		e820_add_region(isa_start + isa_size,
-		                textbegin - (isa_start + isa_size),
-		                E820_UNUSABLE);
-	} else
-		e820_add_region(0, textbegin, E820_RESERVED);
+	e820_add_region(0, textbegin, E820_RESERVED);
 
 	if ((unsigned long)&_end > mem_start)
 		printk("Uh, something looks strange.\n");

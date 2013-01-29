@@ -1,16 +1,11 @@
 #ifndef __ASM_L4__GENERIC__VCPU_H__
 #define __ASM_L4__GENERIC__VCPU_H__
 
-#include <linux/threads.h>
 #include <l4/sys/vcpu.h>
+#include <asm/percpu.h>
+#include <linux/percpu-defs.h>
 
-extern l4_vcpu_state_t *l4x_vcpu_states[NR_CPUS];
-
-static inline
-l4_vcpu_state_t *l4x_vcpu_state(int cpu)
-{
-	return l4x_vcpu_states[cpu];
-}
+DECLARE_PER_CPU(l4_vcpu_state_t *, l4x_vcpu_ptr);
 
 #ifdef CONFIG_L4_VCPU
 
@@ -25,7 +20,7 @@ l4_vcpu_state_t *l4x_vcpu_state(int cpu)
 
 void l4x_vcpu_handle_irq(l4_vcpu_state_t *t, struct pt_regs *regs);
 void l4x_vcpu_handle_ipi(struct pt_regs *regs);
-asmlinkage void l4x_vcpu_entry(void);
+void l4x_vcpu_entry(l4_vcpu_state_t *vcpu);
 
 static inline void l4x_vcpu_init(l4_vcpu_state_t *v)
 {

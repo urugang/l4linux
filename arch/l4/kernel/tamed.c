@@ -366,8 +366,12 @@ EXPORT_SYMBOL(l4x_global_sti);
 #ifdef CONFIG_L4_VCPU
 void l4x_global_halt(void)
 {
-	l4vcpu_halt(l4x_vcpu_state_current(), l4x_utcb_current(),
-	            do_vcpu_irq, l4x_srv_setup_recv_wrap);
+	l4vcpu_wait_for_event(l4x_vcpu_state_current(), l4x_utcb_current(),
+	                      do_vcpu_irq, l4x_srv_setup_recv_wrap);
+#ifdef CONFIG_X86
+	// on x86, interrupts are enabled after hlt
+	l4x_global_sti();
+#endif
 }
 EXPORT_SYMBOL(l4x_global_halt);
 

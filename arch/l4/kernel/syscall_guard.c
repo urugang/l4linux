@@ -64,9 +64,9 @@ int l4x_syscall_guard(struct task_struct *p, int sysnr)
 	LOG_printf("%s: Syscall%d was forbidden for %s(%d) at %p\n",
 	           __func__, sysnr, p->comm, p->pid,
 #ifdef ARCH_arm
-		   (void *)L4X_THREAD_REGSP(&p->thread)->ARM_pc
+		   (void *)task_pt_regs(p)->ARM_pc
 #else
-	           (void *)L4X_THREAD_REGSP(&p->thread)->ip
+	           (void *)task_pt_regs(p)->ip
 #endif
 		   );
 

@@ -18,6 +18,7 @@
 #include <asm/pgalloc.h>		/* pgd_*(), ...			*/
 #include <asm/kmemcheck.h>		/* kmemcheck_*(), ...		*/
 #include <asm/fixmap.h>			/* VSYSCALL_START		*/
+#include <asm/rcu.h>			/* exception_enter(), ...	*/
 
 /*
  * Page fault error code bits:
@@ -1011,13 +1012,24 @@ static int fault_in_kernel_space(unsigned long address)
 }
 #endif
 
+static inline bool smap_violation(int error_code, struct pt_regs *regs)
+{
+	if (error_code & PF_USER)
+		return false;
+
+	if (!user_mode_vm(regs) && (regs->flags & X86_EFLAGS_AC))
+		return false;
+
+	return true;
+}
+
 /*
  * This routine handles page faults.  It determines the address,
  * and the problem, and then passes it off to one of the appropriate
  * routines.
  */
-dotraplinkage int __kprobes
-l4x_do_page_fault(unsigned long __address, struct pt_regs *regs, unsigned long error_code)
+static int __kprobes
+__do_page_fault(unsigned long __address, struct pt_regs *regs, unsigned long error_code)
 {
 	struct vm_area_struct *vma;
 	struct task_struct *tsk;
@@ -1105,6 +1117,12 @@ l4x_do_page_fault(unsigned long __address, struct pt_regs *regs, unsigned long e
 
 	if (unlikely(error_code & PF_RSVD))
 		pgtable_bad(regs, error_code, address);
+
+	if (static_cpu_has(X86_FEATURE_SMAP)) {
+		if (unlikely(smap_violation(error_code, regs))) {
+			return bad_area_nosemaphore(regs, error_code, address);
+		}
+	}
 
 	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, address);
 
@@ -1212,6 +1230,7 @@ good_area:
 			/* Clear FAULT_FLAG_ALLOW_RETRY to avoid any risk
 			 * of starvation. */
 			flags &= ~FAULT_FLAG_ALLOW_RETRY;
+			flags |= FAULT_FLAG_TRIED;
 			goto retry;
 		}
 	}
@@ -1220,4 +1239,14 @@ good_area:
 
 	up_read(&mm->mmap_sem);
 	return 0;
+}
+
+dotraplinkage int __kprobes
+l4x_do_page_fault(unsigned long __address, struct pt_regs *regs, unsigned long error_code)
+{
+	int r;
+	exception_enter(regs);
+	r = __do_page_fault(__address, regs, error_code);
+	exception_exit(regs);
+	return r;
 }
