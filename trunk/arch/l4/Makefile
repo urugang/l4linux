@@ -405,7 +405,7 @@ arch/l4/include/asm/orig-arch:
 
 include/generated/mach-types.h: $(srctree)/arch/arm/tools/gen-mach-types $(srctree)/arch/arm/tools/mach-types
 	$(Q)cp $(srctree)/arch/arm/tools/mach-types arch/l4/include/asm/mach-types.list
-	$(Q)echo "l4	MACH_L4	L4	9999" >> arch/l4/include/asm/mach-types.list
+	$(Q)echo -e "\nl4	MACH_L4	L4	9999" >> arch/l4/include/asm/mach-types.list
 	$(Q)$(AWK) -f $< arch/l4/include/asm/mach-types.list > $@ || { rm -f $@; /bin/false; }
 	$(Q)rm -f arch/l4/include/asm/mach-types.list
 
