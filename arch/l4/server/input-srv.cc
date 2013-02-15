@@ -26,6 +26,8 @@ public:
 	void trigger() const { _irq.trigger(); }
 	L4::Cap<L4::Kobject> rcv_cap() { return l4x_srv_rcv_cap(); }
 
+	void reset_event_buffer() { _evbuf.reset(); }
+
 private:
 	L4Re::Util::Event_buffer _evbuf;
 };

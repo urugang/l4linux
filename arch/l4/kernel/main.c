@@ -351,10 +351,14 @@ static void l4x_virt_to_phys_show(void)
 {
 	int i;
 	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
-		printk("v = %08lx  p = %08lx   sz = %zx\n",
-		       (unsigned long)l4x_phys_virt_addrs[i].virt,
-		       l4x_phys_virt_addrs[i].phys,
-		       l4x_phys_virt_addrs[i].size);
+		if (l4x_phys_virt_addrs[i].virt
+		    || l4x_phys_virt_addrs[i].phys
+		    || l4x_phys_virt_addrs[i].size)
+			l4x_printf("v2p: %d: v = %08lx  p = %08lx   sz = %zx\n",
+			           i,
+			           (unsigned long)l4x_phys_virt_addrs[i].virt,
+			           l4x_phys_virt_addrs[i].phys,
+			           l4x_phys_virt_addrs[i].size);
 	}
 }
 
