@@ -7,21 +7,18 @@
 
 typedef struct {
 #ifdef CONFIG_CPU_HAS_ASID
-	unsigned int id;
-	raw_spinlock_t id_lock;
+	u64 id;
 #endif
-	unsigned int kvm_seq;
+	unsigned int vmalloc_seq;
 
 	l4_cap_idx_t task;
 	enum l4x_unmap_mode_enum l4x_unmap_mode;
 } mm_context_t;
 
 #ifdef CONFIG_CPU_HAS_ASID
-#define ASID(mm)	((mm)->context.id & 255)
-
-/* init_mm.context.id_lock should be initialized. */
-#define INIT_MM_CONTEXT(name)                                                 \
-	.context.id_lock    = __RAW_SPIN_LOCK_UNLOCKED(name.context.id_lock),
+#define ASID_BITS	8
+#define ASID_MASK	((~0ULL) << ASID_BITS)
+#define ASID(mm)	((mm)->context.id & ~ASID_MASK)
 #else
 #define ASID(mm)	(0)
 #endif

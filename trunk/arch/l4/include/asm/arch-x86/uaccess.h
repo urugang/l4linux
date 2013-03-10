@@ -330,17 +330,6 @@ unsigned long __must_check __clear_user(void __user *mem, unsigned long len);
 	(x) = (__force __typeof__(*(ptr)))__gue_val;			\
 } while (0)
 
-//l4/#ifdef CONFIG_X86_WP_WORKS_OK
-#ifdef TAKE_THE_OTHER_FOR_L4
-
-#define put_user_try		uaccess_try
-#define put_user_catch(err)	uaccess_catch(err)
-
-#define put_user_ex(x, ptr)						\
-	__put_user_size_ex((__typeof__(*(ptr)))(x), (ptr), sizeof(*(ptr)))
-
-#else /* !CONFIG_X86_WP_WORKS_OK */
-
 #define put_user_try		do {		\
 	int __uaccess_err = 0;
 
@@ -351,8 +340,6 @@ unsigned long __must_check __clear_user(void __user *mem, unsigned long len);
 #define put_user_ex(x, ptr)	do {		\
 	__uaccess_err |= __put_user(x, ptr);	\
 } while (0)
-
-#endif /* CONFIG_X86_WP_WORKS_OK */
 
 extern unsigned long
 copy_from_user_nmi(void *to, const void __user *from, unsigned long n);

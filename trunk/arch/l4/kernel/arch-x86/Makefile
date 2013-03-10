@@ -48,6 +48,7 @@ obj-$(CONFIG_OF)			+= devicetree.o
 obj-$(CONFIG_UPROBES)			+= uprobes.o
 
 obj-$(CONFIG_PERF_EVENTS)		+= perf_regs.o
+obj-$(CONFIG_X86_TSC)			+= trace_clock.o
 
 ###
 # 64 bit specific files
@@ -94,6 +95,7 @@ x8664_ksyms_64-y += $(b)/x8664_ksyms_64.o
 vsyscall_emu_64-y += $(b)/vsyscall_emu_64.o
 nmi-y           += $(b)/nmi.o
 perf_regs-y     += $(b)/perf_regs.o
+trace_clock-y   += $(b)/trace_clock.o
 
 # we have our own versions of destroy_context and init_new_context,
 # so rename the original one

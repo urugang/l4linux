@@ -256,7 +256,7 @@ void write_pci_config(u8 bus, u8 slot, u8 func, u8 offset, u32 val)
 }
 
 #ifdef CONFIG_X86
-char * __devinit  pcibios_setup(char *str)
+char * pcibios_setup(char *str)
 {
 	return str;
 }
@@ -271,7 +271,7 @@ void pcibios_disable_device(struct pci_dev *dev)
  *  Called after each bus is probed, but before its children
  *  are examined.
  */
-void __devinit  pcibios_fixup_bus(struct pci_bus *b)
+void pcibios_fixup_bus(struct pci_bus *b)
 {
 	pci_read_bridge_bases(b);
 }

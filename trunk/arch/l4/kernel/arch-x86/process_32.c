@@ -135,8 +135,7 @@ void release_thread(struct task_struct *dead_task)
 }
 
 int copy_thread(unsigned long clone_flags, unsigned long sp,
-	unsigned long arg,
-	struct task_struct *p, struct pt_regs *regs)
+	unsigned long arg, struct task_struct *p)
 {
 	struct pt_regs *childregs = task_pt_regs(p);
 	struct task_struct *tsk;
@@ -145,7 +144,7 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 	if (0)
 	printk("%s %d: clone_flags=%lx sp=%lx arg=%lx p=%p regs=%p\n",
 	       __func__, __LINE__, clone_flags, sp,
-	       arg, p, regs);
+	       arg, p, childregs);
 
 
 	p->thread.sp = (unsigned long) childregs;
@@ -157,7 +156,7 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 
 	l4x_stack_set(p->stack, l4_utcb());
 
-	if (unlikely(!regs)) {
+	if (unlikely(p->flags & PF_KTHREAD)) {
 		/* kernel thread */
 		memset(childregs, 0, sizeof(struct pt_regs));
 		p->thread.ip = (unsigned long) ret_from_kernel_thread;
@@ -175,12 +174,13 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 		memset(p->thread.ptrace_bps, 0, sizeof(p->thread.ptrace_bps));
 		return 0;
 	}
-	*childregs = *regs;
+	*childregs = *current_pt_regs();
 	childregs->ax = 0;
-	childregs->sp = sp;
+	if (sp)
+		childregs->sp = sp;
 
 	p->thread.ip = (unsigned long) ret_from_fork;
-	task_user_gs(p) = get_user_gs(regs);
+	task_user_gs(p) = get_user_gs(current_pt_regs());
 
 	p->fpu_counter = 0;
 	p->thread.io_bitmap_ptr = NULL;

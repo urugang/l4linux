@@ -10,6 +10,10 @@
 #include <linux/stringify.h>
 #include <linux/kernel.h>
 
+#ifdef CONFIG_L4
+#include <asm/generic/smp.h>
+#endif
+
 #define CPUID_ID	0
 #define CPUID_CACHETYPE	1
 #define CPUID_TCM	2
@@ -30,6 +34,19 @@
 #define CPUID_EXT_ISAR3	"c2, 3"
 #define CPUID_EXT_ISAR4	"c2, 4"
 #define CPUID_EXT_ISAR5	"c2, 5"
+
+#define MPIDR_SMP_BITMASK (0x3 << 30)
+#define MPIDR_SMP_VALUE (0x2 << 30)
+
+#define MPIDR_MT_BITMASK (0x1 << 24)
+
+#define MPIDR_HWID_BITMASK 0xFFFFFF
+
+#define MPIDR_LEVEL_BITS 8
+#define MPIDR_LEVEL_MASK ((1 << MPIDR_LEVEL_BITS) - 1)
+
+#define MPIDR_AFFINITY_LEVEL(mpidr, level) \
+	((mpidr >> (MPIDR_LEVEL_BITS * level)) & MPIDR_LEVEL_MASK)
 
 extern unsigned int processor_id;
 
@@ -79,7 +96,11 @@ static inline unsigned int __attribute_const__ read_cpuid_tcmstatus(void)
 
 static inline unsigned int __attribute_const__ read_cpuid_mpidr(void)
 {
-	return 0; //l4x: just 0 might not be smart enough... //read_cpuid(CPUID_MPIDR);
+#ifndef CONFIG_L4
+	return read_cpuid(CPUID_MPIDR);
+#else
+	return (1U << 31) | l4x_cpu_physmap_get_id(smp_processor_id());
+#endif
 }
 
 /*
@@ -92,7 +113,10 @@ static inline unsigned int __attribute_const__ read_cpuid_mpidr(void)
 #else
 static inline int cpu_is_xsc3(void)
 {
-	if ((read_cpuid_id() & 0xffffe000) == 0x69056000)
+	unsigned int id;
+	id = read_cpuid_id() & 0xffffe000;
+	/* It covers both Intel ID and Marvell ID */
+	if ((id == 0x69056000) || (id == 0x56056000))
 		return 1;
 
 	return 0;

@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/l4 3.7.0-l4 Kernel Configuration
+# Linux/l4 3.8.0-l4 Kernel Configuration
 #
 
 #
@@ -90,6 +90,7 @@ CONFIG_NEED_MACH_MEMORY_H=y
 CONFIG_GENERIC_BUG=y
 CONFIG_DEFCONFIG_LIST="/lib/modules/$UNAME_RELEASE/.config"
 CONFIG_HAVE_IRQ_WORK=y
+CONFIG_BUILDTIME_EXTABLE_SORT=y
 
 #
 # General setup
@@ -215,10 +216,10 @@ CONFIG_HAVE_CLK=y
 CONFIG_HAVE_DMA_API_DEBUG=y
 CONFIG_HAVE_ARCH_JUMP_LABEL=y
 CONFIG_ARCH_WANT_IPC_PARSE_VERSION=y
-CONFIG_GENERIC_KERNEL_THREAD=y
-CONFIG_GENERIC_KERNEL_EXECVE=y
+CONFIG_HAVE_ARCH_SECCOMP_FILTER=y
 CONFIG_HAVE_MOD_ARCH_SPECIFIC=y
 CONFIG_MODULES_USE_ELF_REL=y
+CONFIG_CLONE_BACKWARDS=y
 
 #
 # GCOV-based kernel profiling
@@ -244,6 +245,7 @@ CONFIG_LBDAF=y
 #
 # CONFIG_PARTITION_ADVANCED is not set
 CONFIG_MSDOS_PARTITION=y
+CONFIG_EFI_PARTITION=y
 
 #
 # IO Schedulers
@@ -280,7 +282,6 @@ CONFIG_ARCH_L4=y
 # CONFIG_ARCH_EBSA110 is not set
 # CONFIG_ARCH_EP93XX is not set
 # CONFIG_ARCH_FOOTBRIDGE is not set
-# CONFIG_ARCH_MXC is not set
 # CONFIG_ARCH_MXS is not set
 # CONFIG_ARCH_NETX is not set
 # CONFIG_ARCH_H720X is not set
@@ -315,12 +316,12 @@ CONFIG_ARCH_L4=y
 # CONFIG_PLAT_SPEAR is not set
 # CONFIG_ARCH_DAVINCI is not set
 # CONFIG_ARCH_OMAP is not set
-# CONFIG_ARCH_VT8500 is not set
-# CONFIG_ARCH_ZYNQ is not set
+# CONFIG_ARCH_VT8500_SINGLE is not set
 CONFIG_MACH_L4=y
 CONFIG_L4_ARM_BUILD_FOR_V5=y
 # CONFIG_L4_ARM_BUILD_FOR_V6K is not set
 # CONFIG_L4_ARM_BUILD_FOR_V7 is not set
+# CONFIG_ARCH_VT8500 is not set
 
 #
 # Processor Type
@@ -576,17 +577,13 @@ CONFIG_EXTRA_FIRMWARE=""
 #
 # Bus devices
 #
-# CONFIG_OMAP_OCP2SCP is not set
 # CONFIG_CONNECTOR is not set
 # CONFIG_MTD is not set
 # CONFIG_PARPORT is not set
 CONFIG_BLK_DEV=y
 # CONFIG_BLK_DEV_COW_COMMON is not set
 # CONFIG_BLK_DEV_LOOP is not set
-
-#
-# DRBD disabled because PROC_FS, INET or CONNECTOR not selected
-#
+# CONFIG_BLK_DEV_DRBD is not set
 # CONFIG_BLK_DEV_NBD is not set
 CONFIG_BLK_DEV_RAM=y
 CONFIG_BLK_DEV_RAM_COUNT=16
@@ -699,7 +696,7 @@ CONFIG_SERIAL_CORE_CONSOLE=y
 # CONFIG_SERIAL_TIMBERDALE is not set
 # CONFIG_SERIAL_ALTERA_JTAGUART is not set
 # CONFIG_SERIAL_ALTERA_UART is not set
-# CONFIG_SERIAL_XILINX_PS_UART is not set
+# CONFIG_SERIAL_ARC is not set
 # CONFIG_TTY_PRINTK is not set
 # CONFIG_HVC_DCC is not set
 # CONFIG_IPMI_HANDLER is not set
@@ -726,10 +723,12 @@ CONFIG_HW_RANDOM=m
 #
 # PTP clock support
 #
+# CONFIG_PTP_1588_CLOCK is not set
 
 #
-# Enable Device Drivers -> PPS to see the PTP clock options.
+# Enable PHYLIB and NETWORK_PHY_TIMESTAMPING to see the additional clocks.
 #
+# CONFIG_PTP_1588_CLOCK_PCH is not set
 CONFIG_ARCH_HAVE_CUSTOM_GPIO_H=y
 # CONFIG_W1 is not set
 # CONFIG_POWER_SUPPLY is not set
@@ -755,6 +754,7 @@ CONFIG_BCMA_POSSIBLE=y
 #
 # CONFIG_MFD_CORE is not set
 # CONFIG_MFD_SM501 is not set
+# CONFIG_MFD_TI_AM335X_TSCADC is not set
 # CONFIG_HTC_PASIC3 is not set
 # CONFIG_MFD_TMIO is not set
 # CONFIG_MFD_T7L66XB is not set
@@ -874,6 +874,7 @@ CONFIG_IOMMU_SUPPORT=y
 # CONFIG_MEMORY is not set
 # CONFIG_IIO is not set
 # CONFIG_PWM is not set
+# CONFIG_IPACK_BUS is not set
 
 #
 # File systems
@@ -952,6 +953,7 @@ CONFIG_CRAMFS=y
 # CONFIG_PSTORE is not set
 # CONFIG_SYSV_FS is not set
 # CONFIG_UFS_FS is not set
+# CONFIG_F2FS_FS is not set
 CONFIG_NETWORK_FILESYSTEMS=y
 # CONFIG_NFS_FS is not set
 # CONFIG_NFSD is not set
@@ -1171,6 +1173,7 @@ CONFIG_CRYPTO_HW=y
 CONFIG_BITREVERSE=y
 CONFIG_GENERIC_PCI_IOMAP=y
 CONFIG_GENERIC_IO=y
+CONFIG_PERCPU_RWSEM=y
 # CONFIG_CRC_CCITT is not set
 # CONFIG_CRC16 is not set
 # CONFIG_CRC_T10DIF is not set

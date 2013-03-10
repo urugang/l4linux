@@ -1300,7 +1300,7 @@ do_refresh_sleep_write(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR(refresh_sleep, 0600,
                    do_refresh_sleep_read, do_refresh_sleep_write);
 
-static int __devinit l4fb_probe(struct platform_device *dev)
+static int l4fb_probe(struct platform_device *dev)
 {
 	struct fb_info *info;
 	struct l4fb_screen *screen = container_of(dev, struct l4fb_screen, platform_device);

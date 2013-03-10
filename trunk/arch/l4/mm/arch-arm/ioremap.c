@@ -16,6 +16,21 @@
 #include <asm/mach/map.h>
 #include "mm.h"
 
+
+void __check_vmalloc_seq(struct mm_struct *mm)
+{
+	unsigned int seq;
+
+	do {
+		seq = init_mm.context.vmalloc_seq;
+		memcpy(pgd_offset(mm, VMALLOC_START),
+		       pgd_offset_k(VMALLOC_START),
+		       sizeof(pgd_t) * (pgd_index(VMALLOC_END) -
+					pgd_index(VMALLOC_START)));
+		mm->context.vmalloc_seq = seq;
+	} while (seq != init_mm.context.vmalloc_seq);
+}
+
 /*
  * Used by ioremap() and iounmap() code to mark (super)section-mapped
  * I/O regions in vm_struct->flags field.

@@ -37,7 +37,6 @@ ifeq ($(CONFIG_X86_32),y)
 	lib-y += checksum.o
         lib-y += $(b)/strstr_32.o
         lib-y += $(b)/string_32.o
-	lib-y += $(b)/cmpxchg.o
 ifneq ($(CONFIG_X86_CMPXCHG64),y)
         lib-y += cmpxchg8b_emu.o $(b)/atomic64_386_32.o
 endif

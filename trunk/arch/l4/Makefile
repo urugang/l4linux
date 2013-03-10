@@ -154,9 +154,10 @@ cfi-sections := $(call as-instr,.cfi_sections .debug_frame,-DCONFIG_AS_CFI_SECTI
 # does binutils support specific instructions?
 asinstr := $(call as-instr,fxsaveq (%rax),-DCONFIG_AS_FXSAVEQ=1)
 avx_instr := $(call as-instr,vxorps %ymm0$(comma)%ymm1$(comma)%ymm2,-DCONFIG_AS_AVX=1)
+avx2_instr :=$(call as-instr,vpbroadcastb %xmm0$(comma)%ymm1,-DCONFIG_AS_AVX2=1)
 
-KBUILD_AFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections) $(asinstr) $(avx_instr)
-KBUILD_CFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections) $(asinstr) $(avx_instr)
+KBUILD_AFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections) $(asinstr) $(avx_instr) $(avx2_instr)
+KBUILD_CFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections) $(asinstr) $(avx_instr) $(avx2_instr)
 
 LDFLAGS := -m elf_$(UTS_MACHINE)
 
@@ -462,12 +463,15 @@ chkl4conf:
 # regparm: gcc may call memset from our libs, so obey calling convention
 #          this should probably be fixed
 
+# M486 M586 M586TSC M586MMX: cmpxchg64 emulation uses cli
+
 DIS_OPTS-x86-32 := HPET_TIMER
 DIS_OPTS-arm-32 := PERF_EVENTS ARM_PATCH_PHYS_VIRT HIGHMEM X86_X32
 DIS_OPTS := HIGHMEM4G HIGHMEM64G PCI_GOANY PCI_GOBIOS \
             X86_MCE X86_MCE MTRR PARAVIRT KEXEC MCA SOFTWARE_SUSPEND APM \
 	    CPU_FREQ VM86 X86_DS X86_PTRACE_BTS HT_IRQ DMI \
 	    TRANSPARENT_HUGEPAGE COMPACTION X86_PAE ACPI X86_SMAP \
+	    M486 M586 M586TSC M586MMX \
 	    $(DIS_OPTS-$(BASEARCH)-$(BITS))
 ENA_OPTS := $(ENA_OPTS-$(BASEARCH))
 

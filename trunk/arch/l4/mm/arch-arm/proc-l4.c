@@ -34,7 +34,7 @@ extern void          l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte
 static inline void l4x_cpu_set_pte_ext(pte_t *pteptr, pte_t pteval,
                                        unsigned int ext)
 {
-	if ((pte_val(*pteptr) & (L_PTE_PRESENT | L_PTE_MAPPED)) == (L_PTE_PRESENT | L_PTE_MAPPED)) {
+	if (pte_present(*pteptr)) {
 		if (pteval == __pte(0))
 			l4x_pte_clear(NULL, 0, *pteptr);
 		else
@@ -128,7 +128,7 @@ void __glue(_CACHE, _flush_user_cache_range)(unsigned long start, unsigned long 
 
 	for (start &= PAGE_MASK; start < end; start += PAGE_SIZE) {
 		pte_t *ptep = lookup_pte(pgd, start);
-		if (ptep && pte_present(*ptep) && pte_mapped(*ptep)) {
+		if (ptep && pte_present(*ptep)) {
 			unsigned long k = pte_pfn(*ptep) << PAGE_SHIFT;
 			unsigned long e = k + PAGE_SIZE;
 			l4_cache_flush_data(k, e);
@@ -174,7 +174,7 @@ int __glue(_CACHE, _coherent_user_range)(unsigned long start, unsigned long end)
 
 	for (start &= PAGE_MASK; start < end; start += PAGE_SIZE) {
 		pte_t *ptep = lookup_pte(pgd, start);
-		if (ptep && pte_present(*ptep) && pte_mapped(*ptep)) {
+		if (ptep && pte_present(*ptep)) {
 			unsigned long k = pte_pfn(*ptep) << PAGE_SHIFT;
 			unsigned long e = k + PAGE_SIZE;
 			l4_cache_coherent(k, e);
