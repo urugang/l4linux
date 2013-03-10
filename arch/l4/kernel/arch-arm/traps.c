@@ -597,9 +597,10 @@ asmlinkage int arm_syscall(int no, struct pt_regs *regs)
 		if (tls_emu)
 			return 0;
 		if (has_tls_reg) {
-			// remove this sometime later
-			asm ("mcr p15, 0, %0, c13, c0, 2"
+#ifndef CONFIG_L4
+			asm ("mcr p15, 0, %0, c13, c0, 3"
 				: : "r" (regs->ARM_r0));
+#endif
 		} else {
 			/*
 			 * User space must never try to access this directly.

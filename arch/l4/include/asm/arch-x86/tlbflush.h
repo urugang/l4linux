@@ -59,10 +59,7 @@ static inline void __flush_tlb_all(void)
 static inline void __flush_tlb_one(unsigned long addr)
 {
 	l4x_update_mapping(addr);
-	if (cpu_has_invlpg)
 		__flush_tlb_single(addr);
-	else
-		__flush_tlb();
 }
 
 #define TLB_FLUSH_ALL	-1UL
@@ -118,7 +115,7 @@ static inline void flush_tlb_mm_range(struct mm_struct *mm,
 static inline void native_flush_tlb_others(const struct cpumask *cpumask,
 					   struct mm_struct *mm,
 					   unsigned long start,
-					   unsigned long va)
+					   unsigned long end)
 {
 }
 

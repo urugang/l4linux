@@ -64,7 +64,7 @@ extern void          l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte
 static inline void __l4x_set_pte(struct mm_struct *mm, unsigned long addr,
                                  pte_t *pteptr, pte_t pteval)
 {
-	if ((pte_val(*pteptr) & (_PAGE_PRESENT | _PAGE_MAPPED)) == (_PAGE_PRESENT | _PAGE_MAPPED))
+	if (pte_val(*pteptr) & _PAGE_PRESENT)
 		pteval.pte_low = l4x_set_pte(mm, addr, *pteptr, pteval);
 	*pteptr = pteval;
 }
@@ -82,7 +82,7 @@ static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 
 static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 {
-	if ((pte_val(*ptep) & (_PAGE_PRESENT | _PAGE_MAPPED)) == (_PAGE_PRESENT | _PAGE_MAPPED))
+	if (pte_val(*ptep) & _PAGE_PRESENT)
 		l4x_pte_clear(mm, addr, *ptep);
 	ptep->pte_low = 0;
 }

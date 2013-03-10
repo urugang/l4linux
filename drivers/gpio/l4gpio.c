@@ -148,8 +148,8 @@ static int l4gpio_to_irq(struct gpio_chip *gc, unsigned offset)
 	return L4XV_FN_i(l4vbus_gpio_to_irq(vbus, chip->dh, offset));
 }
 
-static __devinit int add_chip(unsigned gpio, l4io_device_handle_t dh,
-                              struct platform_device *pdev)
+static int add_chip(unsigned gpio, l4io_device_handle_t dh,
+                    struct platform_device *pdev)
 {
 	int ret;
 	struct l4gpio_gpio *chip;
@@ -185,7 +185,7 @@ free_chip:
 	return ret;
 }
 
-static __devinit int l4gpio_probe(struct platform_device *pdev)
+static int l4gpio_probe(struct platform_device *pdev)
 {
 	l4io_device_handle_t dh;
 	l4io_device_t dev;

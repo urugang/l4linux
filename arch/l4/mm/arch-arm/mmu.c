@@ -285,7 +285,7 @@ static struct mem_type mem_types[] = {
 	},
 	[MT_MEMORY_SO] = {
 		.prot_pte  = L_PTE_PRESENT | L_PTE_YOUNG | L_PTE_DIRTY |
-				L_PTE_MT_UNCACHED,
+				L_PTE_MT_UNCACHED | L_PTE_XN,
 		.prot_l1   = PMD_TYPE_TABLE,
 		.prot_sect = PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_SECT_S |
 				PMD_SECT_UNCACHED | PMD_SECT_XN,
@@ -490,7 +490,7 @@ static void __init build_mem_type_table(void)
 #endif
 
 	for (i = 0; i < 16; i++) {
-		unsigned long v = pgprot_val(protection_map[i]);
+		pteval_t v = pgprot_val(protection_map[i]);
 		protection_map[i] = __pgprot(v | user_pgprot);
 	}
 
@@ -882,9 +882,28 @@ static void __init pci_reserve_io(void)
 #define pci_reserve_io() do { } while (0)
 #endif
 
-//l4/static void * __initdata vmalloc_min =
-//l4/	(void *)(VMALLOC_END - (240 << 20) - VMALLOC_OFFSET);
+#ifdef CONFIG_DEBUG_LL
+void __init debug_ll_io_init(void)
+{
+	struct map_desc map;
+
+	debug_ll_addr(&map.pfn, &map.virtual);
+	if (!map.pfn || !map.virtual)
+		return;
+	map.pfn = __phys_to_pfn(map.pfn);
+	map.virtual &= PAGE_MASK;
+	map.length = PAGE_SIZE;
+	map.type = MT_DEVICE;
+	create_mapping(&map);
+}
+#endif
+
+#ifndef CONFIG_L4
+static void * __initdata vmalloc_min =
+	(void *)(VMALLOC_END - (240 << 20) - VMALLOC_OFFSET);
+#else
 void * __initdata vmalloc_min;
+#endif
 
 /*
  * vmalloc=size forces the vmalloc area to be exactly 'size'

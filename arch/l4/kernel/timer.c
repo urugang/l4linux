@@ -65,7 +65,7 @@ static void L4_CV timer_thread(void *data)
 		int r = 0;
 
 		if (l4_ipc_error(t, u) == L4_IPC_RETIMEOUT) {
-			if (l4_error(l4_irq_trigger_u(irq_cap, u)) != -1)
+			if (l4_ipc_error(l4_irq_trigger_u(irq_cap, u), u))
 				LOG_printf("IRQ timer trigger failed\n");
 
 			if (increment) {

@@ -326,14 +326,14 @@ __switch_to(struct task_struct *prev, struct task_struct *next)
 	return prev;
 }
 
-static inline void l4x_pte_add_access_and_mapped(pte_t *ptep)
+static inline void l4x_pte_add_access_flag(pte_t *ptep)
 {
-	ptep->pte |= (_PAGE_ACCESSED + _PAGE_MAPPED);
+	ptep->pte |= _PAGE_ACCESSED;
 }
 
-static inline void l4x_pte_add_access_mapped_and_dirty(pte_t *ptep)
+static inline void l4x_pte_add_access_and_dirty_flags(pte_t *ptep)
 {
-	ptep->pte |= (_PAGE_ACCESSED + _PAGE_DIRTY + _PAGE_MAPPED);
+	ptep->pte |= _PAGE_ACCESSED + _PAGE_DIRTY;
 }
 
 static inline

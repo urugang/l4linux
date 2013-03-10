@@ -35,11 +35,9 @@ void l4x_irq_set_type_at_icu(unsigned irq, unsigned type)
 
 int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 {
-#ifdef ARCH_x86
-	extern struct irq_chip l4x_irq_dev_chip;
-#endif
 	unsigned int irq = data->irq;
 	struct l4x_irq_desc_private *p;
+	struct irq_desc *desc = irq_to_desc(data->irq);
 
 	if (unlikely(irq >= NR_IRQS))
 		return -1;
@@ -52,33 +50,23 @@ int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 	switch (type & IRQF_TRIGGER_MASK) {
 		case IRQ_TYPE_EDGE_BOTH:
 			p->trigger = L4_IRQ_F_BOTH_EDGE;
-#ifdef ARCH_x86
-			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
-#endif
+			desc->handle_irq = handle_edge_irq;
 			break;
 		case IRQ_TYPE_EDGE_RISING:
 			p->trigger = L4_IRQ_F_POS_EDGE;
-#ifdef ARCH_x86
-			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
-#endif
+			desc->handle_irq = handle_edge_irq;
 			break;
 		case IRQ_TYPE_EDGE_FALLING:
 			p->trigger = L4_IRQ_F_NEG_EDGE;
-#ifdef ARCH_x86
-			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_edge_irq, "edge");
-#endif
+			desc->handle_irq = handle_edge_irq;
 			break;
 		case IRQ_TYPE_LEVEL_HIGH:
 			p->trigger = L4_IRQ_F_LEVEL_HIGH;
-#ifdef ARCH_x86
-			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
-#endif
+			desc->handle_irq = handle_fasteoi_irq;
 			break;
 		case IRQ_TYPE_LEVEL_LOW:
 			p->trigger = L4_IRQ_F_LEVEL_LOW;
-#ifdef ARCH_x86
-			irq_set_chip_and_handler_name(irq, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
-#endif
+			desc->handle_irq = handle_fasteoi_irq;
 			break;
 		default:
 			p->trigger = L4_IRQ_F_NONE;

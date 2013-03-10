@@ -48,7 +48,7 @@ static inline l4_umword_t l4x_parse_ptabs(struct task_struct *p,
 	if (ptep && (pte_present(*ptep))) {
 		if (!(address & 2)) {
 			/* read access */
-			l4x_pte_add_access_and_mapped(ptep);
+			l4x_pte_add_access_flag(ptep);
 			phy = pte_val(*ptep) & PAGE_MASK;
 
 			/* handle zero page specially */
@@ -61,7 +61,7 @@ static inline l4_umword_t l4x_parse_ptabs(struct task_struct *p,
 			/* write access */
 			if (pte_write(*ptep)) {
 				/* page present and writable */
-				l4x_pte_add_access_mapped_and_dirty(ptep);
+				l4x_pte_add_access_and_dirty_flags(ptep);
 				phy = pte_val(*ptep) & PAGE_MASK;
 
 				/* handle the zero page specially */

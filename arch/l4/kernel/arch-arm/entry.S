@@ -44,22 +44,6 @@ ENTRY(sys_call_table)
 #undef ABI
 #undef OBSOLETE
 
-sys_fork_wrapper:
-		add	r0, sp, #S_OFF
-		b	sys_fork
-ENDPROC(sys_fork_wrapper)
-
-sys_vfork_wrapper:
-		add	r0, sp, #S_OFF
-		b	sys_vfork
-ENDPROC(sys_vfork_wrapper)
-
-sys_clone_wrapper:
-		add	ip, sp, #S_OFF
-		str	ip, [sp, #4]
-		b	sys_clone
-ENDPROC(sys_clone_wrapper)
-
 sys_sigreturn_wrapper_orig:
 		add	r0, sp, #S_OFF
 		mov	why, #0		@ prevent syscall restart handling

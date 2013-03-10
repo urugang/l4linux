@@ -269,16 +269,12 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #ifndef CONFIG_L4_VCPU
 	per_cpu(l4x_current_ti, smp_processor_id())
 	  = (struct thread_info *)((unsigned long)next->stack & ~(THREAD_SIZE - 1));
-	BUILD_BUG_ON(ARRAY_SIZE(t->user_thread_ids) <= NR_CPUS);
+	BUILD_BUG_ON(ARRAY_SIZE(next->thread.user_thread_ids) <= NR_CPUS);
 #endif /* VCPU */
 
 #ifdef CONFIG_L4_ARM_UPAGE_TLS
 	*(unsigned long *)(upage_addr + UPAGE_USER_TLS_OFFSET) = task_thread_info(next)->tp_value;
 #endif
-	if (has_tls_reg)
-		// remove this sometime later...
-		asm volatile("mcr p15, 0, %0, c13, c0, 2"
-		             : : "r" (task_thread_info(next)->tp_value));
 
 #if defined(CONFIG_SMP) && !defined(CONFIG_L4_VCPU)
 	next->thread.user_thread_id = next->thread.user_thread_ids[smp_processor_id()];
@@ -302,14 +298,14 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #endif /* VCPU */
 }
 
-static inline void l4x_pte_add_access_and_mapped(pte_t *ptep)
+static inline void l4x_pte_add_access_flag(pte_t *ptep)
 {
-	pte_val(*ptep) |= (L_PTE_YOUNG + L_PTE_MAPPED);
+	pte_val(*ptep) |= L_PTE_YOUNG;
 }
 
-static inline void l4x_pte_add_access_mapped_and_dirty(pte_t *ptep)
+static inline void l4x_pte_add_access_and_dirty_flags(pte_t *ptep)
 {
-	pte_val(*ptep) |= (L_PTE_YOUNG + L_PTE_DIRTY + L_PTE_MAPPED);
+	pte_val(*ptep) |= L_PTE_YOUNG + L_PTE_DIRTY;
 }
 
 static inline

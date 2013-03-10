@@ -1964,7 +1964,12 @@ static long l4x_blink(int state)
 
 static L4_CV void __init cpu0_startup(void *data)
 {
+#ifdef CONFIG_X86_64
+	register unsigned long rsp asm("rsp");
+	struct thread_info *ti = (struct thread_info *)((rsp & ~(THREAD_SIZE - 1)) + KERNEL_STACK_OFFSET);
+#else
 	struct thread_info *ti = current_thread_info();
+#endif
 	l4_cap_idx_t cpu0id = l4x_cpu_thread_get_cap(0);
 
 	ti->cpu = 0;
@@ -2467,20 +2472,10 @@ long ptregs_##name(void)                                        \
 
 #ifdef CONFIG_X86_32
 PTREGSCALL1(iopl, unsigned int)
-PTREGSCALL0(fork)
-PTREGSCALL0(vfork)
-PTREGSCALL2(sigaltstack, const stack_t __user *, stack_t __user *)
 PTREGSCALL0(sigreturn)
 PTREGSCALL0(rt_sigreturn)
 PTREGSCALL2(vm86, unsigned long, unsigned long)
 PTREGSCALL1(vm86old, struct vm86_struct __user *)
-
-long ptregs_clone(void)
-{
-	struct pt_regs *r = task_pt_regs(current);
-	return sys_clone(r->bx, r->cx, (void __user *)r->dx,
-	                 (void __user *)r->di, r);
-}
 #endif
 
 #ifdef CONFIG_X86_32

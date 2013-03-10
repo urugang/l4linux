@@ -65,51 +65,26 @@ static void l4x_flush_page(struct mm_struct *mm,
 #endif
 
 	/* do the real flush */
-	if (mm && !l4_is_invalid_cap(mm->context.task)) {
-		L4XV_V(f);
-		if (!mm->context.task)
-			l4x_printf("%s: Ups, task == 0\n", __func__);
+	if (mm && !l4_is_invalid_cap(mm->context.task) && mm->context.task) {
 		/* Direct flush in the child, use virtual address in the
 		 * child address space */
-		L4XV_L(f);
-		tag = l4_task_unmap(mm->context.task,
-		                    l4_fpage(vaddr & PAGE_MASK, size, flush_rights),
-		                    L4_FP_ALL_SPACES);
-		L4XV_U(f);
+		tag = L4XV_FN(l4_msgtag_t,
+		              l4_task_unmap(mm->context.task,
+		                           l4_fpage(vaddr & PAGE_MASK, size,
+		                                    flush_rights),
+		                           L4_FP_ALL_SPACES));
 	} else {
-		L4XV_V(f);
 		/* Flush all pages in all childs using the 'physical'
 		 * address known in the Linux server */
-		L4XV_L(f);
-		tag = l4_task_unmap(L4RE_THIS_TASK_CAP,
-			            l4_fpage(address & PAGE_MASK, size, flush_rights),
-			            L4_FP_OTHER_SPACES);
-		L4XV_U(f);
+		tag = L4XV_FN(l4_msgtag_t,
+		              l4_task_unmap(L4RE_THIS_TASK_CAP,
+			                    l4_fpage(address & PAGE_MASK, size,
+		                                     flush_rights),
+			                    L4_FP_OTHER_SPACES));
 	}
 	if (l4_error(tag))
 		l4x_printf("l4_task_unmap error %ld\n", l4_error(tag));
 }
-
-#ifdef ARCH_arm
-#define _PAGE_MAPPED L_PTE_MAPPED
-#define PF ""
-#else
-#define PF "l"
-#endif
-
-#define check_pte_mapped(old, newval, txt)			\
-do {								\
-       if (pte_mapped(old) && !pte_mapped(newval)) {		\
-		printk("set_pte: " txt" old mapped, "		\
-		       "new one not: "				\
-		       "old=%" PF "x new=%" PF "x addr=%lx\n",	\
-		       pte_val(old), pte_val(newval), addr);	\
-		WARN_ON(1);					\
-		enter_kdebug("set_pte");			\
-		newval = __pte(pte_val(newval) | _PAGE_MAPPED); \
-       }							\
-} while (0)
-
 
 unsigned long l4x_set_pte(struct mm_struct *mm,
                           unsigned long addr,
@@ -128,10 +103,7 @@ unsigned long l4x_set_pte(struct mm_struct *mm,
 
 	/* old was present && new not -> flush */
 	int flush_rights = L4_FPAGE_RWX;
-#if 0
-	if ((pte_val(old) & PAGE_MASK) != (pte_val(pteval) & PAGE_MASK))
-		printk("spte %x->%x\n", pte_val(old), pte_val(pteval));
-#endif
+
 	if (pte_present(pteval)) {
 		/* new page is present,
 		 * now we have to find out what has changed */
@@ -140,18 +112,13 @@ unsigned long l4x_set_pte(struct mm_struct *mm,
 			/* physical page frame changed
 			 * || access attribute changed -> flush */
 			/* flush is the default */
-			//pteval.pte_low &= ~_PAGE_MAPPED;
-			pteval = __pte(pte_val(pteval) & ~_PAGE_MAPPED);
-
 		} else if ((pte_write(old) && !pte_write(pteval))
 		           || (pte_dirty(old) && !pte_dirty(pteval))) {
 			/* Protection changed from r/w to ro
 			 * or page now clean -> remap */
 			flush_rights = L4_FPAGE_W;
-			check_pte_mapped(old, pteval, "RW->RO");
 		} else {
 			/* nothing changed, simply return */
-			check_pte_mapped(old, pteval, "NoChg");
 			return pte_val(pteval);
 		}
 	}

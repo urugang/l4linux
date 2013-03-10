@@ -1,2 +1,1 @@
-include include/asm-generic/Kbuild.asm
 include arch/$(LINSRCARCH)/include/asm/Kbuild

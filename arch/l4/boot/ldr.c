@@ -113,7 +113,8 @@ int main(int argc, char **argv)
 		if (ph->p_vaddr != ph->p_paddr) {
 			printf("lxldr: vaddr vs paddr mismatch ["FMT"/"FMT"]\n",
 			       ph->p_vaddr, ph->p_paddr);
-			continue;
+			if (0) // x86-64 kernel has vaddr=0 for its init-section
+				continue;
 		}
 
 		if (ph->p_filesz < ph->p_memsz) {
