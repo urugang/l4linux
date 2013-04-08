@@ -7,6 +7,7 @@ menu "L4Linux configuration"
 # We're running on top of L4, always true
 config L4
 	def_bool y
+	select IRQ_EDGE_EOI_HANDLER
 
 # We're L4Linux, always true
 config L4_LINUX

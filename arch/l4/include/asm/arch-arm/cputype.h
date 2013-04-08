@@ -81,12 +81,30 @@ extern unsigned int processor_id;
  */
 static inline unsigned int __attribute_const__ read_cpuid_id(void)
 {
-	return 0x860f0001; //read_cpuid(CPUID_ID);
+#ifdef CONFIG_L4
+#if defined(CONFIG_L4_ARM_BUILD_FOR_V7)
+	return 0x410fc080;
+#elif defined(CONFIG_L4_ARM_BUILD_FOR_V6K)
+	return 0x410fb767;
+#else
+	return 0x41069265;
+#endif
+#else
+	read_cpuid(CPUID_ID);
+#endif
 }
 
 static inline unsigned int __attribute_const__ read_cpuid_cachetype(void)
 {
-	return 0x1c192992; //read_cpuid(CPUID_CACHETYPE);
+#ifdef CONFIG_L4
+#if defined(CONFIG_L4_ARM_BUILD_FOR_V7)
+	return 0x82048004;
+#else
+	return 0x01dd20d2;
+#endif
+#else
+	read_cpuid(CPUID_CACHETYPE);
+#endif
 }
 
 static inline unsigned int __attribute_const__ read_cpuid_tcmstatus(void)

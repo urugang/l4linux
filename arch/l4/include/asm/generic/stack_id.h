@@ -52,7 +52,11 @@ static inline l4_utcb_t *l4x_utcb_current(void)
 static inline
 l4_vcpu_state_t *l4x_vcpu_state_current(void)
 {
-	return this_cpu_read(l4x_vcpu_ptr);
+	l4_vcpu_state_t *v;
+	preempt_disable();
+	v = this_cpu_read(l4x_vcpu_ptr);
+	preempt_enable_no_resched();
+	return v;
 }
 #endif
 

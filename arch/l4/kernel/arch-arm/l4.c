@@ -40,7 +40,7 @@ void printascii(const char *buf)
 
 void __init l4x_setup_irq(unsigned int irq)
 {
-	irq_set_chip_and_handler(irq, &l4x_irq_dev_chip, handle_simple_irq);
+	irq_set_chip_and_handler(irq, &l4x_irq_dev_chip, handle_level_irq);
 	set_irq_flags(irq, IRQF_VALID);
 	l4x_alloc_irq_desc_data(irq);
 }

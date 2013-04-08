@@ -238,7 +238,7 @@ static int __get_cpu_architecture(void)
 
 		/* Revised CPUID format. Read the Memory Model Feature
 		 * Register 0 and check for VMSAv7 or PMSAv7 */
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 		asm("mrc	p15, 0, %0, c0, c1, 4"
 		    : "=r" (mmfr0));
 #else
