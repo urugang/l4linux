@@ -51,6 +51,7 @@
 
 #include <asm/generic/dispatch.h>
 #include <asm/generic/ferret.h>
+#include <asm/generic/ioremap.h>
 #include <asm/generic/kthreads.h>
 #include <asm/generic/memory.h>
 #include <asm/generic/setup.h>
@@ -71,6 +72,7 @@
 #include <asm/l4x/utcb.h>
 #include <asm/l4x/upage.h>
 #ifdef ARCH_arm
+#include <asm/cputype.h>
 #include <asm/l4x/dma.h>
 #endif
 
@@ -354,17 +356,22 @@ static void l4x_virt_to_phys_show(void)
 		if (l4x_phys_virt_addrs[i].virt
 		    || l4x_phys_virt_addrs[i].phys
 		    || l4x_phys_virt_addrs[i].size)
-			l4x_printf("v2p: %d: v = %08lx  p = %08lx   sz = %zx\n",
+			l4x_printf("v2p: %d: v:%08lx-%08lx p:%08lx-%08lx sz:%08zx\n",
 			           i,
 			           (unsigned long)l4x_phys_virt_addrs[i].virt,
+			           (unsigned long)l4x_phys_virt_addrs[i].virt + l4x_phys_virt_addrs[i].size,
 			           l4x_phys_virt_addrs[i].phys,
+			           l4x_phys_virt_addrs[i].phys + l4x_phys_virt_addrs[i].size,
 			           l4x_phys_virt_addrs[i].size);
 	}
+
+	l4x_ioremap_show();
 }
 
 unsigned long l4x_virt_to_phys(volatile void * address)
 {
 	int i;
+	unsigned long p;
 
 	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
 		if (l4x_phys_virt_addrs[i].size
@@ -374,6 +381,10 @@ unsigned long l4x_virt_to_phys(volatile void * address)
 			return (address - l4x_phys_virt_addrs[i].virt)
 			       + l4x_phys_virt_addrs[i].phys;
 	}
+
+	p = find_ioremap_entry_phys((unsigned long)address);
+	if (p)
+		return p;
 
 	/* Whitelist: */
 
@@ -392,6 +403,7 @@ EXPORT_SYMBOL(l4x_virt_to_phys);
 void *l4x_phys_to_virt(unsigned long address)
 {
 	int i;
+	unsigned long v;
 
 	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
 		if (l4x_phys_virt_addrs[i].size
@@ -402,6 +414,10 @@ void *l4x_phys_to_virt(unsigned long address)
 			       + l4x_phys_virt_addrs[i].virt;
 		}
 	}
+
+	v = find_ioremap_entry(address);
+	if (v)
+		return __va(v);
 
 	/* Whitelist: */
 #ifdef ARCH_x86
@@ -1069,7 +1085,7 @@ static void l4x_register_pointer_section(void *p_in_addr,
 /* Reserve some part of the virtual address space for vmalloc */
 static void __init l4x_reserve_vmalloc_space(void)
 {
-	unsigned long sz = (unsigned long)l4x_main_memory_start;
+	unsigned long sz;
 	unsigned flags   = L4RE_RM_SEARCH_ADDR;
 
 #if defined(CONFIG_X86_64)
@@ -1077,8 +1093,10 @@ static void __init l4x_reserve_vmalloc_space(void)
 	flags &= ~L4RE_RM_SEARCH_ADDR;
 	sz = VMALLOC_END - VMALLOC_START + 1;
 #elif defined(CONFIG_X86_32)
+	l4x_vmalloc_memory_start = (unsigned long)l4x_main_memory_start;
 	sz = __VMALLOC_RESERVE;
 #elif defined(CONFIG_ARM)
+	l4x_vmalloc_memory_start = (unsigned long)l4x_main_memory_start;
 	sz = VMALLOC_SIZE << 20;
 #else
 #error Check this for your architecture
@@ -1089,6 +1107,10 @@ static void __init l4x_reserve_vmalloc_space(void)
 		LOG_printf("l4x: Error reserving vmalloc memory area of %ldBytes!\n", sz);
 		l4x_exit_l4linux();
 	}
+
+	LOG_printf("l4x: vmalloc area: %08lx - %08lx\n",
+	           l4x_vmalloc_memory_start,
+	           l4x_vmalloc_memory_start + sz);
 }
 
 void __init l4x_setup_memory(char *cmdl,
@@ -1100,6 +1122,7 @@ void __init l4x_setup_memory(char *cmdl,
 	char *memtypestr;
 	void *a;
 	l4_addr_t memory_area_id = 0;
+	int virt_phys_alignment = L4_SUPERPAGESHIFT;
 	l4_uint32_t dm_flags = L4RE_MA_CONTINUOUS | L4RE_MA_PINNED;
 	int i;
 	unsigned long mem_chunk_sz[10];
@@ -1123,6 +1146,10 @@ void __init l4x_setup_memory(char *cmdl,
 				memstr++;
 			else
 				break;
+		}
+		if (num_mem_chunk == 0) {
+			LOG_printf("Invalid mem= configuration.\n");
+			l4x_exit_l4linux();
 		}
 	} else
 		mem_chunk_sz[num_mem_chunk++] = l4x_mainmem_size;
@@ -1190,11 +1217,26 @@ void __init l4x_setup_memory(char *cmdl,
 		l4x_exit_l4linux();
 	}
 
+	if (dm_flags & L4RE_MA_PINNED) {
+		l4_addr_t p;
+		l4_size_t ps;
+		if (!l4re_ds_phys(l4x_ds_mainmem[0], 0, &p, &ps)) {
+			p &= (1 << virt_phys_alignment) - 1;
+
+			memory_area_id &= ~((1 << virt_phys_alignment) - 1);
+			memory_area_id |= p;
+
+			LOG_printf("Adjusted memory start: %08lx\n",
+			           memory_area_id);
+		}
+	}
+
+
 	/* Get contiguous region in our virtual address space to put
 	 * the dataspaces in */
 	if (l4re_rm_reserve_area(&memory_area_id, l4x_mainmem_size,
 	                         L4RE_RM_SEARCH_ADDR,
-	                         L4_SUPERPAGESHIFT)) {
+	                         virt_phys_alignment)) {
 		LOG_printf("Error reserving memory area\n");
 		l4x_exit_l4linux();
 	}
@@ -2973,7 +3015,7 @@ static int l4x_handle_arm_exception(l4_exc_regs_t *exc)
 	op = *(unsigned long *)pc;
 
 	if ((op & 0xff000000) == 0xee000000) {
-		// always, mrc
+		// always, mrc, mcr
 		unsigned int reg;
 
 		op &= 0x00ffffff;
@@ -2982,16 +3024,25 @@ static int l4x_handle_arm_exception(l4_exc_regs_t *exc)
 		if ((op & 0x00ff0fff) == 0x00100f30) {
 			LOG_printf("Read Cache Type Register, to r%d\n", reg);
 			// 32kb i/d cache
-			l4x_arm_set_reg(exc, reg, 0x1c192992);
+			l4x_arm_set_reg(exc, reg, read_cpuid_cachetype());
 			return 0;
 		} else if ((op & 0x00ff0fff) == 0x100f10) {
 			// mrc     15, 0, xx, cr0, cr0, {0}
 			LOG_printf("Read ID code register, to r%d\n", reg);
-			l4x_arm_set_reg(exc, reg, 0x860f0001);
+			l4x_arm_set_reg(exc, reg, read_cpuid_id());
 			return 0;
 		} else if ((op & 0x00ff0fff) == 0x00100f91) {
 			// mrc     15, 0, xx, cr0, cr1, {4}
 			LOG_printf("Read memory model feature reg0 to r%d\n", reg);
+			l4x_arm_set_reg(exc, reg, 0);
+			return 0;
+		} else if ((op & 0x00ff0fff) == 0x00400f10) {
+			// mcr     15, 2, xx, cr0, cr0, 0
+			LOG_printf("Write of CSSELR\n");
+			return 0;
+		} else if ((op & 0x00ff0fff) == 0x00300f10) {
+			// mrc     15, 1, xx, cr0, cr0, {0}
+			LOG_printf("Read of CCSIDR to r%d\n", reg);
 			l4x_arm_set_reg(exc, reg, 0);
 			return 0;
 		} else if (   (op & 0x00000f00) == 0xa00

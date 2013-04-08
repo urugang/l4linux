@@ -3,6 +3,7 @@
 #endif
 
 #include <asm/generic/io.h>
+#include <asm/generic/log.h>
 #include <l4/sys/kdebug.h>
 
 #define MAX_IOREMAP_ENTRIES 30
@@ -31,10 +32,10 @@ static void init_ioremap_nocheck(void)
 	ioremap_table_initialized = 1;
 }
 
-static int set_ioremap_entry(unsigned long real_map_addr,
-                             unsigned long ioremap_addr,
-			     unsigned long phys_addr,
-			     unsigned long size)
+static void set_ioremap_entry(unsigned long real_map_addr,
+                              unsigned long ioremap_addr,
+                              unsigned long phys_addr,
+                              unsigned long size)
 {
 	int i;
 
@@ -54,13 +55,12 @@ static int set_ioremap_entry(unsigned long real_map_addr,
 			                                     phys_addr,
 			                                     size};
 			spin_unlock(&ioremap_lock);
-			return 0;
+			return;
 		}
 
 	spin_unlock(&ioremap_lock);
 	printk("no free entry in ioremaptable\n");
 	BUG();
-	return 1;
 }
 
 static int __lookup_ioremap_entry_phys(unsigned long phys_addr)
@@ -81,6 +81,24 @@ static int __lookup_ioremap_entry_phys(unsigned long phys_addr)
 	return i == MAX_IOREMAP_ENTRIES ? -1 : i;
 }
 
+static int __lookup_ioremap_entry_virt(unsigned long virt_addr)
+{
+	int i;
+
+	if (!ioremap_table_initialized)
+		return -1;
+
+	spin_lock(&ioremap_lock);
+
+	for (i = 0; i < MAX_IOREMAP_ENTRIES; i++)
+		if ((io_table[i].ioremap_addr <= virt_addr) &&
+		    io_table[i].ioremap_addr + io_table[i].size > virt_addr)
+			break;
+
+	spin_unlock(&ioremap_lock);
+	return i == MAX_IOREMAP_ENTRIES ? -1 : i;
+}
+
 unsigned long find_ioremap_entry(unsigned long phys_addr)
 {
 	int i;
@@ -90,12 +108,35 @@ unsigned long find_ioremap_entry(unsigned long phys_addr)
 	return io_table[i].ioremap_addr + (phys_addr - io_table[i].phys_addr);
 }
 
+unsigned long find_ioremap_entry_phys(unsigned long virt_addr)
+{
+	int i;
+	if ((i = __lookup_ioremap_entry_virt(virt_addr)) == -1)
+		return 0;
+
+	return io_table[i].phys_addr + (virt_addr - io_table[i].ioremap_addr);
+}
+
 static int remove_ioremap_entry(int idx)
 {
 	spin_lock(&ioremap_lock);
 	reset_ioremap_entry_nocheck(idx);
 	spin_unlock(&ioremap_lock);
 	return 0;
+}
+
+void l4x_ioremap_show(void)
+{
+	int i;
+
+	for (i = 0; i < MAX_IOREMAP_ENTRIES; i++)
+		if (io_table[i].real_map_addr)
+			l4x_printf("ioremap: v:%08lx-%08lx p:%08lx-%08lx sz:%08lx\n",
+			           (unsigned long)io_table[i].ioremap_addr,
+			           (unsigned long)io_table[i].ioremap_addr + io_table[i].size,
+			           io_table[i].phys_addr,
+			           io_table[i].phys_addr + io_table[i].size,
+			           io_table[i].size);
 }
 
 #ifdef CONFIG_L4
@@ -327,9 +368,6 @@ l4x_iounmap(volatile void __iomem *addr)
 	unsigned long size, ioremap_addr;
 	int i, idx;
 
-	if (addr <= high_memory)
-		return;
-
 	if ((idx = lookup_phys_entry((unsigned long)addr)) == -1) {
 		printk("%s: Error unmapping addr %p\n", __func__, addr);
 		return;
@@ -348,5 +386,6 @@ l4x_iounmap(volatile void __iomem *addr)
 
 	if (i == MAX_IOREMAP_ENTRIES
 	    && L4XV_FN_i(l4io_release_iomem(ioremap_addr, size)))
-		printk("iounmap: error calling l4io_release_mem_region, not freed");
+		pr_warn("%s: error calling l4io_release_mem_region, not freed",
+		        __func__);
 }

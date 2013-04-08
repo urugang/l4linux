@@ -6729,7 +6729,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 	pvclock_update_vm_gtod_copy(kvm);
 
 #ifdef CONFIG_L4
-	l4x_kvm_create_vm(kvm);
+	return l4x_kvm_create_vm(kvm);
 #endif
 
 	return 0;

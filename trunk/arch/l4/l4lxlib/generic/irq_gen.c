@@ -50,23 +50,23 @@ int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 	switch (type & IRQF_TRIGGER_MASK) {
 		case IRQ_TYPE_EDGE_BOTH:
 			p->trigger = L4_IRQ_F_BOTH_EDGE;
-			desc->handle_irq = handle_edge_irq;
+			desc->handle_irq = handle_edge_eoi_irq;
 			break;
 		case IRQ_TYPE_EDGE_RISING:
 			p->trigger = L4_IRQ_F_POS_EDGE;
-			desc->handle_irq = handle_edge_irq;
+			desc->handle_irq = handle_edge_eoi_irq;
 			break;
 		case IRQ_TYPE_EDGE_FALLING:
 			p->trigger = L4_IRQ_F_NEG_EDGE;
-			desc->handle_irq = handle_edge_irq;
+			desc->handle_irq = handle_edge_eoi_irq;
 			break;
 		case IRQ_TYPE_LEVEL_HIGH:
 			p->trigger = L4_IRQ_F_LEVEL_HIGH;
-			desc->handle_irq = handle_fasteoi_irq;
+			desc->handle_irq = handle_level_irq;
 			break;
 		case IRQ_TYPE_LEVEL_LOW:
 			p->trigger = L4_IRQ_F_LEVEL_LOW;
-			desc->handle_irq = handle_fasteoi_irq;
+			desc->handle_irq = handle_level_irq;
 			break;
 		default:
 			p->trigger = L4_IRQ_F_NONE;

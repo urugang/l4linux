@@ -350,13 +350,6 @@ __kuser_get_tls:				@ 0x0fe0
 	.word	0			@ 0xffff0ff0 software TLS value, then
 	.endr				@ pad up to __kuser_helper_version
 
-	.text
-	.global kuser_tls_user_access_code
-kuser_tls_user_access_code:
-	mrc	p15, 0, r0, c13, c0, 3    @ tls-reg
-	usr_ret lr
-	.previous
-
 __kuser_helper_version:				@ 0xffff0ffc
 	.word	((__kuser_helper_end - __kuser_helper_start) >> 5)
 

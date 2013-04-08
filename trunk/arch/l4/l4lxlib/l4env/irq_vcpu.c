@@ -7,6 +7,7 @@
 #include <linux/irq.h>
 
 #include <l4/sys/irq.h>
+#include <l4/sys/icu.h>
 #include <l4/sys/factory.h>
 
 #include <asm/api/config.h>
@@ -88,22 +89,24 @@ unsigned int l4lx_irq_dev_startup(struct irq_data *data)
 	p->irq_cap = l4x_have_irqcap(irq);
 	if (l4_is_invalid_cap(p->irq_cap)) {
 		/* No, get IRQ from IO service */
-		unsigned long irq_f;
-		local_irq_save(irq_f);
-		p->irq_cap = l4x_cap_alloc();
-		if (l4_is_invalid_cap(p->irq_cap)
-		    || l4io_request_irq(irq, p->irq_cap)) {
-			/* "reset" handler ... */
-			//irq_desc[irq].chip = &no_irq_type;
-			/* ... and bail out  */
-			LOG_printf("irq-startup: did not get irq %d\n", irq);
-			local_irq_restore(irq_f);
+		if (l4_is_invalid_cap(p->irq_cap = l4x_cap_alloc())) {
+			pr_err("l4x-irq: Failed to get IRQ cap\n");
 			return 0;
 		}
-		local_irq_restore(irq_f);
-	}
 
-	l4x_irq_set_type_at_icu(irq, p->trigger);
+		if (L4XV_FN_i(l4_error(l4_icu_set_mode(l4io_request_icu(),
+		                                       irq, p->trigger))) < 0) {
+			pr_err("l4x-irq: Failed to set type for IRQ %d\n", irq);
+			return 0;
+		}
+
+		if (L4XV_FN_i(l4io_request_irq(irq, p->irq_cap))) {
+			pr_err("l4x-irq: Did not get IRQ %d from IO service\n",
+			       irq);
+			WARN_ON(1);
+			return 0;
+		}
+	}
 
 	l4lx_irq_dev_enable(data);
 	return 1;
@@ -154,12 +157,12 @@ void l4lx_irq_dev_mask(struct irq_data *data)
 	dd_printk("%s: %u\n", __func__, data->irq);
 }
 
-void l4lx_irq_dev_unmask(struct irq_data *data)
+void l4lx_irq_dev_mask_ack(struct irq_data *data)
 {
 	dd_printk("%s: %u\n", __func__, data->irq);
 }
 
-void l4lx_irq_dev_eoi(struct irq_data *data)
+void l4lx_irq_dev_unmask(struct irq_data *data)
 {
 	struct l4x_irq_desc_private *p = irq_get_chip_data(data->irq);
 	unsigned long flags;
@@ -168,6 +171,11 @@ void l4lx_irq_dev_eoi(struct irq_data *data)
 	local_irq_save(flags);
 	l4_irq_unmask(p->irq_cap);
 	local_irq_restore(flags);
+}
+
+void l4lx_irq_dev_eoi(struct irq_data *data)
+{
+	l4lx_irq_dev_unmask(data);
 }
 
 #ifdef CONFIG_SMP

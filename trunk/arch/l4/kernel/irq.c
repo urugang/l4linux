@@ -71,6 +71,12 @@ l4_cap_idx_t l4x_have_irqcap(int irqnum)
 	return L4_INVALID_CAP;
 }
 
+int l4lx_irq_set_wake(struct irq_data *data, unsigned int on)
+{
+	/* Every IRQ is ok */
+	return 0;
+}
+
 struct irq_chip l4x_irq_dev_chip = {
 	.name                   = "L4-irq",
 	.irq_startup            = l4lx_irq_dev_startup,
@@ -79,9 +85,11 @@ struct irq_chip l4x_irq_dev_chip = {
 	.irq_disable            = l4lx_irq_dev_disable,
 	.irq_ack                = l4lx_irq_dev_ack,
 	.irq_mask               = l4lx_irq_dev_mask,
+	.irq_mask_ack           = l4lx_irq_dev_mask_ack,
 	.irq_unmask             = l4lx_irq_dev_unmask,
 	.irq_eoi                = l4lx_irq_dev_eoi,
 	.irq_set_type           = l4lx_irq_set_type,
+	.irq_set_wake           = l4lx_irq_set_wake,
 #ifdef CONFIG_L4_VCPU
 #ifdef CONFIG_SMP
 	.irq_set_affinity       = l4lx_irq_dev_set_affinity,

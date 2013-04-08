@@ -43,6 +43,7 @@ void l4lx_irq_dev_enable(struct irq_data *data);
 void l4lx_irq_dev_disable(struct irq_data *data);
 void l4lx_irq_dev_ack(struct irq_data *data);
 void l4lx_irq_dev_mask(struct irq_data *data);
+void l4lx_irq_dev_mask_ack(struct irq_data *data);
 void l4lx_irq_dev_unmask(struct irq_data *data);
 int l4lx_irq_dev_set_affinity(struct irq_data *data,
                               const struct cpumask *dest, bool force);

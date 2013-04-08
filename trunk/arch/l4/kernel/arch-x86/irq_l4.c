@@ -47,10 +47,7 @@ void __init l4x_init_IRQ(void)
 
 	for (i = 0; i < NR_IRQS; i++) {
 		l4x_alloc_irq_desc_data(i);
-		if (0)
-			irq_set_chip_and_handler_name(i, &l4x_irq_dev_chip, handle_edge_irq, "edge");
-		else
-			irq_set_chip_and_handler_name(i, &l4x_irq_dev_chip, handle_fasteoi_irq, "fasteoi");
+		irq_set_chip_and_handler_name(i, &l4x_irq_dev_chip, handle_edge_eoi_irq, "edge-eoi");
 	}
 
 	/* from native_init_IRQ() */

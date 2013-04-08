@@ -55,7 +55,9 @@ static inline l4_umword_t l4x_parse_ptabs(struct task_struct *p,
 			if (phy == 0)
 				phy = PAGE0_PAGE_ADDRESS;
 
-			*fp   = l4_fpage(phy, fpage_size, L4_FPAGE_RO);
+			*fp   = l4_fpage(phy, fpage_size,
+			                 pte_exec(*ptep)
+					  ? L4_FPAGE_RX : L4_FPAGE_RO);
 			*attr = l4x_map_page_attr_to_l4(*ptep);
 		} else {
 			/* write access */
@@ -69,7 +71,8 @@ static inline l4_umword_t l4x_parse_ptabs(struct task_struct *p,
 					phy = PAGE0_PAGE_ADDRESS;
 
 				*fp = l4_fpage(phy, fpage_size,
-				               L4_FPAGE_RW);
+				               pte_exec(*ptep)
+				                ? L4_FPAGE_RWX: L4_FPAGE_RW);
 				*attr = l4x_map_page_attr_to_l4(*ptep);
 			} else {
 				/* page present, but not writable
@@ -182,8 +185,14 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 		phy = l4x_parse_ptabs(p, pfa, &pferror, &fp, &attr);
 		if (phy == (l4_umword_t)(-EFAULT)) {
 			l4_umword_t pfe_old = pferror;
+			int ret;
+			unsigned long flags;
 
-			if (l4x_do_page_fault(pfa, regs, pferror)) {
+			local_irq_save(flags);
+			local_irq_enable();
+			ret = l4x_do_page_fault(pfa, regs, pferror);
+			local_irq_restore(flags);
+			if (ret) {
 				verbose_segfault(p, regs, pfa, ip, pferror);
 				return 1;
 			}
@@ -1135,9 +1144,6 @@ void l4x_vcpu_handle_irq(l4_vcpu_state_t *v, struct pt_regs *regs)
 #else
 		handle_IRQ(irq, regs);
 #endif
-#ifdef ARCH_arm
-		l4lx_irq_dev_eoi(irq_get_irq_data(irq));
-#endif
 	}
 	local_irq_restore(flags);
 }
@@ -1271,6 +1277,7 @@ l4x_vcpu_entry_kern(l4_vcpu_state_t *vcpu)
 
 	} else if (l4vcpu_is_page_fault_entry(vcpu)) {
 		vcpu_to_ptregs(vcpu, regsp);
+		WARN_ON(irqs_disabled());
 		l4x_do_page_fault(vcpu->r.pfa, regsp, vcpu->r.err);
 	} else {
 		int ret = l4x_vcpu_handle_kernel_exc(&vcpu->r);

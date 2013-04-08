@@ -822,12 +822,9 @@ static void __init kuser_get_tls_init(unsigned long vectors)
 	/*
 	 * vectors + 0xfe0 = __kuser_get_tls
 	 * vectors + 0xfe8 = hardware TLS instruction at 0xffff0fe8
-	 * L4: one instruction more, see asm
 	 */
-	if (tls_emu || has_tls_reg) {
-		extern char kuser_tls_user_access_code[];
-		memcpy((void *)vectors + 0xfe0, kuser_tls_user_access_code, 8);
-	}
+	if (tls_emu || has_tls_reg)
+		memcpy((void *)vectors + 0xfe0, (void *)vectors + 0xfe8, 4);
 }
 
 void __init early_trap_init(void *vectors_base)
