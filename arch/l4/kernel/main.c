@@ -506,9 +506,10 @@ L4_CV l4_utcb_t *l4_utcb_wrap(void)
 	return l4_utcb_direct();
 #elif defined(CONFIG_X86_32)
 	unsigned long v;
-	asm volatile ("mov %%fs, %0": "=r" (v));
+	asm ("mov %%fs, %0": "=r" (v));
 	if (v == 0x43 || v == 7) {
-		asm volatile("mov %%fs:0, %0" : "=r" (v));
+		/* also use input for proper insn ordering */
+		asm ("mov %%fs:0, %0" : "=r" (v) : "r" (v));
 		return (l4_utcb_t *)v;
 	}
 	return l4x_utcb_current();
