@@ -399,7 +399,11 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 
 	exception_enter(regs);
 
+#ifdef CONFIG_L4
+	dr6 = 0;
+#else
 	get_debugreg(dr6, 6);
+#endif
 
 	/* Filter out all the reserved bits which are preset to 1 */
 	dr6 &= ~DR6_RESERVED;
@@ -417,7 +421,9 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 		goto exit;
 
 	/* DR6 may or may not be cleared by the CPU */
+#ifndef CONFIG_L4
 	set_debugreg(0, 6);
+#endif
 
 	/*
 	 * The processor cleared BTF, so don't mark that we need it set.

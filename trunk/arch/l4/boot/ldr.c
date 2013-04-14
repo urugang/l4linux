@@ -33,6 +33,7 @@ L4_CV l4_utcb_t *l4_utcb_wrap(void)
 {
 	if (exchg.l4lx_utcb)
 		return exchg.l4lx_utcb();
+	l4_barrier();
 	return l4_utcb_direct();
 }
 

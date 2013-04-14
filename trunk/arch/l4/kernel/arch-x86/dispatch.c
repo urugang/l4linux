@@ -745,9 +745,11 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		return 0;
 	} else if (r_trapno(t, v) == 7) {
 		do_device_not_available(regs, -1);
+		l4x_pre_iret_work(regs, p, 0, 0);
 		return 0;
 	} else if (unlikely(r_trapno(t, v) == 1)) {
-		/* Singlestep */
+		do_debug(regs, 0);
+		l4x_pre_iret_work(regs, p, 0, 0);
 		return 0;
 	} else if (r_trapno(t, v) == 0xd) {
 #ifndef CONFIG_L4_VCPU
@@ -761,10 +763,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		if (l4x_kdebug_emulation(regs))
 			return 0; /* known and handled */
 		do_int3(regs, r_err(t, v));
-		if (signal_pending(p))
-			l4x_do_signal(regs, 0);
-		if (need_resched())
-			schedule();
+		l4x_pre_iret_work(regs, p, 0, 0);
 		return 0;
 	}
 
