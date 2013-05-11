@@ -118,7 +118,7 @@ L4_EXTERNAL_FUNC(l4re_rm_detach_srv);
 L4_EXTERNAL_FUNC(l4re_rm_reserve_area_srv);
 L4_EXTERNAL_FUNC(l4re_rm_free_area_srv);
 
-L4_EXTERNAL_FUNC(l4re_ma_alloc_srv);
+L4_EXTERNAL_FUNC(l4re_ma_alloc_align_srv);
 L4_EXTERNAL_FUNC(l4re_ma_free_srv);
 
 L4_EXTERNAL_FUNC(l4io_request_iomem);
@@ -837,6 +837,7 @@ static int l4x_forward_pf(l4_umword_t addr, l4_umword_t pc, int extra_write)
 	return 1;
 }
 
+#ifdef CONFIG_X86
 /*
  * We need to get the lowest virtual address and we can find out in the
  * KIP's memory descriptors. Fiasco-UX on system like Ubuntu set the minimum
@@ -987,6 +988,7 @@ static void l4x_map_below_mainmem(void)
 	LOG_printf("Done (%d entries).\n", map_count_all);
 	LOG_flush();
 }
+#endif /* X86 */
 
 static __init_refok void l4x_setup_upage(void)
 {
@@ -1122,7 +1124,7 @@ void __init l4x_setup_memory(char *cmdl,
 	char *memstr;
 	char *memtypestr;
 	void *a;
-	l4_addr_t memory_area_id = 0;
+	l4_addr_t memory_area_id = (l4_addr_t)&_text;
 	int virt_phys_alignment = L4_SUPERPAGESHIFT;
 	l4_uint32_t dm_flags = L4RE_MA_CONTINUOUS | L4RE_MA_PINNED;
 	int i;
@@ -1198,7 +1200,8 @@ void __init l4x_setup_memory(char *cmdl,
 			l4x_exit_l4linux();
 		}
 
-		if (l4re_ma_alloc(mem_chunk_sz[i], l4x_ds_mainmem[i], f)) {
+		if (l4re_ma_alloc_align(mem_chunk_sz[i], l4x_ds_mainmem[i],
+		                        f, virt_phys_alignment)) {
 			LOG_printf("%s: Can't get main memory of %ldkiB!\n",
 				   __func__, mem_chunk_sz[i] >> 10);
 			l4re_debug_obj_debug(l4re_env()->mem_alloc, 0);
@@ -1312,7 +1315,9 @@ void __init l4x_setup_memory(char *cmdl,
 	}
 #endif
 
+#ifdef CONFIG_X86
 	l4x_map_below_mainmem();
+#endif
 
 	// that happened with some version of ld...
 	if ((unsigned long)&_end < 0x100000)
@@ -1360,7 +1365,9 @@ static void setup_module_area(void)
 	l4_addr_t start = MODULES_VADDR;
 	if (l4re_rm_reserve_area(&start, MODULES_END - MODULES_VADDR,
 	                         0, PGDIR_SHIFT))
-		LOG_printf("Could not reserve module area, modules won't work!\n");
+		LOG_printf("Could not reserve module area %08lx-%08lx, "
+		           "modules won't work!\n",
+		           MODULES_VADDR, MODULES_END);
 }
 
 /* Sanity check for hard-coded values used in dispatch.c */
@@ -2103,10 +2110,15 @@ static int fprov_load_initrd(const char *filename,
  */
 void l4x_free_initrd_mem(void)
 {
+	int r;
+
+	if (!l4x_initrd_mem_start)
+		return;
+
 	printk("INITRD: Freeing memory.\n");
 	/* detach memory */
-	if (L4XV_FN_i(l4re_rm_detach((void *)l4x_initrd_mem_start)))
-		enter_kdebug("Error detaching from initrd mem!");
+	if ((r = L4XV_FN_i(l4re_rm_detach((void *)l4x_initrd_mem_start))))
+		pr_err("l4x: Error detaching from initrd mem (%d)!", r);
 }
 
 
