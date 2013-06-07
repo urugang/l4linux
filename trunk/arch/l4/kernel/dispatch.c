@@ -37,59 +37,73 @@ static inline l4_umword_t l4x_parse_ptabs(struct task_struct *p,
 					  l4_fpage_t *fp, unsigned long *attr)
 {
 	unsigned fpage_size = L4_LOG2_PAGESIZE;
+	spinlock_t *ptl;
 	l4_umword_t phy = (l4_umword_t)(-EFAULT);
-	pte_t *ptep = lookup_pte(p->mm->pgd, address);
+	pte_t *ptep = lookup_pte_lock(p->mm, address, &ptl);
 #ifdef CONFIG_HUGETLB_PAGE
 	struct vm_area_struct *vma = find_vma(p->mm, address);
 	if (vma && is_vm_hugetlb_page(vma))
 		fpage_size = L4_LOG2_SUPERPAGESIZE;
 #endif
 
-	if (ptep && (pte_present(*ptep))) {
-		if (!(address & 2)) {
-			/* read access */
-			l4x_pte_add_access_flag(ptep);
+	if (!ptep || !pte_present(*ptep))
+		goto not_present;
+
+	spin_lock(ptl);
+	if (unlikely(!pte_present(*ptep)))
+		goto not_present_locked;
+
+	if (!(address & 2)) {
+		/* read access */
+		l4x_pte_add_access_flag(ptep);
+		phy = pte_val(*ptep) & PAGE_MASK;
+
+		/* handle zero page specially */
+		if (phy == 0)
+			phy = PAGE0_PAGE_ADDRESS;
+
+		*fp   = l4_fpage(phy, fpage_size,
+		                 pte_exec(*ptep)
+		                  ? L4_FPAGE_RX : L4_FPAGE_RO);
+		*attr = l4x_map_page_attr_to_l4(*ptep);
+	} else {
+		/* write access */
+		if (pte_write(*ptep)) {
+			/* page present and writable */
+			l4x_pte_add_access_and_dirty_flags(ptep);
 			phy = pte_val(*ptep) & PAGE_MASK;
 
 			/* handle zero page specially */
 			if (phy == 0)
 				phy = PAGE0_PAGE_ADDRESS;
 
-			*fp   = l4_fpage(phy, fpage_size,
-			                 pte_exec(*ptep)
-					  ? L4_FPAGE_RX : L4_FPAGE_RO);
+			*fp = l4_fpage(phy, fpage_size,
+			               pte_exec(*ptep)
+			                ? L4_FPAGE_RWX: L4_FPAGE_RW);
 			*attr = l4x_map_page_attr_to_l4(*ptep);
 		} else {
-			/* write access */
-			if (pte_write(*ptep)) {
-				/* page present and writable */
-				l4x_pte_add_access_and_dirty_flags(ptep);
-				phy = pte_val(*ptep) & PAGE_MASK;
-
-				/* handle the zero page specially */
-				if (phy == 0)
-					phy = PAGE0_PAGE_ADDRESS;
-
-				*fp = l4_fpage(phy, fpage_size,
-				               pte_exec(*ptep)
-				                ? L4_FPAGE_RWX: L4_FPAGE_RW);
-				*attr = l4x_map_page_attr_to_l4(*ptep);
-			} else {
-				/* page present, but not writable
-				 * --> return error */
-				*pferror = PF_EUSER + PF_EWRITE +
-				           PF_EPROTECTION;
-			}
-		}
-	} else {
-		/* page and/or pgdir not present --> return error */
-		if ((address & 2))
+			/* page present, but not writable
+			 * --> return error */
 			*pferror = PF_EUSER + PF_EWRITE +
-				   PF_ENOTPRESENT;
-		else
-			*pferror = PF_EUSER + PF_EREAD +
-			           PF_ENOTPRESENT;
+			           PF_EPROTECTION;
+			fp->raw = 0;
+		}
 	}
+
+	spin_unlock(ptl);
+	return phy;
+
+not_present_locked:
+	spin_unlock(ptl);
+not_present:
+	/* page and/or pgdir not present --> return error */
+	if ((address & 2))
+		*pferror = PF_EUSER + PF_EWRITE +
+			   PF_ENOTPRESENT;
+	else
+		*pferror = PF_EUSER + PF_EREAD +
+		           PF_ENOTPRESENT;
+	fp->raw = 0;
 
 	return phy;
 }
@@ -99,7 +113,7 @@ static int l4x_no_page_found(struct task_struct *p,
                              l4_umword_t eip,
 			     l4_umword_t pfa)
 {
-	pte_t *ptep = lookup_pte(p->mm->pgd, pfa);
+	pte_t *ptep = lookup_pte(p->mm, pfa);
 
 	if (ptep && pte_present(*ptep) &&
 	    (pfa & 2) && !pte_write(*ptep)) {
@@ -207,7 +221,7 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 				}
 				phy = 0; /* reset phy */
 			} else if (phy > 0xffff0000) {
-				pte_t *ptep = lookup_pte(p->mm->pgd, pfa);
+				pte_t *ptep = lookup_pte(p->mm, pfa);
 				printk("%s: phy=%lx pfa=%lx pferror=%lx pte_val=%"
 #ifndef ARCH_arm
 				       "l"
@@ -251,7 +265,7 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 	/* page fault in upage ? */
 	} else if ((pfa & PAGE_MASK) == UPAGE_USER_ADDRESS && !(pfa & 2)) {
 		*d1 = l4_fpage(upage_addr, L4_LOG2_PAGESIZE,
-		               L4_FPAGE_RO).fpage;
+		               L4_FPAGE_RX).fpage;
 		*d0 = (*d0 & PAGE_MASK) | L4_ITEM_MAP;
 	} else {
 		printk("WARN: %s: Page-fault above task size: pfa=%lx pc=%lx\n",
@@ -433,7 +447,7 @@ static int l4x_hybrid_begin(struct task_struct *p,
 		tag = l4_task_map(p->mm->context.task,
 				  L4RE_THIS_TASK_CAP,
 				  l4_fpage((l4_umword_t)l4re_kip() &
-					  PAGE_MASK, L4_PAGESHIFT, L4_FPAGE_RO),
+					  PAGE_MASK, L4_PAGESHIFT, L4_FPAGE_RX),
 				  l4_map_control(L4X_USER_KIP_ADDR, 0, L4_MAP_ITEM_MAP));
 		if (l4_error(tag))
 			LOG_printf("Hybrid: Error mapping kip to task\n");
@@ -1195,7 +1209,10 @@ create_task:
 				l4lx_task_delete_task(c);
 				l4lx_task_number_free(c);
 			}
-		}
+		} else if (likely(p->mm)
+		           && (p->mm->context.task != (vcpu->user_task & ~0xff)))
+			vcpu->user_task = p->mm->context.task;
+
 
 		thread_struct_to_vcpu(vcpu, t);
 		vcpu->saved_state |= L4_VCPU_F_USER_MODE

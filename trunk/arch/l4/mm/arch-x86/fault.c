@@ -131,7 +131,7 @@ check_prefetch_opcode(struct pt_regs *regs, unsigned char *instr,
 static int
 is_prefetch(struct pt_regs *regs, unsigned long error_code, unsigned long addr)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned char *max_instr;
 	unsigned char *instr;
 	int prefetch = 0;
@@ -163,7 +163,7 @@ is_prefetch(struct pt_regs *regs, unsigned long error_code, unsigned long addr)
 	return prefetch;
 #else
 	return 0;
-#endif
+#endif /* L4 */
 }
 
 static void
@@ -262,7 +262,7 @@ void vmalloc_sync_all(void)
  *
  *   Handle a fault on the vmalloc or module mapping area
  */
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 static noinline __kprobes int vmalloc_fault(unsigned long address)
 {
 	unsigned long pgd_paddr;
@@ -293,7 +293,7 @@ static noinline __kprobes int vmalloc_fault(unsigned long address)
 
 	return 0;
 }
-#endif
+#endif /* L4 */
 
 /*
  * Did it hit the DOS screen memory VA from vm86 mode?
@@ -302,7 +302,7 @@ static inline void
 check_v8086_mode(struct pt_regs *regs, unsigned long address,
 		 struct task_struct *tsk)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned long bit;
 
 	if (!v8086_mode(regs))
@@ -311,7 +311,7 @@ check_v8086_mode(struct pt_regs *regs, unsigned long address,
 	bit = (address - 0xA0000) >> PAGE_SHIFT;
 	if (bit < 32)
 		tsk->thread.screen_bitmap |= 1 << bit;
-#endif
+#endif /* L4 */
 }
 
 static bool low_pfn(unsigned long pfn)
@@ -386,10 +386,12 @@ static noinline __kprobes int vmalloc_fault(unsigned long address)
 	if (pgd_none(*pgd_ref))
 		return -1;
 
-	if (pgd_none(*pgd))
+	if (pgd_none(*pgd)) {
 		set_pgd(pgd, *pgd_ref);
-	else
+		arch_flush_lazy_mmu_mode();
+	} else {
 		BUG_ON(pgd_page_vaddr(*pgd) != pgd_page_vaddr(*pgd_ref));
+	}
 
 	/*
 	 * Below here mismatches are bugs because these lower tables
@@ -777,8 +779,8 @@ __bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
 	if (is_f00f_bug(regs, address))
 		return 1;
 
-#ifdef NOT_FOR_L4
-	no_context(regs, error_code, address);
+#ifndef CONFIG_L4
+	no_context(regs, error_code, address, SIGSEGV, si_code);
 #else
 	return -1;
 #endif
@@ -899,7 +901,7 @@ mm_fault_error(struct pt_regs *regs, unsigned long error_code,
 	return 1;
 }
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 static int spurious_fault_check(unsigned long error_code, pte_t *pte)
 {
 	if ((error_code & PF_WRITE) && !pte_write(*pte))
@@ -954,14 +956,8 @@ spurious_fault(unsigned long error_code, unsigned long address)
 	if (pmd_large(*pmd))
 		return spurious_fault_check(error_code, (pte_t *) pmd);
 
-	/*
-	 * Note: don't use pte_present() here, since it returns true
-	 * if the _PAGE_PROTNONE bit is set.  However, this aliases the
-	 * _PAGE_GLOBAL bit, which for kernel pages give false positives
-	 * when CONFIG_DEBUG_PAGEALLOC is used.
-	 */
 	pte = pte_offset_kernel(pmd, address);
-	if (!(pte_flags(*pte) & _PAGE_PRESENT))
+	if (!pte_present(*pte))
 		return 0;
 
 	ret = spurious_fault_check(error_code, pte);
@@ -977,7 +973,7 @@ spurious_fault(unsigned long error_code, unsigned long address)
 
 	return ret;
 }
-#endif
+#endif /* L4 */
 
 int show_unhandled_signals = 1;
 
@@ -1002,12 +998,12 @@ access_error(unsigned long error_code, struct vm_area_struct *vma)
 	return 0;
 }
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 static int fault_in_kernel_space(unsigned long address)
 {
 	return address >= TASK_SIZE_MAX;
 }
-#endif
+#endif /* L4 */
 
 static inline bool smap_violation(int error_code, struct pt_regs *regs)
 {
@@ -1067,7 +1063,7 @@ __do_page_fault(unsigned long __address, struct pt_regs *regs, unsigned long err
 	 * (error_code & 4) == 0, and that the fault was not a
 	 * protection error (error_code & 9) == 0.
 	 */
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	if (unlikely(fault_in_kernel_space(address))) {
 		if (!(error_code & (PF_RSVD | PF_USER | PF_PROT))) {
 			if (vmalloc_fault(address) >= 0)
@@ -1092,7 +1088,7 @@ __do_page_fault(unsigned long __address, struct pt_regs *regs, unsigned long err
 
 		return;
 	}
-#endif
+#endif /* L4 */
 
 	/* kprobes don't want to hook the spurious faults: */
 	if (unlikely(notify_page_fault(regs)))

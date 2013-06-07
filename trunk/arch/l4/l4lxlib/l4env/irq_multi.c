@@ -223,9 +223,13 @@ unsigned int l4lx_irq_dev_startup(struct irq_data *data)
 	if (l4_is_invalid_cap(irq_caps[irq])) {
 		/* No, get IRQ from IO service */
 		irq_caps[irq] = l4x_cap_alloc();
-		if (l4_is_invalid_cap(irq_caps[irq])
-		    || l4io_request_irq(irq, irq_caps[irq])) {
+		if (l4_is_invalid_cap(irq_caps[irq])) {
+			LOG_printf("irq-startup: did not get cap\n");
+			return 0;
+		}
+		if (l4io_request_irq(irq, irq_caps[irq])) {
 			LOG_printf("irq-startup: did not get irq %d\n", irq);
+			l4x_cap_free(irq_caps[irq]);
 			return 0;
 		}
 	}
@@ -238,8 +242,10 @@ unsigned int l4lx_irq_dev_startup(struct irq_data *data)
 void l4lx_irq_dev_shutdown(struct irq_data *data)
 {
 	l4lx_irq_dev_disable(data);
-	if (l4_is_invalid_cap(l4x_have_irqcap(data->irq)))
+	if (l4_is_invalid_cap(l4x_have_irqcap(data->irq))) {
 		l4io_release_irq(data->irq, irq_caps[data->irq]);
+		l4x_cap_free(irq_caps[data->irq]);
+	}
 }
 
 void l4lx_irq_dev_enable(struct irq_data *data)

@@ -48,7 +48,9 @@ void leave_mm(int cpu)
 		BUG();
 	if (cpumask_test_cpu(cpu, mm_cpumask(active_mm))) {
 		cpumask_clear_cpu(cpu, mm_cpumask(active_mm));
-		//l4/load_cr3(swapper_pg_dir);
+#ifndef CONFIG_L4
+		load_cr3(swapper_pg_dir);
+#endif
 	}
 }
 EXPORT_SYMBOL_GPL(leave_mm);
@@ -335,7 +337,7 @@ static const struct file_operations fops_tlbflush = {
 	.llseek = default_llseek,
 };
 
-static int __cpuinit create_tlb_flushall_shift(void)
+static int __init create_tlb_flushall_shift(void)
 {
 	debugfs_create_file("tlb_flushall_shift", S_IRUSR | S_IWUSR,
 			    arch_debugfs_dir, NULL, &fops_tlbflush);

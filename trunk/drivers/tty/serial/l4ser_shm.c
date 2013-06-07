@@ -87,7 +87,7 @@ static void
 l4ser_shm_rx_chars(struct uart_port *port)
 {
 	struct l4ser_shm_uart_port *l4port = (struct l4ser_shm_uart_port *)port;
-	struct tty_struct *tty = port->state->port.tty;
+	struct tty_port *ttyport = &port->state->port;
 
 	struct chunk_head *chhead;
 	struct ring_chunk_head *rph;
@@ -113,11 +113,11 @@ l4ser_shm_rx_chars(struct uart_port *port)
 
 		port->icount.rx += rph->size;
 
-		tty_insert_flip_string(tty,
+		tty_insert_flip_string(ttyport,
 		                       (const unsigned char *)l4port->rx_ring_start + offs,
 		                       l);
 		if (l != rph->size)
-			tty_insert_flip_string(tty,
+			tty_insert_flip_string(ttyport,
 			                       (const unsigned char *)l4port->rx_ring_start,
 			                       rph->size - l);
 
@@ -129,7 +129,7 @@ l4ser_shm_rx_chars(struct uart_port *port)
 		rph->size = 0;
 
 	}
-	tty_flip_buffer_push(tty);
+	tty_flip_buffer_push(ttyport);
 
 	if (chhead->writer_blocked)
 		L4XV_FN_v(l4shmc_trigger(&l4port->tx_sig));

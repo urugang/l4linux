@@ -823,18 +823,17 @@ L4_CV static void input_event_put(l4re_event_t *event, void *data)
 {
 	struct l4fb_screen *screen = (struct l4fb_screen *)data;
 	struct input_event *e = (struct input_event *)event;
-	struct hlist_node *p;
 	struct l4fb_input_device *input = 0;
 
 	if (system_state != SYSTEM_RUNNING)
 		return;
 
-	hlist_for_each_entry(input, p, &screen->input[event->stream_id & INPUT_HASH_MASK], l) {
+	hlist_for_each_entry(input, &screen->input[event->stream_id & INPUT_HASH_MASK], l) {
 		if (input->id == event->stream_id)
 			break;
 	}
 
-	if (!p) {
+	if (!input) {
 		input = l4fb_new_input_device(screen, event->stream_id);
 		if (!input)
 			return;
@@ -1443,8 +1442,8 @@ static int l4fb_remove(struct platform_device *dev)
 
 		for (i = 0; i < (1UL << INPUT_HASH_BITS); ++i) {
 			struct l4fb_input_device *d;
-			struct hlist_node *p, *n;
-			hlist_for_each_entry_safe(d, p, n, &screen->input[i], l) {
+			struct hlist_node *n;
+			hlist_for_each_entry_safe(d, n, &screen->input[i], l) {
 				struct input_dev *idev = d->dev;
 				d->dev = 0;
 				input_unregister_device(idev);

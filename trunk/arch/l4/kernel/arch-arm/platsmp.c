@@ -14,7 +14,6 @@
 #include <linux/io.h>
 
 #include <mach/hardware.h>
-#include <asm/hardware/gic.h>
 #include <asm/mach-types.h>
 #include <asm/smp_scu.h>
 
@@ -33,13 +32,13 @@ static void __cpuinit write_pen_release(int val)
 {
 	pen_release = val;
 	smp_wmb();
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	__cpuc_flush_dcache_area((void *)&pen_release, sizeof(pen_release));
 	outer_clean_range(__pa(&pen_release), __pa(&pen_release + 1));
 #endif
 }
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 static void __iomem *scu_base_addr(void)
 {
 	if (machine_is_realview_eb_mp())

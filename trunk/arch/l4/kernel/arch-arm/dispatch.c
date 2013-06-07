@@ -312,14 +312,21 @@ static inline
 unsigned long l4x_map_page_attr_to_l4(pte_t pte)
 {
 	switch (pte_val(pte) & L_PTE_MT_MASK) {
-	case L_PTE_MT_UNCACHED:
-		return L4_FPAGE_UNCACHEABLE << 4;
-	case L_PTE_MT_BUFFERABLE:
-		return L4_FPAGE_BUFFERABLE << 4;
-	default:
-		/* Leave all others as they are L4-wise, i.e. we do not
-		 * handle the other types */
-		return 0;
+		case L_PTE_MT_UNCACHED:
+			return L4_FPAGE_UNCACHEABLE << 4;
+		case L_PTE_MT_BUFFERABLE:
+			return L4_FPAGE_BUFFERABLE << 4;
+		case L_PTE_MT_WRITEALLOC:
+			return L4_FPAGE_CACHEABLE << 4;
+		case L_PTE_MT_DEV_WC:
+		case L_PTE_MT_WRITETHROUGH:
+			if (0)
+				pr_info("%s: pte=%x\n", __func__, pte_val(pte));
+			return L4_FPAGE_BUFFERABLE << 4;
+		default:
+			if (0)
+				pr_info("%s: pte=%x\n", __func__, pte_val(pte));
+			return L4_FPAGE_CACHEABLE << 4;
 	};
 }
 

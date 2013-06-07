@@ -135,7 +135,7 @@ static int __init parse_lapic(char *arg)
 {
 	if (config_enabled(CONFIG_X86_32) && !arg)
 		force_enable_local_apic = 1;
-	else if (!strncmp(arg, "notscdeadline", 13))
+	else if (arg && !strncmp(arg, "notscdeadline", 13))
 		setup_clear_cpu_cap(X86_FEATURE_TSC_DEADLINE_TIMER);
 	return 0;
 }
@@ -236,7 +236,7 @@ static inline int lapic_is_integrated(void)
  */
 static int modern_apic(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	/* AMD systems use old APIC versions, so check the CPU */
 	if (boot_cpu_data.x86_vendor == X86_VENDOR_AMD &&
 	    boot_cpu_data.x86 >= 0xf)
@@ -324,7 +324,7 @@ int lapic_get_maxlvt(void)
  * Local APIC timer
  */
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 /* Clock divisor */
 #define APIC_DIVISOR 16
 #define TSC_DIVISOR  32
@@ -560,7 +560,7 @@ static DEFINE_PER_CPU(struct clock_event_device, lapic_events);
  */
 static void __cpuinit setup_APIC_timer(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	struct clock_event_device *levt = &__get_cpu_var(lapic_events);
 
 	if (this_cpu_has(X86_FEATURE_ARAT)) {
@@ -607,7 +607,7 @@ static void __cpuinit setup_APIC_timer(void)
 
 #define LAPIC_CAL_LOOPS		(HZ/10)
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 static __initdata int lapic_cal_loops = -1;
 static __initdata long lapic_cal_t1, lapic_cal_t2;
 static __initdata unsigned long long lapic_cal_tsc1, lapic_cal_tsc2;
@@ -618,7 +618,7 @@ static __initdata unsigned long lapic_cal_j1, lapic_cal_j2;
 /*
  * Temporary interrupt handler.
  */
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 static void __init lapic_cal_handler(struct clock_event_device *dev)
 {
 	unsigned long long tsc = 0;
@@ -852,7 +852,7 @@ static int __init calibrate_APIC_clock(void)
  */
 void __init setup_boot_APIC_clock(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	/*
 	 * The local apic timer can be disabled via the kernel
 	 * commandline or from the CPU detection code. Register the lapic
@@ -893,7 +893,7 @@ void __cpuinit setup_secondary_APIC_clock(void)
 	setup_APIC_timer();
 }
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 /*
  * The guts of the apic timer interrupt
  */
@@ -977,7 +977,7 @@ int setup_profiling_timer(unsigned int multiplier)
  */
 void clear_local_APIC(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	int maxlvt;
 	u32 v;
 
@@ -1050,7 +1050,7 @@ void clear_local_APIC(void)
  */
 void disable_local_APIC(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned int value;
 
 	/* APIC hasn't been mapped yet */
@@ -1091,7 +1091,7 @@ void disable_local_APIC(void)
  */
 void lapic_shutdown(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned long flags;
 
 	if (!cpu_has_apic && !apic_from_smp_config())
@@ -1118,7 +1118,7 @@ void lapic_shutdown(void)
  */
 int __init verify_local_APIC(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned int reg0, reg1;
 
 	/*
@@ -1179,7 +1179,7 @@ int __init verify_local_APIC(void)
  */
 void __init sync_Arb_IDs(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	/*
 	 * Unsupported on P4 - see Intel Dev. Manual Vol. 3, Ch. 8.6.1 And not
 	 * needed on AMD.
@@ -1203,7 +1203,7 @@ void __init sync_Arb_IDs(void)
  */
 void __init init_bsp_APIC(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned int value;
 
 	/*
@@ -1247,7 +1247,7 @@ void __init init_bsp_APIC(void)
 #endif
 }
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 static void __cpuinit lapic_setup_esr(void)
 {
 	unsigned int oldvalue, value, maxlvt;
@@ -1298,7 +1298,7 @@ static void __cpuinit lapic_setup_esr(void)
  */
 void __cpuinit setup_local_APIC(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	int cpu = smp_processor_id();
 	unsigned int value, queued;
 	int i, j, acked = 0;
@@ -1495,7 +1495,7 @@ void __cpuinit setup_local_APIC(void)
 
 void __cpuinit end_local_APIC_setup(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	lapic_setup_esr();
 
 #ifdef CONFIG_X86_32
@@ -1514,15 +1514,14 @@ void __cpuinit end_local_APIC_setup(void)
 
 void __init bsp_end_local_APIC_setup(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	end_local_APIC_setup();
 
 	/*
 	 * Now that local APIC setup is completed for BP, configure the fault
 	 * handling for interrupt remapping.
 	 */
-	if (irq_remapping_enabled)
-		irq_remap_enable_fault_handling();
+	irq_remap_enable_fault_handling();
 
 #endif
 }
@@ -1617,7 +1616,7 @@ int __init enable_IR(void)
 #ifdef CONFIG_X86_64
 void __init enable_IR_x2apic(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned long flags;
 	int ret, x2apic_enabled = 0;
 	int hardware_init_ret;
@@ -1959,7 +1958,7 @@ int __init APIC_init_uniprocessor(void)
  */
 void smp_spurious_interrupt(struct pt_regs *regs)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	u32 v;
 
 	irq_enter();
@@ -2306,8 +2305,7 @@ static int lapic_suspend(void)
 	local_irq_save(flags);
 	disable_local_APIC();
 
-	if (irq_remapping_enabled)
-		irq_remapping_disable();
+	irq_remapping_disable();
 
 	local_irq_restore(flags);
 	return 0;
@@ -2323,16 +2321,15 @@ static void lapic_resume(void)
 		return;
 
 	local_irq_save(flags);
-	if (irq_remapping_enabled) {
-		/*
-		 * IO-APIC and PIC have their own resume routines.
-		 * We just mask them here to make sure the interrupt
-		 * subsystem is completely quiet while we enable x2apic
-		 * and interrupt-remapping.
-		 */
-		mask_ioapic_entries();
-		legacy_pic->mask_all();
-	}
+
+	/*
+	 * IO-APIC and PIC have their own resume routines.
+	 * We just mask them here to make sure the interrupt
+	 * subsystem is completely quiet while we enable x2apic
+	 * and interrupt-remapping.
+	 */
+	mask_ioapic_entries();
+	legacy_pic->mask_all();
 
 	if (x2apic_mode)
 		enable_x2apic();
@@ -2375,8 +2372,7 @@ static void lapic_resume(void)
 	apic_write(APIC_ESR, 0);
 	apic_read(APIC_ESR);
 
-	if (irq_remapping_enabled)
-		irq_remapping_reenable(x2apic_mode);
+	irq_remapping_reenable(x2apic_mode);
 
 	local_irq_restore(flags);
 }

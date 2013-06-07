@@ -134,22 +134,8 @@ static inline int arch_spin_trylock(arch_spinlock_t *lock)
 
 static inline void arch_spin_unlock(arch_spinlock_t *lock)
 {
-	unsigned long tmp;
-	u32 slock;
-
 	smp_mb();
-
-	__asm__ __volatile__(
-"	mov	%1, #1\n"
-"1:	ldrex	%0, [%2]\n"
-"	uadd16	%0, %0, %1\n"
-"	strex	%1, %0, [%2]\n"
-"	teq	%1, #0\n"
-"	bne	1b"
-	: "=&r" (slock), "=&r" (tmp)
-	: "r" (&lock->slock)
-	: "cc");
-
+	lock->tickets.owner++;
 	dsb_sev();
 }
 
@@ -182,9 +168,9 @@ static inline void arch_write_lock(arch_rwlock_t *rw)
 "1:	ldrex	%0, [%1]\n"
 "	teq	%0, #0\n"
 	L4_REP_NOP_ASM(eq)
-#ifdef CONFIG_CPU_32v6K___NOT_FOR_L4
+#ifndef CONFIG_L4
 	WFE("ne")
-#endif
+#endif /* L4 */
 "	strexeq	%0, %2, [%1]\n"
 "	teq	%0, #0\n"
 "	bne	1b"
@@ -252,9 +238,9 @@ static inline void arch_read_lock(arch_rwlock_t *rw)
 "	adds	%0, %0, #1\n"
 "	strexpl	%1, %0, [%2]\n"
 	L4_REP_NOP_ASM(pl)
-#ifdef CONFIG_CPU_32v6K___NOT_FOR_L4
+#ifndef CONFIG_L4
 	WFE("mi")
-#endif
+#endif /* L4 */
 "	rsbpls	%0, %1, #0\n"
 "	bmi	1b"
 	: "=&r" (tmp), "=&r" (tmp2)

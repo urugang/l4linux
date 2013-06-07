@@ -80,17 +80,20 @@ int dma_needs_bounce(struct device *d, dma_addr_t a, size_t s)
 #ifdef CONFIG_OUTER_CACHE
 static void l4x_outer_cache_inv_range(unsigned long start, unsigned long end)
 {
-	l4_cache_l2_inv(start, end);
+	l4_cache_l2_inv((unsigned long)phys_to_virt(start),
+	                (unsigned long)phys_to_virt(end));
 }
 
 static void l4x_outer_cache_clean_range(unsigned long start, unsigned long end)
 {
-	l4_cache_l2_clean(start, end);
+	l4_cache_l2_clean((unsigned long)phys_to_virt(start),
+	                  (unsigned long)phys_to_virt(end));
 }
 
 static void l4x_outer_cache_flush_range(unsigned long start, unsigned long end)
 {
-	l4_cache_l2_flush(start, end);
+	l4_cache_l2_flush((unsigned long)phys_to_virt(start),
+	                  (unsigned long)phys_to_virt(end));
 }
 
 static void l4x_outer_cache_flush_all(void)
@@ -158,10 +161,6 @@ static inline void l4x_stop(char mode, const char *cmd)
 }
 
 
-struct sys_timer l4x_mach_timer = {
-	.init		= l4x_timer_init,
-};
-
 extern struct smp_operations l4x_smp_ops;
 
 MACHINE_START(L4, "L4")
@@ -170,7 +169,7 @@ MACHINE_START(L4, "L4")
 	.fixup		= l4x_mach_fixup,
 	.map_io		= l4x_mach_map_io,
 	.init_irq	= l4x_mach_init_irq,
-	.timer		= &l4x_mach_timer,
+	.init_time	= l4x_timer_init,
 	.init_machine	= l4x_mach_init,
 	.restart	= l4x_stop,
 MACHINE_END

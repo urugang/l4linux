@@ -12,6 +12,7 @@
 #include <asm/generic/tamed.h>
 #include <asm/generic/vmalloc.h>
 #include <asm/generic/log.h>
+#include <asm/generic/memory.h>
 
 #include <asm/l4lxapi/task.h>
 #include <asm/l4lxapi/memory.h>
@@ -247,7 +248,8 @@ static struct platform_suspend_ops l4x_pm_plat_ops = {
 
 struct l4x_virtual_mem_struct {
 	struct list_head list;
-	unsigned long address, page;
+	unsigned long address;
+	pte_t pte;
 };
 
 static LIST_HEAD(virtual_pages);
@@ -258,7 +260,7 @@ enum l4x_virtual_mem_type {
 	L4X_VIRTUAL_MEM_TYPE_UNMAP,
 };
 
-void l4x_virtual_mem_register(unsigned long address, unsigned long page)
+void l4x_virtual_mem_register(unsigned long address, pte_t pte)
 {
 	struct l4x_virtual_mem_struct *e;
 	unsigned long flags;
@@ -266,7 +268,7 @@ void l4x_virtual_mem_register(unsigned long address, unsigned long page)
 	if (!(e = kmalloc(sizeof(*e), GFP_KERNEL)))
 		BUG();
 	e->address = address;
-	e->page    = page;
+	e->pte     = pte;
 	spin_lock_irqsave(&virtual_pages_lock, flags);
 	list_add_tail(&e->list, &virtual_pages);
 	spin_unlock_irqrestore(&virtual_pages_lock, flags);
@@ -298,8 +300,9 @@ static void l4x_virtual_mem_handle_pages(enum l4x_virtual_mem_type t)
 
 		if (t == L4X_VIRTUAL_MEM_TYPE_MAP) {
 			if (0)
-				l4x_printf("map virtual %lx -> %lx\n", e->address, e->page);
-			l4lx_memory_map_virtual_page(e->address, e->page, 1);
+				l4x_printf("map virtual %lx -> %" PTE_VAL_FMTTYPE "x\n",
+				           e->address, pte_val(e->pte));
+			l4lx_memory_map_virtual_page(e->address, e->pte);
 		} else {
 			if (0)
 				l4x_printf("unmap virtual %lx\n", e->address);
@@ -465,15 +468,15 @@ static __init int l4x_pm_init(void)
 
 	r = sysfs_create_file(power_kobj, &wakeup_src_add_attr.attr);
 	if (r)
-		printk(KERN_ERR "failed to create sysfs file: %d\n", r);
+		pr_err("failed to create sysfs file: %d\n", r);
 
 	r = sysfs_create_file(power_kobj, &wakeup_src_del_attr.attr);
 	if (r)
-		printk(KERN_ERR "failed to create sysfs file: %d\n", r);
+		pr_err("failed to create sysfs file: %d\n", r);
 
 	r = sysfs_create_file(power_kobj, &wakeup_src_type_attr.attr);
 	if (r)
-		printk(KERN_ERR "failed to create sysfs file: %d\n", r);
+		pr_err("failed to create sysfs file: %d\n", r);
 
 	register_syscore_ops(&l4x_pm_syscore_ops);
 	suspend_set_ops(&l4x_pm_plat_ops);

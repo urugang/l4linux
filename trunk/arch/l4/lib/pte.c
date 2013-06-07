@@ -145,10 +145,20 @@ void l4x_vmalloc_map_vm_area(unsigned long address, unsigned long end)
 	if (address & ~PAGE_MASK)
 		enter_kdebug("map_vm_area: Unaligned address!");
 
+	if (!(   (VMALLOC_START <= address && end <= VMALLOC_END)
+	      || (MODULES_VADDR <= address && end <= MODULES_END))) {
+		pr_err("%s: %lx-%lx outside areas: %lx-%lx, %lx-%lx\n",
+		       __func__, address, end,
+		       VMALLOC_START, VMALLOC_END, MODULES_VADDR, MODULES_END);
+		pr_err("%s: %p\n", __func__, __builtin_return_address(0));
+		enter_kdebug("KK");
+		return;
+	}
+
 	for (; address < end; address += PAGE_SIZE) {
 		pte_t *ptep;
 
-#ifdef ARCH_arm
+#ifdef CONFIG_ARM
 		unsigned long o;
 		if ((o = l4x_arm_is_selfmapped_addr(address))) {
 			address += o - PAGE_SIZE;
@@ -156,13 +166,13 @@ void l4x_vmalloc_map_vm_area(unsigned long address, unsigned long end)
 		}
 #endif
 
-		ptep = lookup_pte(swapper_pg_dir, address);
+		ptep = lookup_pte(&init_mm, address);
 
 		if (!ptep || !pte_present(*ptep)) {
 			if (0)
 				printk("%s: No (valid) PTE for %08lx?!"
 			               " (ptep: %p, pte: %08"
-#ifndef ARCH_arm
+#ifndef CONFIG_ARM
 				       "l"
 #endif
 				       "x\n",
@@ -170,9 +180,8 @@ void l4x_vmalloc_map_vm_area(unsigned long address, unsigned long end)
 			               ptep, pte_val(*ptep));
 			continue;
 		}
-		l4x_virtual_mem_register(address, pte_val(*ptep));
-		l4lx_memory_map_virtual_page(address, pte_val(*ptep),
-		                             pte_write(*ptep));
+		l4x_virtual_mem_register(address, *ptep);
+		l4lx_memory_map_virtual_page(address, *ptep);
 	}
 }
 
@@ -184,7 +193,7 @@ void l4x_vmalloc_unmap_vm_area(unsigned long address, unsigned long end)
 
 	for (; address < end; address += PAGE_SIZE) {
 
-#ifdef ARCH_arm
+#ifdef CONFIG_ARM
 		unsigned long o;
 		if ((o = l4x_arm_is_selfmapped_addr(address))) {
 			address += o - PAGE_SIZE;
@@ -194,7 +203,7 @@ void l4x_vmalloc_unmap_vm_area(unsigned long address, unsigned long end)
 
 		/* check whether we are really flushing a vm page */
 		if (address < (unsigned long)high_memory
-#ifdef ARCH_arm
+#ifdef CONFIG_ARM
 		    && !(address >= MODULES_VADDR && address < MODULES_END)
 #endif
 		    ) {

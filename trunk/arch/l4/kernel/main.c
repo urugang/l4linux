@@ -201,7 +201,7 @@ l4_cap_idx_t l4x_start_thread_pager_id __nosavedata = L4_INVALID_CAP;
 
 enum { NUM_DS_MAINMEM = 10 };
 static l4re_ds_t l4x_ds_mainmem[NUM_DS_MAINMEM] __nosavedata;
-static void *l4x_main_memory_start;
+void *l4x_main_memory_start;
 unsigned long l4x_vmalloc_memory_start;
 l4_kernel_info_t *l4lx_kinfo;
 l4_cap_idx_t l4x_user_gate[NR_CPUS];
@@ -230,7 +230,7 @@ static unsigned long l4x_mainmem_size = CONFIG_L4_MEMSIZE << 20;
 static struct l4x_phys_virt_mem l4x_phys_virt_addrs[L4X_PHYS_VIRT_ADDRS_MAX_ITEMS] __nosavedata;
 
 #ifdef CONFIG_L4_CONFIG_CHECKS
-static const unsigned long required_kernel_abi_version = 1;
+static const unsigned long required_kernel_abi_version = 2;
 static const char *required_kernel_features[] =
   {
   };
@@ -1123,6 +1123,7 @@ void __init l4x_setup_memory(char *cmdl,
 	int res;
 	char *memstr;
 	char *memtypestr;
+	char *str;
 	void *a;
 	l4_addr_t memory_area_id = (l4_addr_t)&_text;
 	int virt_phys_alignment = L4_SUPERPAGESHIFT;
@@ -1180,6 +1181,16 @@ void __init l4x_setup_memory(char *cmdl,
 				l4x_exit_l4linux();
 			}
 		} while (*memtypestr == ',');
+	}
+
+	if ((str = strstr(cmdl, "l4memalign="))) {
+		unsigned val = memparse(str + 11, NULL);
+		if (val > L4_SUPERPAGESHIFT
+		    && val < sizeof(unsigned long) * 8) {
+			virt_phys_alignment = val;
+			LOG_printf("l4x: Set virt/phys alignment to %d\n",
+			           virt_phys_alignment);
+		}
 	}
 
 	for (i = 0; i < num_mem_chunk; ++i) {
@@ -1339,15 +1350,14 @@ void l4x_update_mapping(unsigned long addr)
 	    || addr >= l4x_fixmap_space_start + __end_of_fixed_addresses * PAGE_SIZE)
 		return;
 
-	ptep = lookup_pte(swapper_pg_dir, addr);
+	ptep = lookup_pte(&init_mm, addr);
 
 	if (ptep && pte_val(*ptep))
-		l4lx_memory_map_virtual_page(addr, pte_val(*ptep) & PAGE_MASK,
-		                             1);
+		l4lx_memory_map_virtual_page(addr, *ptep);
 	else
 		l4lx_memory_unmap_virtual_page(addr);
 #else
-	printk("%s %d\n", __func__, __LINE__); 
+	printk("%s\n", __func__);
 #endif
 }
 #endif
@@ -2524,14 +2534,6 @@ long ptregs_##name(void)                                        \
 	return sys_##name((t1)r->bx, (t2)r->cx, (t3)r->dx, r);  \
 }
 
-
-#ifdef CONFIG_X86_32
-PTREGSCALL1(iopl, unsigned int)
-PTREGSCALL0(sigreturn)
-PTREGSCALL0(rt_sigreturn)
-PTREGSCALL2(vm86, unsigned long, unsigned long)
-PTREGSCALL1(vm86old, struct vm86_struct __user *)
-#endif
 
 #ifdef CONFIG_X86_32
 #define RN(n) e##n

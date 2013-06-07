@@ -17,12 +17,11 @@
  *
  * \param	address		Virtual address.
  * \param	page		Physical address.
- * \param       map_rw          True if map should be mapped rw.
+ * \param	pte		Pte (source address).
  *
  * \return	0 on success, != 0 on error
  */
-int l4lx_memory_map_virtual_page(unsigned long address, unsigned long page,
-                                 int map_rw);
+int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte);
 
 int l4lx_memory_map_virtual_range(unsigned long address, unsigned long size,
                                   unsigned long page, int map_rw);

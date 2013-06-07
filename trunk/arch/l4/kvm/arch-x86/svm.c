@@ -616,7 +616,7 @@ static int has_svm(void)
 
 static void svm_hardware_disable(void *garbage)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	/* Make sure we clean up behind us */
 	if (static_cpu_has(X86_FEATURE_TSCRATEMSR))
 		wrmsrl(MSR_AMD64_TSC_RATIO, TSC_RATIO_DEFAULT);
@@ -631,14 +631,14 @@ static int svm_hardware_enable(void *garbage)
 {
 
 	struct svm_cpu_data *sd;
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	uint64_t efer;
 #endif
 	struct desc_ptr gdt_descr;
 	struct desc_struct *gdt;
 	int me = raw_smp_processor_id();
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	rdmsrl(MSR_EFER, efer);
 	if (efer & EFER_SVME)
 		return -EBUSY;
@@ -662,7 +662,7 @@ static int svm_hardware_enable(void *garbage)
 	gdt = (struct desc_struct *)gdt_descr.address;
 	sd->tss_desc = (struct kvm_ldttss_desc *)(gdt + GDT_ENTRY_TSS);
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	wrmsrl(MSR_EFER, efer | EFER_SVME);
 
 	wrmsrl(MSR_VM_HSAVE_PA, page_to_pfn(sd->save_area) << PAGE_SHIFT);
@@ -3540,7 +3540,7 @@ static int handle_exit(struct kvm_vcpu *vcpu)
 	return svm_exit_handlers[exit_code](svm);
 }
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 static void reload_tss(struct kvm_vcpu *vcpu)
 {
 	int cpu = raw_smp_processor_id();
@@ -3609,6 +3609,26 @@ static void update_cr8_intercept(struct kvm_vcpu *vcpu, int tpr, int irr)
 
 	if (tpr >= irr)
 		set_cr_intercept(svm, INTERCEPT_CR8_WRITE);
+}
+
+static void svm_set_virtual_x2apic_mode(struct kvm_vcpu *vcpu, bool set)
+{
+	return;
+}
+
+static int svm_vm_has_apicv(struct kvm *kvm)
+{
+	return 0;
+}
+
+static void svm_load_eoi_exitmap(struct kvm_vcpu *vcpu, u64 *eoi_exit_bitmap)
+{
+	return;
+}
+
+static void svm_hwapic_isr_update(struct kvm *kvm, int isr)
+{
+	return;
 }
 
 static int svm_nmi_allowed(struct kvm_vcpu *vcpu)
@@ -3833,7 +3853,7 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 
 	sync_lapic_to_cr8(vcpu);
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	svm->vmcb->save.cr2 = vcpu->arch.cr2;
 
 	clgi();
@@ -3926,7 +3946,7 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 		printk(KERN_ERR "l4-vm-run failed\n");
 #endif
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 #ifdef CONFIG_X86_64
 	wrmsrl(MSR_GS_BASE, svm->host.gs_base);
 #else
@@ -3958,7 +3978,7 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 
 	if (unlikely(svm->vmcb->control.exit_code == SVM_EXIT_NMI))
 		kvm_after_handle_nmi(&svm->vcpu);
-#endif
+#endif /* L4 */
 
 	sync_cr8_to_lapic(vcpu);
 
@@ -4011,14 +4031,14 @@ static void set_tdp_cr3(struct kvm_vcpu *vcpu, unsigned long root)
 
 static int is_disabled(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	u64 vm_cr;
 
 	rdmsrl(MSR_VM_CR, vm_cr);
 	if (vm_cr & (1 << SVM_VM_CR_SVM_DISABLE))
 		return 1;
 
-#endif
+#endif /* L4 */
 	return 0;
 }
 
@@ -4350,6 +4370,10 @@ static struct kvm_x86_ops svm_x86_ops = {
 	.enable_nmi_window = enable_nmi_window,
 	.enable_irq_window = enable_irq_window,
 	.update_cr8_intercept = update_cr8_intercept,
+	.set_virtual_x2apic_mode = svm_set_virtual_x2apic_mode,
+	.vm_has_apicv = svm_vm_has_apicv,
+	.load_eoi_exitmap = svm_load_eoi_exitmap,
+	.hwapic_isr_update = svm_hwapic_isr_update,
 
 	.set_tss_addr = svm_set_tss_addr,
 	.get_tdp_level = get_npt_level,

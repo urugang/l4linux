@@ -19,14 +19,14 @@
 #include <asm/time.h>
 #include <asm/irq.h>
 #include <asm/io_apic.h>
+#include <asm/hpet.h>
 #include <asm/pat.h>
 #include <asm/tsc.h>
 #include <asm/iommu.h>
 #include <asm/mach_traps.h>
 
 #include <asm/generic/timer.h>
-#include <asm/generic/irq.h>
-char *l4x_memory_setup(void);
+#include <asm/l4x/init.h>
 
 void __cpuinit x86_init_noop(void) { }
 void __init x86_init_uint_noop(unsigned int unused) { }
@@ -42,7 +42,7 @@ struct x86_init_ops x86_init __initdata = {
 	.resources = {
 		.probe_roms		= probe_roms,
 		.reserve_resources	= reserve_standard_io_resources,
-		.memory_setup		= l4x_memory_setup,
+		.memory_setup		= l4x_x86_memory_setup,
 	},
 
 	.mpparse = {
@@ -64,10 +64,6 @@ struct x86_init_ops x86_init __initdata = {
 	.oem = {
 		.arch_setup		= x86_init_noop,
 		.banner			= default_banner,
-	},
-
-	.mapping = {
-		.pagetable_reserve		= native_pagetable_reserve,
 	},
 
 	.paging = {
@@ -114,16 +110,29 @@ struct x86_platform_ops x86_platform = {
 };
 
 EXPORT_SYMBOL_GPL(x86_platform);
+
+void l4x_compose_msi_msg(struct pci_dev *pdev,
+		unsigned int irq, unsigned int dest,
+		struct msi_msg *msg, u8 hpet_id) {}
+
+
 struct x86_msi_ops x86_msi = {
-	.setup_msi_irqs = native_setup_msi_irqs,
-	.teardown_msi_irq = native_teardown_msi_irq,
-	.teardown_msi_irqs = default_teardown_msi_irqs,
-	.restore_msi_irqs = default_restore_msi_irqs,
+	.setup_msi_irqs		= native_setup_msi_irqs,
+	.compose_msi_msg	= l4x_compose_msi_msg,
+	.teardown_msi_irq	= native_teardown_msi_irq,
+	.teardown_msi_irqs	= default_teardown_msi_irqs,
+	.restore_msi_irqs	= default_restore_msi_irqs,
+	.setup_hpet_msi		= default_setup_hpet_msi,
 };
 
 struct x86_io_apic_ops x86_io_apic_ops = {
-	.init	= native_io_apic_init_mappings,
-	.read	= native_io_apic_read,
-	.write	= native_io_apic_write,
-	.modify	= native_io_apic_modify,
+	.init			= l4x_io_apic_init_mappings,
+	.read			= l4x_io_apic_read,
+	.write			= l4x_io_apic_write,
+	.modify			= l4x_io_apic_modify,
+	.disable		= l4x_disable_io_apic,
+	.print_entries		= l4x_io_apic_print_entries,
+	.set_affinity		= l4x_ioapic_set_affinity,
+	.setup_entry		= l4x_setup_ioapic_entry,
+	.eoi_ioapic_pin		= l4x_eoi_ioapic_pin,
 };

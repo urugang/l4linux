@@ -97,19 +97,23 @@ unsigned int l4lx_irq_dev_startup(struct irq_data *data)
 		if (L4XV_FN_i(l4_error(l4_icu_set_mode(l4io_request_icu(),
 		                                       irq, p->trigger))) < 0) {
 			pr_err("l4x-irq: Failed to set type for IRQ %d\n", irq);
-			return 0;
+			goto err;
 		}
 
 		if (L4XV_FN_i(l4io_request_irq(irq, p->irq_cap))) {
 			pr_err("l4x-irq: Did not get IRQ %d from IO service\n",
 			       irq);
 			WARN_ON(1);
-			return 0;
+			goto err;
 		}
 	}
 
 	l4lx_irq_dev_enable(data);
 	return 1;
+
+err:
+	l4x_cap_free(p->irq_cap);
+	return 0;
 }
 
 void l4lx_irq_dev_shutdown(struct irq_data *data)
@@ -120,8 +124,10 @@ void l4lx_irq_dev_shutdown(struct irq_data *data)
 	dd_printk("%s: %u\n", __func__, irq);
 	l4lx_irq_dev_disable(data);
 
-	if (l4_is_invalid_cap(l4x_have_irqcap(irq)))
+	if (l4_is_invalid_cap(l4x_have_irqcap(irq))) {
 		l4io_release_irq(irq, p->irq_cap);
+		l4x_cap_free(p->irq_cap);
+	}
 }
 
 void l4lx_irq_dev_enable(struct irq_data *data)

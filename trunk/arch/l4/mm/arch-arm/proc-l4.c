@@ -115,19 +115,19 @@ void __glue(_TLB, _flush_user_tlb_range)(unsigned long start, unsigned long end,
 void __glue(_CACHE, _flush_user_cache_range)(unsigned long start, unsigned long end,
                                             unsigned int flags)
 {
-	pgd_t *pgd;
+	struct mm_struct *mm;
 
 	if (current->mm)
-		pgd = (pgd_t *)current->mm->pgd;
+		mm = current->mm;
 	else if (current->active_mm)
-		pgd = (pgd_t *)current->active_mm->pgd;
+		mm = current->active_mm;
 	else {
 		printk("active_mm: No mm... %lx-%lx\n", start, end);
 		return;
 	}
 
 	for (start &= PAGE_MASK; start < end; start += PAGE_SIZE) {
-		pte_t *ptep = lookup_pte(pgd, start);
+		pte_t *ptep = lookup_pte(mm, start);
 		if (ptep && pte_present(*ptep)) {
 			unsigned long k = pte_pfn(*ptep) << PAGE_SHIFT;
 			unsigned long e = k + PAGE_SIZE;
@@ -161,19 +161,19 @@ void __glue(_CACHE, _coherent_kern_range)(unsigned long start, unsigned long end
 
 int __glue(_CACHE, _coherent_user_range)(unsigned long start, unsigned long end)
 {
-	pgd_t *pgd;
+	struct mm_struct *mm;
 
 	if (current->mm)
-		pgd = (pgd_t *)current->mm->pgd;
+		mm = current->mm;
 	else if (current->active_mm)
-		pgd = (pgd_t *)current->active_mm->pgd;
+		mm = current->active_mm;
 	else {
 		printk("active_mm: No mm... %lx-%lx\n", start, end);
 		return -EINVAL;
 	}
 
 	for (start &= PAGE_MASK; start < end; start += PAGE_SIZE) {
-		pte_t *ptep = lookup_pte(pgd, start);
+		pte_t *ptep = lookup_pte(mm, start);
 		if (ptep && pte_present(*ptep)) {
 			unsigned long k = pte_pfn(*ptep) << PAGE_SHIFT;
 			unsigned long e = k + PAGE_SIZE;
