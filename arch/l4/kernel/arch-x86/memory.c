@@ -8,7 +8,7 @@
 
 #include <asm/generic/setup.h>
 
-char * __init l4x_memory_setup(void)
+char * __init l4x_x86_memory_setup(void)
 {
 	unsigned long mem_start, mem_size;
 	unsigned long textbegin = (unsigned long)&_stext;

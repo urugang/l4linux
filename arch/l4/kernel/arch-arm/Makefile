@@ -26,6 +26,9 @@ CFLAGS_swp_emulate.o				:= -Wa,-march=armv7-a
 
 obj-$(CONFIG_DEBUG_LL)				+= debug.o
 obj-$(CONFIG_ARM_CPU_TOPOLOGY)			+= topology.o
+
+obj-$(CONFIG_ARM_VIRT_EXT)                      += hyp-stub.o
+
 obj-$(CONFIG_L4_VPCI)				+= bios32.o
 
 cpuidle-y	:= ../../../arm/kernel/cpuidle.o
@@ -49,6 +52,7 @@ opcodes-y       := ../../../arm/kernel/opcodes.o
 atags_parse-y   := ../../../arm/kernel/atags_parse.o
 atags_proc-y    := ../../../arm/kernel/atags_proc.o
 swp_emulate-y	:= ../../../arm/kernel/swp_emulate.o
+hyp-stub-y      := ../../../arm/kernel/hyp-stub.o
 
 KBUILD_CPPFLAGS	+= -I$(srctree)/arch/arm/kernel
 

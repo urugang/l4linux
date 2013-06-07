@@ -78,7 +78,6 @@ static void
 l4ser_rx_chars(struct uart_port *port)
 {
 	struct l4ser_uart_port *l4port = (struct l4ser_uart_port *)port;
-	struct tty_struct *tty = port->state->port.tty;
 	unsigned int flg;
 	int ch;
 
@@ -105,9 +104,9 @@ l4ser_rx_chars(struct uart_port *port)
 		if (uart_handle_sysrq_char(port, ch))
 			continue;
 
-		tty_insert_flip_char(tty, ch, flg);
+		tty_insert_flip_char(&port->state->port, ch, flg);
 	}
-	tty_flip_buffer_push(tty);
+	tty_flip_buffer_push(&port->state->port);
 	return;
 }
 

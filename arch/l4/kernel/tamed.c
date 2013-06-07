@@ -416,8 +416,6 @@ void l4x_global_saved_event_inject(void)
 	       L4_UTCB_GENERIC_BUFFERS_SIZE);
 	memcpy(l4_utcb_mr_u(utcb), &buf_utcb_msg_regs,
 	       L4_UTCB_GENERIC_DATA_SIZE);
-	vcpu->state |= L4_VCPU_F_IRQ;
-	l4_barrier();
 
 	do_vcpu_irq(vcpu);
 

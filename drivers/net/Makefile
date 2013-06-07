@@ -71,5 +71,8 @@ obj-$(CONFIG_USB_IPHETH)        += usb/
 obj-$(CONFIG_USB_CDC_PHONET)   += usb/
 obj-$(CONFIG_HYPERV_NET) += hyperv/
 
+obj-$(CONFIG_HYPERV_NET) += hyperv/
+obj-$(CONFIG_NTB_NETDEV) += ntb_netdev.o
+
 obj-$(CONFIG_L4_NET_ANKH_DRV)     += l4ankh.o
 obj-$(CONFIG_L4_NET_L4SHM)   += l4shmnet.o

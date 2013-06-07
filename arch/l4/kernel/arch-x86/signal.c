@@ -46,8 +46,6 @@
 #include <asm/api/macros.h>
 #include <asm/l4x/signal.h>
 
-//#define DEBUG_L4_SIG 1
-
 #ifdef CONFIG_X86_32
 # define FIX_EFLAGS	(__FIX_EFLAGS | X86_EFLAGS_RF)
 #else
@@ -284,7 +282,7 @@ static const struct {
 };
 
 static int
-__setup_frame(int sig, struct k_sigaction *ka, sigset_t *set,
+__setup_frame(int sig, struct ksignal *ksig, sigset_t *set,
 	      struct pt_regs *regs)
 {
 	struct sigframe __user *frame;
@@ -292,7 +290,7 @@ __setup_frame(int sig, struct k_sigaction *ka, sigset_t *set,
 	int err = 0;
 	void __user *fpstate = NULL;
 
-	frame = get_sigframe(ka, regs, sizeof(*frame), &fpstate);
+	frame = get_sigframe(&ksig->ka, regs, sizeof(*frame), &fpstate);
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
 		return -EFAULT;
@@ -313,8 +311,8 @@ __setup_frame(int sig, struct k_sigaction *ka, sigset_t *set,
 		restorer = VDSO32_SYMBOL(current->mm->context.vdso, sigreturn);
 	else
 		restorer = &frame->retcode;
-	if (ka->sa.sa_flags & SA_RESTORER)
-		restorer = ka->sa.sa_restorer;
+	if (ksig->ka.sa.sa_flags & SA_RESTORER)
+		restorer = ksig->ka.sa.sa_restorer;
 
 	/* Set up to return from userspace.  */
 	err |= __put_user(restorer, &frame->pretcode);
@@ -333,7 +331,7 @@ __setup_frame(int sig, struct k_sigaction *ka, sigset_t *set,
 
 	/* Set up registers for signal handler */
 	regs->sp = (unsigned long)frame;
-	regs->ip = (unsigned long)ka->sa.sa_handler;
+	regs->ip = (unsigned long)ksig->ka.sa.sa_handler;
 	regs->ax = (unsigned long)sig;
 	regs->dx = 0;
 	regs->cx = 0;
@@ -346,7 +344,7 @@ __setup_frame(int sig, struct k_sigaction *ka, sigset_t *set,
 	return 0;
 }
 
-static int __setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
+static int __setup_rt_frame(int sig, struct ksignal *ksig,
 			    sigset_t *set, struct pt_regs *regs)
 {
 	struct rt_sigframe __user *frame;
@@ -354,7 +352,7 @@ static int __setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	int err = 0;
 	void __user *fpstate = NULL;
 
-	frame = get_sigframe(ka, regs, sizeof(*frame), &fpstate);
+	frame = get_sigframe(&ksig->ka, regs, sizeof(*frame), &fpstate);
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
 		return -EFAULT;
@@ -374,8 +372,8 @@ static int __setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 
 		/* Set up to return from userspace.  */
 		restorer = VDSO32_SYMBOL(current->mm->context.vdso, rt_sigreturn);
-		if (ka->sa.sa_flags & SA_RESTORER)
-			restorer = ka->sa.sa_restorer;
+		if (ksig->ka.sa.sa_flags & SA_RESTORER)
+			restorer = ksig->ka.sa.sa_restorer;
 		put_user_ex(restorer, &frame->pretcode);
 
 		/*
@@ -388,7 +386,7 @@ static int __setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 		put_user_ex(*((u64 *)&rt_retcode), (u64 *)frame->retcode);
 	} put_user_catch(err);
 	
-	err |= copy_siginfo_to_user(&frame->info, info);
+	err |= copy_siginfo_to_user(&frame->info, &ksig->info);
 	err |= setup_sigcontext(&frame->uc.uc_mcontext, fpstate,
 				regs, set->sig[0]);
 	err |= __copy_to_user(&frame->uc.uc_sigmask, set, sizeof(*set));
@@ -398,7 +396,7 @@ static int __setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 
 	/* Set up registers for signal handler */
 	regs->sp = (unsigned long)frame;
-	regs->ip = (unsigned long)ka->sa.sa_handler;
+	regs->ip = (unsigned long)ksig->ka.sa.sa_handler;
 	regs->ax = (unsigned long)sig;
 	regs->dx = (unsigned long)&frame->info;
 	regs->cx = (unsigned long)&frame->uc;
@@ -411,20 +409,20 @@ static int __setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	return 0;
 }
 #else /* !CONFIG_X86_32 */
-static int __setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
+static int __setup_rt_frame(int sig, struct ksignal *ksig,
 			    sigset_t *set, struct pt_regs *regs)
 {
 	struct rt_sigframe __user *frame;
 	void __user *fp = NULL;
 	int err = 0;
 
-	frame = get_sigframe(ka, regs, sizeof(struct rt_sigframe), &fp);
+	frame = get_sigframe(&ksig->ka, regs, sizeof(struct rt_sigframe), &fp);
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
 		return -EFAULT;
 
-	if (ka->sa.sa_flags & SA_SIGINFO) {
-		if (copy_siginfo_to_user(&frame->info, info))
+	if (ksig->ka.sa.sa_flags & SA_SIGINFO) {
+		if (copy_siginfo_to_user(&frame->info, &ksig->info))
 			return -EFAULT;
 	}
 
@@ -440,8 +438,8 @@ static int __setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 		/* Set up to return from userspace.  If provided, use a stub
 		   already in userspace.  */
 		/* x86-64 should always use SA_RESTORER. */
-		if (ka->sa.sa_flags & SA_RESTORER) {
-			put_user_ex(ka->sa.sa_restorer, &frame->pretcode);
+		if (ksig->ka.sa.sa_flags & SA_RESTORER) {
+			put_user_ex(ksig->ka.sa.sa_restorer, &frame->pretcode);
 		} else {
 			/* could use a vstub here */
 			err |= -EFAULT;
@@ -463,7 +461,7 @@ static int __setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	   next argument after the signal number on the stack. */
 	regs->si = (unsigned long)&frame->info;
 	regs->dx = (unsigned long)&frame->uc;
-	regs->ip = (unsigned long) ka->sa.sa_handler;
+	regs->ip = (unsigned long) ksig->ka.sa.sa_handler;
 
 	regs->sp = (unsigned long)frame;
 
@@ -475,8 +473,8 @@ static int __setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 }
 #endif /* CONFIG_X86_32 */
 
-static int x32_setup_rt_frame(int sig, struct k_sigaction *ka,
-			      siginfo_t *info, compat_sigset_t *set,
+static int x32_setup_rt_frame(struct ksignal *ksig,
+			      compat_sigset_t *set,
 			      struct pt_regs *regs)
 {
 #ifdef CONFIG_X86_X32_ABI
@@ -485,13 +483,13 @@ static int x32_setup_rt_frame(int sig, struct k_sigaction *ka,
 	int err = 0;
 	void __user *fpstate = NULL;
 
-	frame = get_sigframe(ka, regs, sizeof(*frame), &fpstate);
+	frame = get_sigframe(&ksig->ka, regs, sizeof(*frame), &fpstate);
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
 		return -EFAULT;
 
-	if (ka->sa.sa_flags & SA_SIGINFO) {
-		if (copy_siginfo_to_user32(&frame->info, info))
+	if (ksig->ka.sa.sa_flags & SA_SIGINFO) {
+		if (copy_siginfo_to_user32(&frame->info, &ksig->info))
 			return -EFAULT;
 	}
 
@@ -505,8 +503,8 @@ static int x32_setup_rt_frame(int sig, struct k_sigaction *ka,
 		err |= __compat_save_altstack(&frame->uc.uc_stack, regs->sp);
 		put_user_ex(0, &frame->uc.uc__pad0);
 
-		if (ka->sa.sa_flags & SA_RESTORER) {
-			restorer = ka->sa.sa_restorer;
+		if (ksig->ka.sa.sa_flags & SA_RESTORER) {
+			restorer = ksig->ka.sa.sa_restorer;
 		} else {
 			/* could use a vstub here */
 			restorer = NULL;
@@ -524,10 +522,10 @@ static int x32_setup_rt_frame(int sig, struct k_sigaction *ka,
 
 	/* Set up registers for signal handler */
 	regs->sp = (unsigned long) frame;
-	regs->ip = (unsigned long) ka->sa.sa_handler;
+	regs->ip = (unsigned long) ksig->ka.sa.sa_handler;
 
 	/* We use the x32 calling convention here... */
-	regs->di = sig;
+	regs->di = ksig->sig;
 	regs->si = (unsigned long) &frame->info;
 	regs->dx = (unsigned long) &frame->uc;
 
@@ -541,70 +539,13 @@ static int x32_setup_rt_frame(int sig, struct k_sigaction *ka,
 	return 0;
 }
 
-#ifdef CONFIG_X86_32
-/*
- * Atomically swap in the new signal mask, and wait for a signal.
- */
-asmlinkage int
-sys_sigsuspend(int history0, int history1, old_sigset_t mask)
-{
-	sigset_t blocked;
-	siginitset(&blocked, mask);
-	return sigsuspend(&blocked);
-}
-
-asmlinkage int
-sys_sigaction(int sig, const struct old_sigaction __user *act,
-	      struct old_sigaction __user *oact)
-{
-	struct k_sigaction new_ka, old_ka;
-	int ret = 0;
-
-	if (act) {
-		old_sigset_t mask;
-
-		if (!access_ok(VERIFY_READ, act, sizeof(*act)))
-			return -EFAULT;
-
-		get_user_try {
-			get_user_ex(new_ka.sa.sa_handler, &act->sa_handler);
-			get_user_ex(new_ka.sa.sa_flags, &act->sa_flags);
-			get_user_ex(mask, &act->sa_mask);
-			get_user_ex(new_ka.sa.sa_restorer, &act->sa_restorer);
-		} get_user_catch(ret);
-
-		if (ret)
-			return -EFAULT;
-		siginitset(&new_ka.sa.sa_mask, mask);
-	}
-
-	ret = do_sigaction(sig, act ? &new_ka : NULL, oact ? &old_ka : NULL);
-
-	if (!ret && oact) {
-		if (!access_ok(VERIFY_WRITE, oact, sizeof(*oact)))
-			return -EFAULT;
-
-		put_user_try {
-			put_user_ex(old_ka.sa.sa_handler, &oact->sa_handler);
-			put_user_ex(old_ka.sa.sa_flags, &oact->sa_flags);
-			put_user_ex(old_ka.sa.sa_mask.sig[0], &oact->sa_mask);
-			put_user_ex(old_ka.sa.sa_restorer, &oact->sa_restorer);
-		} put_user_catch(ret);
-
-		if (ret)
-			return -EFAULT;
-	}
-
-	return ret;
-}
-#endif /* CONFIG_X86_32 */
-
 /*
  * Do a signal return; undo the signal stack.
  */
 #ifdef CONFIG_X86_32
-unsigned long sys_sigreturn(struct pt_regs *regs)
+unsigned long sys_sigreturn(void)
 {
+	struct pt_regs *regs = current_pt_regs();
 	struct sigframe __user *frame;
 	unsigned long ax;
 	sigset_t set;
@@ -631,8 +572,9 @@ badframe:
 }
 #endif /* CONFIG_X86_32 */
 
-long sys_rt_sigreturn(struct pt_regs *regs)
+long sys_rt_sigreturn(void)
 {
+	struct pt_regs *regs = current_pt_regs();
 	struct rt_sigframe __user *frame;
 	unsigned long ax;
 	sigset_t set;
@@ -673,38 +615,29 @@ static int signr_convert(int sig)
 }
 
 static int
-setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
-		struct pt_regs *regs)
+setup_rt_frame(struct ksignal *ksig, struct pt_regs *regs)
 {
-	int usig = signr_convert(sig);
+	int usig = signr_convert(ksig->sig);
 	sigset_t *set = sigmask_to_save();
 	compat_sigset_t *cset = (compat_sigset_t *) set;
 
 	/* Set up the stack frame */
 	if (is_ia32_frame()) {
-		if (ka->sa.sa_flags & SA_SIGINFO)
-			return ia32_setup_rt_frame(usig, ka, info, cset, regs);
+		if (ksig->ka.sa.sa_flags & SA_SIGINFO)
+			return ia32_setup_rt_frame(usig, ksig, cset, regs);
 		else
-			return ia32_setup_frame(usig, ka, cset, regs);
+			return ia32_setup_frame(usig, ksig, cset, regs);
 	} else if (is_x32_frame()) {
-		return x32_setup_rt_frame(usig, ka, info, cset, regs);
+		return x32_setup_rt_frame(ksig, cset, regs);
 	} else {
-		return __setup_rt_frame(sig, ka, info, set, regs);
+		return __setup_rt_frame(ksig->sig, ksig, set, regs);
 	}
 }
 
 static void
-handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
-		struct pt_regs *regs)
+handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 {
-#ifdef DEBUG_L4_SIG
-	printk("%s: entering, sig=%ld\n", __func__, sig);
-	printk("%s: delivering signal %ld to %d(%s), eip: %lx, eflags: %lx, "
-	       "cs: %x, orig_eax=%lx\n",
-	       __func__, sig, current->pid, current->comm, regs->ip,
-	       regs->flags, regs->cs, regs->orig_ax);
-#endif
-
+	bool failed;
 	/* Are we from a system call? */
 	if (syscall_get_nr(current, regs) >= 0) {
 		/* If so, check system call restarting.. */
@@ -715,7 +648,7 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 			break;
 
 		case -ERESTARTSYS:
-			if (!(ka->sa.sa_flags & SA_RESTART)) {
+			if (!(ksig->ka.sa.sa_flags & SA_RESTART)) {
 				regs->ax = -EINTR;
 				break;
 			}
@@ -735,31 +668,21 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	    likely(test_and_clear_thread_flag(TIF_FORCED_TF)))
 		regs->flags &= ~X86_EFLAGS_TF;
 
-	if (setup_rt_frame(sig, ka, info, regs) < 0) {
-		force_sigsegv(sig, current);
-		return;
+	failed = (setup_rt_frame(ksig, regs) < 0);
+	if (!failed) {
+		/*
+		 * Clear the direction flag as per the ABI for function entry.
+		 */
+		regs->flags &= ~X86_EFLAGS_DF;
+		/*
+		 * Clear TF when entering the signal handler, but
+		 * notify any tracer that was single-stepping it.
+		 * The tracer may want to single-step inside the
+		 * handler too.
+		 */
+		regs->flags &= ~X86_EFLAGS_TF;
 	}
-
-#ifdef DEBUG_L4_SIG
-	printk("%s: setting stack frame (%lx): eip: %lx, eflags: %lx, cs: %x\n",
-	       __func__, regs->sp, regs->ip, regs->flags, regs->cs);
-#endif
-
-	/*
-	 * Clear the direction flag as per the ABI for function entry.
-	 */
-	regs->flags &= ~X86_EFLAGS_DF;
-
-	/*
-	 * Clear TF when entering the signal handler, but
-	 * notify any tracer that was single-stepping it.
-	 * The tracer may want to single-step inside the
-	 * handler too.
-	 */
-	regs->flags &= ~X86_EFLAGS_TF;
-
-	signal_delivered(sig, info, ka, regs,
-			 test_thread_flag(TIF_SINGLESTEP));
+	signal_setup_done(failed, ksig, test_thread_flag(TIF_SINGLESTEP));
 }
 
 #ifdef CONFIG_X86_32
@@ -776,14 +699,11 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
  */
 void do_signal(struct pt_regs *regs)
 {
-	struct k_sigaction ka;
-	siginfo_t info;
-	int signr;
+	struct ksignal ksig;
 
-	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
-	if (signr > 0) {
+	if (get_signal(&ksig)) {
 		/* Whee! Actually deliver the signal.  */
-		handle_signal(signr, &info, &ka, regs);
+		handle_signal(&ksig, regs);
 		return;
 	}
 

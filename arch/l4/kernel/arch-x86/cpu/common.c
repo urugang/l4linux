@@ -37,6 +37,8 @@
 #include <asm/mce.h>
 #include <asm/msr.h>
 #include <asm/pat.h>
+#include <asm/microcode.h>
+#include <asm/microcode_intel.h>
 
 #ifdef CONFIG_X86_LOCAL_APIC
 #include <asm/uv/uv.h>
@@ -215,7 +217,7 @@ static inline int flag_is_changeable_p(u32 flag)
 }
 
 /* Probe for the CPUID instruction */
-static int __cpuinit have_cpuid_p(void)
+int __cpuinit have_cpuid_p(void)
 {
 	return flag_is_changeable_p(X86_EFLAGS_ID);
 }
@@ -248,11 +250,6 @@ static int __init x86_serial_nr_setup(char *s)
 __setup("serialnumber", x86_serial_nr_setup);
 #else
 static inline int flag_is_changeable_p(u32 flag)
-{
-	return 1;
-}
-/* Probe for the CPUID instruction */
-static inline int have_cpuid_p(void)
 {
 	return 1;
 }
@@ -944,7 +941,7 @@ static void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 			boot_cpu_data.x86_capability[i] &= c->x86_capability[i];
 	}
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	/* Init Machine Check Exception if available. */
 	mcheck_cpu_init(c);
 #endif
@@ -986,7 +983,7 @@ void __cpuinit identify_secondary_cpu(struct cpuinfo_x86 *c)
 #ifdef CONFIG_X86_32
 	enable_sep_cpu();
 #endif
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	mtrr_ap_init();
 #endif
 }
@@ -1203,7 +1200,7 @@ DEFINE_PER_CPU_ALIGNED(struct stack_canary, stack_canary);
  */
 static void clear_all_debug_regs(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	int i;
 
 	for (i = 0; i < 8; i++) {
@@ -1247,6 +1244,12 @@ void __cpuinit cpu_init(void)
 	unsigned long v;
 	int cpu;
 	int i;
+
+	/*
+	 * Load microcode on this cpu if a valid microcode is available.
+	 * This is early microcode loading procedure.
+	 */
+	load_ucode_ap();
 
 	cpu = stack_smp_processor_id();
 	t = &per_cpu(init_tss, cpu);
@@ -1347,6 +1350,8 @@ void __cpuinit cpu_init(void)
 	//l4/struct tss_struct *t = &per_cpu(init_tss, cpu);
 	//l4/struct thread_struct *thread = &curr->thread;
 
+	show_ucode_info_early();
+
 	if (cpumask_test_and_set_cpu(cpu, cpu_initialized_mask)) {
 		printk(KERN_WARNING "CPU#%d already initialized!\n", cpu);
 		for (;;)
@@ -1355,7 +1360,7 @@ void __cpuinit cpu_init(void)
 
 	printk(KERN_INFO "Initializing CPU#%d\n", cpu);
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	if (cpu_has_vme || cpu_has_tsc || cpu_has_de)
 		clear_in_cr4(X86_CR4_VME|X86_CR4_PVI|X86_CR4_TSD|X86_CR4_DE);
 
@@ -1371,7 +1376,7 @@ void __cpuinit cpu_init(void)
 	BUG_ON(curr->mm);
 	enter_lazy_tlb(&init_mm, curr);
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	load_sp0(t, thread);
 	set_tss_desc(cpu, t);
 	load_TR_desc();
@@ -1383,7 +1388,7 @@ void __cpuinit cpu_init(void)
 	/* Set up doublefault TSS pointer in the GDT */
 	__set_tss_desc(cpu, GDT_ENTRY_DOUBLEFAULT_TSS, &doublefault_tss);
 #endif
-#endif
+#endif /* L4 */
 
 	clear_all_debug_regs();
 	dbg_restore_debug_regs();
