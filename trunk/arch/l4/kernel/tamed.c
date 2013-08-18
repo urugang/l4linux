@@ -283,7 +283,7 @@ void l4x_global_cli(void)
 {
 #ifdef CONFIG_L4_VCPU
 	l4vcpu_irq_disable(l4x_vcpu_state_current());
-	mb();
+	smp_mb();
 #else
 	l4_cap_idx_t me = l4x_cap_current();
 	int nr = get_tamer_nr(current_thread_info()->cpu);

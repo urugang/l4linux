@@ -1,5 +1,6 @@
 
 obj-$(CONFIG_X86_LOCAL_APIC)	+= apic.o apic_noop.o ipi.o
+obj-y				+= hw_nmi.o
 
 
 obj-$(CONFIG_X86_IO_APIC)	+= io_apic.o
@@ -27,3 +28,4 @@ b		:= ../../../../x86/kernel/apic
 apic_noop-y	:= $(b)/apic_noop.o
 apic_flat_64-y  := $(b)/apic_flat_64.o
 probe_$(BITS)-y := $(b)/probe_$(BITS).o
+hw_nmi-y        := $(b)/hw_nmi.o

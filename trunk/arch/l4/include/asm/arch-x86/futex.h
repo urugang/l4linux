@@ -52,16 +52,20 @@ static inline int futex_atomic_op_inuser(int encoded_op, u32 __user *uaddr)
 	int oparg = (encoded_op << 8) >> 20;
 	int cmparg = (encoded_op << 20) >> 20;
 	int oldval = 0, ret, tem;
-
 #ifdef CONFIG_L4
-	L4X_FUTEX_TRANSLATE_UADDR_NOCHECK(uaddr);
+	unsigned long flags;
 #endif
 
 	if (encoded_op & (FUTEX_OP_OPARG_SHIFT << 28))
 		oparg = 1 << oparg;
 
+#ifdef CONFIG_L4
+	if ((uaddr = l4x_futex_translate_uaddr_nocheck(uaddr, &flags)) == ERR_PTR(-EFAULT))
+		return -EFAULT;
+#else
 	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
 		return -EFAULT;
+#endif
 
 	pagefault_disable();
 
@@ -85,6 +89,10 @@ static inline int futex_atomic_op_inuser(int encoded_op, u32 __user *uaddr)
 	default:
 		ret = -ENOSYS;
 	}
+
+#ifdef CONFIG_L4
+	l4x_futex_translate_uaddr_end(flags);
+#endif
 
 	pagefault_enable();
 
@@ -121,13 +129,16 @@ static inline int futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	int ret = 0;
 
 #ifdef CONFIG_L4
-	L4X_FUTEX_TRANSLATE_UADDR(uaddr);
-	if (uaddr == NULL) /* Cheat in-kernel test */
+	unsigned long flags;
+	if (!current->mm) /* Cheat in-kernel test */
 		return -EFAULT;
-#endif
 
+	if ((uaddr = l4x_futex_translate_uaddr_nocheck(uaddr, &flags)) == ERR_PTR(-EFAULT))
+		return -EFAULT;
+#else
 	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
 		return -EFAULT;
+#endif
 
 	asm volatile("\t" ASM_STAC "\n"
 		     "1:\t" LOCK_PREFIX "cmpxchgl %4, %2\n"
@@ -141,6 +152,10 @@ static inline int futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 		     : "i" (-EFAULT), "r" (newval), "1" (oldval)
 		     : "memory"
 	);
+
+#ifdef CONFIG_L4
+	l4x_futex_translate_uaddr_end(flags);
+#endif
 
 	*uval = oldval;
 	return ret;

@@ -270,6 +270,7 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 
 #if defined(CONFIG_L4_VCPU) || defined(CONFIG_KVM)
 	if (vcpu_state) {
+		(*vcpu_state)->state = 0;
 #ifdef CONFIG_KVM
 		res = l4_thread_vcpu_control_ext(l4cap, (l4_addr_t)(*vcpu_state));
 #else

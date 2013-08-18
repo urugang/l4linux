@@ -3,18 +3,21 @@
 
 #include <asm/generic/memory.h>
 
-#define L4X_FUTEX_TRANSLATE_UADDR_NOCHECK(uaddr) \
-	do { \
-		unsigned long page, offset; \
-		if ((page = parse_ptabs_write((unsigned long)uaddr, &offset)) == -EFAULT) \
-			return -EFAULT; \
-		uaddr = (u32 __user *)(page + offset); \
-	} while (0)
+static inline
+u32 __user *l4x_futex_translate_uaddr_nocheck(u32 __user *uaddr,
+                                              unsigned long *flags)
+{
+	unsigned long page, offset;
+	page = parse_ptabs_write((unsigned long)uaddr, &offset, flags);
+	if (page == -EFAULT)
+		return ERR_PTR(-EFAULT);
+	return (u32 __user *)(page + offset);
+}
 
-#define L4X_FUTEX_TRANSLATE_UADDR(uaddr) \
-	do { \
-		if (current->mm) \
-			L4X_FUTEX_TRANSLATE_UADDR_NOCHECK(uaddr); \
-	} while (0)
+static inline
+void l4x_futex_translate_uaddr_end(unsigned long flags)
+{
+	local_irq_restore(flags);
+}
 
 #endif /* ! __INCLUDE__ASM__GENERIC__FUTEX_HELPER_H__ */

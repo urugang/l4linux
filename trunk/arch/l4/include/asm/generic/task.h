@@ -8,6 +8,7 @@
 #include <l4/sys/types.h>
 
 #include <asm/api/config.h>
+#include <asm/l4lxapi/task.h>
 
 #ifdef CONFIG_SMP
 #include <asm/generic/smp.h>
@@ -23,6 +24,30 @@ void l4x_exit_thread(void);
 static inline void l4x_init_thread_struct(struct task_struct *p) {}
 #else
 void l4x_init_thread_struct(struct task_struct *p);
+
+static inline void
+l4x_delete_process_thread(struct task_struct *tsk)
+{
+	int i;
+
+	for (i = 0; i < NR_CPUS; i++) {
+		l4_cap_idx_t thread_id = tsk->thread.user_thread_ids[i];
+
+		if (l4_is_invalid_cap(thread_id))
+			continue;
+
+		if (l4lx_task_delete_thread(thread_id))
+			do_exit(9);
+
+		l4lx_task_number_free(thread_id);
+		tsk->thread.user_thread_ids[i] = L4_INVALID_CAP;
+	}
+
+	tsk->thread.started = 0;
+	tsk->thread.threads_up = 0;
+	tsk->thread.user_thread_id = L4_INVALID_CAP;
+}
+
 #endif
 
 #endif /* ! __ASM_L4__GENERIC__TASK_H__ */

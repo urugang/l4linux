@@ -39,7 +39,15 @@ static inline l4_umword_t l4x_parse_ptabs(struct task_struct *p,
 	unsigned fpage_size = L4_LOG2_PAGESIZE;
 	spinlock_t *ptl;
 	l4_umword_t phy = (l4_umword_t)(-EFAULT);
-	pte_t *ptep = lookup_pte_lock(p->mm, address, &ptl);
+	pte_t *ptep;
+	unsigned long flags;
+	unsigned retry_count = 0;
+
+	local_save_flags(flags);
+
+retry:
+	ptep = lookup_pte_lock(p->mm, address, &ptl);
+
 #ifdef CONFIG_HUGETLB_PAGE
 	struct vm_area_struct *vma = find_vma(p->mm, address);
 	if (vma && is_vm_hugetlb_page(vma))
@@ -49,7 +57,17 @@ static inline l4_umword_t l4x_parse_ptabs(struct task_struct *p,
 	if (!ptep || !pte_present(*ptep))
 		goto not_present;
 
-	spin_lock(ptl);
+	if (!spin_trylock(ptl)) {
+		local_irq_enable();
+		if (retry_count < 10) {
+			retry_count++;
+			cpu_relax();
+		} else
+			schedule_timeout_interruptible(1);
+		local_irq_restore(flags);
+		goto retry;
+	}
+
 	if (unlikely(!pte_present(*ptep)))
 		goto not_present_locked;
 
@@ -73,7 +91,7 @@ static inline l4_umword_t l4x_parse_ptabs(struct task_struct *p,
 			l4x_pte_add_access_and_dirty_flags(ptep);
 			phy = pte_val(*ptep) & PAGE_MASK;
 
-			/* handle zero page specially */
+			/* handle the zero page specially */
 			if (phy == 0)
 				phy = PAGE0_PAGE_ADDRESS;
 
@@ -108,55 +126,6 @@ not_present:
 	return phy;
 }
 
-static int l4x_no_page_found(struct task_struct *p,
-                             l4_fpage_t *fp,
-                             l4_umword_t eip,
-			     l4_umword_t pfa)
-{
-	pte_t *ptep = lookup_pte(p->mm, pfa);
-
-	if (ptep && pte_present(*ptep) &&
-	    (pfa & 2) && !pte_write(*ptep)) {
-		*fp = l4_fpage(pte_val(*ptep), L4_LOG2_PAGESIZE, 0);
-		return 1;
-	}
-	printk("\nNo page found for addr %lx\n"
-	       "   eip: %lx, task: %p (%s), pgdir: %p\n",
-	       pfa, eip, p, p->comm, p->mm->pgd);
-	printk("lookup returns: pteptr: %p, pte: %lx\n",
-	       ptep, ptep ? pte_val(*ptep) : 0UL);
-
-	return 0;
-}
-
-/*
- * Handle device memory.
- *
- * \return address, 0 on error
- */
-static inline unsigned long l4x_handle_dev_mem(unsigned long phy)
-{
-	unsigned long devmem;
-
-#ifdef CONFIG_X86
-	if (phy > 0x80000000U) {
-		if (!(devmem = find_ioremap_entry(phy))
-		    && !(devmem = (unsigned long)ioremap(phy & L4_PAGEMASK,
-							 L4_PAGESIZE))) {
-			printk("Invalid device region requested: %08lx\n", phy);
-			return 0;
-		}
-		devmem |= phy & (L4_PAGESIZE - 1);
-	} else
-#endif
-	{
-		if (!l4lx_memory_page_mapped(phy))
-			return 0;
-		devmem = phy;
-	}
-	return devmem;
-}
-
 static inline void verbose_segfault(struct task_struct *p,
                                     struct pt_regs *regs,
                                     l4_umword_t pfa, l4_umword_t ip,
@@ -166,7 +135,7 @@ static inline void verbose_segfault(struct task_struct *p,
 	if (l4x_dbg_stop_on_segv_pf) {
 		l4x_printf("cpu%d: segfault for %s(%d) [T:%lx] "
 		           "at %08lx, ip=%08lx, pferror = %lx\n",
-		           smp_processor_id(), p->comm, p->pid,
+		           raw_smp_processor_id(), p->comm, p->pid,
 		           l4_debugger_global_id(p->mm->context.task),
 		           pfa, ip, pferror);
 		l4x_print_vm_area_maps(p, ip);
@@ -179,31 +148,26 @@ static inline void verbose_segfault(struct task_struct *p,
 
 static inline int l4x_handle_page_fault(struct task_struct *p,
                                         struct pt_regs *regs,
-                                        l4_umword_t pfa, l4_umword_t ip,
-                                        l4_umword_t *d0, l4_umword_t *d1)
+                                        l4_umword_t pfa, l4_umword_t err,
+                                        l4_umword_t ip)
 {
-	l4_fpage_t fp;
-	l4_umword_t pferror = 0;
-
 	l4x_debug_stats_pagefault_hit();
 
-	*d0 = pfa;
-
 	if (likely(pfa < TASK_SIZE)) {
-
-		/* Normal page fault with a process' virtual address space
-		 */
-		l4_umword_t phy;
+		/* Normal page fault with a process' virtual address space */
+		l4_umword_t lxaddr;
 		unsigned long attr = 0;
+		l4_fpage_t fp;
+		l4_umword_t pferror = 0;
 
-		phy = l4x_parse_ptabs(p, pfa, &pferror, &fp, &attr);
-		if (phy == (l4_umword_t)(-EFAULT)) {
-			l4_umword_t pfe_old = pferror;
+		lxaddr = l4x_parse_ptabs(p, pfa, &pferror, &fp, &attr);
+		// optimize here: if we found the page, reply immediately
+		// without looking for work, it's just a tlb miss
+		if (lxaddr == (l4_umword_t)(-EFAULT)) {
 			int ret;
 			unsigned long flags;
 
-			local_irq_save(flags);
-			local_irq_enable();
+			local_save_flags(flags);
 			ret = l4x_do_page_fault(pfa, regs, pferror);
 			local_irq_restore(flags);
 			if (ret) {
@@ -211,62 +175,19 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 				return 1;
 			}
 
-			pferror = 0;
-			phy = l4x_parse_ptabs(p, pfa, &pferror, &fp, &attr);
-
-			if (phy == (l4_umword_t)(-EFAULT)) {
-				if (!l4x_no_page_found(p, &fp, ip, pfa)) {
-					printk("segfault @ %lx, ip = %lx\n", pfa, ip);
-					return 1;
-				}
-				phy = 0; /* reset phy */
-			} else if (phy > 0xffff0000) {
-				pte_t *ptep = lookup_pte(p->mm, pfa);
-				printk("%s: phy=%lx pfa=%lx pferror=%lx pte_val=%"
-#ifndef ARCH_arm
-				       "l"
-#endif
-				       "x present=%d\n    old_pferror=%lx %s(%d)\n",
-				       __func__, phy, pfa, pferror, pte_val(*ptep),
-				       pte_present(*ptep), pfe_old,
-				       p->comm, p->pid);
-				return 1;
-			}
 		} else {
 			l4x_debug_stats_pagefault_but_in_PTs_hit();
 			if (pfa & 2)
 				l4x_debug_stats_pagefault_write_hit();
 		}
 
-		/* if the physical address is above RAM, then the user wants
-		 * device memory.  Go grab it. */
-		if (unlikely(phy > (l4_umword_t)high_memory)) {
-			unsigned long devmem = l4x_handle_dev_mem(phy);
-			if (!devmem) {
-				verbose_segfault(p, regs, pfa, ip, pferror);
-				return 1; /* No region found */
-			}
-
-			*d0 = (*d0 & L4_PAGEMASK) | L4_ITEM_MAP | attr;
-			*d1  = l4_fpage(devmem & L4_PAGEMASK,
-			                L4_LOG2_PAGESIZE, L4_FPAGE_RW).fpage;
-		} else {
-			*d0 = (*d0 & L4_PAGEMASK) | L4_ITEM_MAP | attr;
-			*d1  = fp.fpage;
-
-			l4_cache_clean_data
-			    (l4_fpage_page(fp) << L4_LOG2_PAGESIZE,
-			     ((l4_fpage_page(fp) + 1) << l4_fpage_size(fp)));
-		}
 #ifdef CONFIG_L4_FERRET_USER
 	} else if (l4x_ferret_handle_pf(pfa, d0, d1)) {
 		/* Handled */
 #endif
 	/* page fault in upage ? */
 	} else if ((pfa & PAGE_MASK) == UPAGE_USER_ADDRESS && !(pfa & 2)) {
-		*d1 = l4_fpage(upage_addr, L4_LOG2_PAGESIZE,
-		               L4_FPAGE_RX).fpage;
-		*d0 = (*d0 & PAGE_MASK) | L4_ITEM_MAP;
+		/* */
 	} else {
 		printk("WARN: %s: Page-fault above task size: pfa=%lx pc=%lx\n",
 		        p->comm, pfa, ip);
@@ -278,6 +199,53 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 	}
 
 	return 0; /* Success */
+}
+
+static void
+l4x_pf_pfa_to_fp(struct task_struct *p, unsigned long pfa,
+		 l4_umword_t *d0, l4_umword_t *d1)
+{
+	l4_fpage_t fp;
+	l4_umword_t pferror = 0;
+
+	*d0 = pfa;
+
+#ifdef CONFIG_L4_VCPU
+	BUG_ON(!irqs_disabled());
+#endif
+
+	if (likely(pfa < TASK_SIZE)) {
+		l4_umword_t phy;
+		unsigned long attr = 0;
+
+		phy = l4x_parse_ptabs(p, pfa, &pferror, &fp, &attr);
+		if (phy == (l4_umword_t)(-EFAULT)) {
+			*d0 = 0;
+			return;
+		}
+
+		l4_cache_coherent
+		    (l4_fpage_page(fp) << L4_LOG2_PAGESIZE,
+		     ((l4_fpage_page(fp) + 1) << l4_fpage_size(fp)));
+
+		*d0 = (*d0 & L4_PAGEMASK) | L4_ITEM_MAP | attr;
+		*d1  = fp.fpage;
+#ifdef CONFIG_L4_FERRET_USER
+	} else if (l4x_ferret_handle_pf(pfa, d0, d1)) {
+		/* Handled */
+#endif
+	/* page fault in upage ? */
+	} else if ((pfa & PAGE_MASK) == UPAGE_USER_ADDRESS && !(pfa & 2)) {
+		*d1 = l4_fpage(upage_addr, L4_LOG2_PAGESIZE,
+		               L4_FPAGE_RX).fpage;
+		*d0 = (*d0 & PAGE_MASK) | L4_ITEM_MAP;
+	} else {
+		*d0 = 0;
+	}
+
+#ifdef CONFIG_L4_VCPU
+	BUG_ON(!irqs_disabled());
+#endif
 }
 
 #ifndef CONFIG_L4_VCPU
@@ -591,130 +559,109 @@ void l4x_idle(void)
 	int cpu = smp_processor_id();
 	l4_utcb_t *utcb = l4_utcb();
 	l4_cap_idx_t me = l4x_cap_current();
-	char s[9];
+	l4_umword_t u_err;
 
-	snprintf(s, sizeof(s), "idler%d", cpu);
-	s[sizeof(s) - 1] = 0;
+	if (unlikely(!idler_up[cpu])) {
+		char s[9];
 
-	LOG_printf("cpu%d: utcb=%p " PRINTF_L4TASK_FORM "\n",
-	           cpu, utcb, PRINTF_L4TASK_ARG(me));
+		snprintf(s, sizeof(s), "idler%d", cpu);
+		s[sizeof(s) - 1] = 0;
 
-	idler_thread[cpu] = l4lx_thread_create(idler_func, cpu,
-	                                       NULL, NULL, 0,
-	                                       l4x_cap_alloc(),
-	                                       CONFIG_L4_PRIO_IDLER, 0, s, NULL);
-	if (!l4lx_thread_is_valid(idler_thread[cpu])) {
-		LOG_printf("Could not create idler thread... exiting\n");
-		l4x_exit_l4linux();
-	}
-	l4lx_thread_pager_change(l4lx_thread_get_cap(idler_thread[cpu]), me);
-	idler_up[cpu] = 1;
+		LOG_printf("cpu%d: utcb=%p " PRINTF_L4TASK_FORM "\n",
+			   cpu, utcb, PRINTF_L4TASK_ARG(me));
 
-	tick_nohz_idle_enter();
-	rcu_idle_enter();
-
-	while (1) {
-		l4_umword_t u_err;
-
-		per_cpu(l4x_current_proc_run, cpu) = current_thread_info();
-		per_cpu(l4x_idle_running, cpu) = 1;
-		barrier();
-		l4x_dispatch_delete_polling_flag();
-
-		if (need_resched()) {
-			per_cpu(l4x_current_proc_run, cpu) = NULL;
-			per_cpu(l4x_idle_running, cpu) = 0;
-			barrier();
-			l4x_dispatch_set_polling_flag();
-			rcu_idle_exit();
-			tick_nohz_idle_exit();
-			preempt_enable_no_resched();
-			schedule();
-			preempt_disable();
-			tick_nohz_idle_enter();
-			rcu_idle_enter();
-			continue;
+		idler_thread[cpu] = l4lx_thread_create(idler_func, cpu,
+		                                       NULL, NULL, 0,
+		                                       l4x_cap_alloc(),
+		                                       CONFIG_L4_PRIO_IDLER, 0, s, NULL);
+		if (!l4lx_thread_is_valid(idler_thread[cpu])) {
+			LOG_printf("Could not create idler thread... exiting\n");
+			l4x_exit_l4linux();
 		}
-		check_pgt_cache();
-		rmb();
+		l4lx_thread_pager_change(l4lx_thread_get_cap(idler_thread[cpu]), me);
+		idler_up[cpu] = 1;
+	}
 
-		rcu_check_callbacks(cpu, 0);
+
+	per_cpu(l4x_current_proc_run, cpu) = current_thread_info();
+	per_cpu(l4x_idle_running, cpu) = 1;
+	barrier();
 
 #ifdef CONFIG_HOTPLUG_CPU
-		if (cpu_is_offline(cpu))
-			l4x_cpu_dead();
+	if (cpu_is_offline(cpu))
+		l4x_cpu_dead();
 #endif
 
-		TBUF_LOG_IDLE(fiasco_tbuf_log_3val("l4x_idle <", cpu, 0, 0));
+	TBUF_LOG_IDLE(fiasco_tbuf_log_3val("l4x_idle <", cpu, 0, 0));
+
+	local_irq_enable();
 
 wait_again:
 #ifdef CONFIG_L4_SERVER
-		l4x_srv_setup_recv(utcb);
+	l4x_srv_setup_recv(utcb);
 #endif
-		tag = l4_ipc_wait(utcb, &label, L4_IPC_SEND_TIMEOUT_0);
-		error = l4_ipc_error(tag, utcb);
-		u_err = l4_utcb_exc_typeval(l4_utcb_exc_u(utcb));
-		if (l4_msgtag_is_page_fault(tag)) {
-			// must be a hybrid long-IPC PF
-			// for now it's just a PF from the idle-exc-thread
-			data0 = l4_utcb_mr_u(utcb)->mr[0];
-			data1 = l4_utcb_mr_u(utcb)->mr[1];
-			printk("idle-PF(%d): %lx %lx\n", cpu, data0, data1);
-			if ((data0 & 2))
-				l4_touch_rw((void *)data0, 1);
-			else
-				l4_touch_ro((void *)data0, 1);
+	tag = l4_ipc_wait(utcb, &label, L4_IPC_SEND_TIMEOUT_0);
+	error = l4_ipc_error(tag, utcb);
+	u_err = l4_utcb_exc_typeval(l4_utcb_exc_u(utcb));
+	if (l4_msgtag_is_page_fault(tag)) {
+		// must be a hybrid long-IPC PF
+		// for now it's just a PF from the idle-exc-thread
+		data0 = l4_utcb_mr_u(utcb)->mr[0];
+		data1 = l4_utcb_mr_u(utcb)->mr[1];
+		printk("idle-PF(%d): %lx %lx\n", cpu, data0, data1);
+		if ((data0 & 2))
+			l4_touch_rw((void *)data0, 1);
+		else
+			l4_touch_ro((void *)data0, 1);
 
-			tag = l4_ipc_send(L4_SYSF_REPLY, utcb,
-			                  l4_msgtag(0, 0, 0, 0),
-			                  L4_IPC_SEND_TIMEOUT_0);
-			if (l4_ipc_error(tag, utcb))
-				printk("PF reply error\n");
-			goto wait_again;
-		} else
-			data0 = data1 = 0;
+		tag = l4_ipc_send(L4_SYSF_REPLY, utcb,
+		                  l4_msgtag(0, 0, 0, 0),
+		                  L4_IPC_SEND_TIMEOUT_0);
+		if (l4_ipc_error(tag, utcb))
+			printk("PF reply error\n");
+		goto wait_again;
+	} else
+		data0 = data1 = 0;
 
-		per_cpu(l4x_current_proc_run, cpu) = NULL;
-		per_cpu(l4x_idle_running, cpu) = 0;
-		barrier();
-		l4x_dispatch_set_polling_flag();
+	per_cpu(l4x_current_proc_run, cpu) = NULL;
+	per_cpu(l4x_idle_running, cpu) = 0;
+	barrier();
 
-		TBUF_LOG_IDLE(fiasco_tbuf_log_3val("l4x_idle >",
-		              TBUF_TID(label) | (cpu << 20), error, data0));
+	TBUF_LOG_IDLE(fiasco_tbuf_log_3val("l4x_idle >",
+	              TBUF_TID(label) | (cpu << 20), error, data0));
 
-		if (unlikely(error)) {
-			if (error != L4_IPC_RECANCELED) {
-				LOG_printf("idle%d: IPC error = %x (idle)\n",
-				           smp_processor_id(), error);
-				enter_kdebug("l4_idle: ipc_wait failed");
-			}
-			continue;
+	if (unlikely(error)) {
+		if (error != L4_IPC_RECANCELED) {
+			LOG_printf("idle%d: IPC error = %x (idle)\n",
+			           smp_processor_id(), error);
+			enter_kdebug("l4_idle: ipc_wait failed");
 		}
+		return;
+	}
 
-		if (label == 0) {
-			/* We have received a wakeup message from another
-			 * kernel thread. Reschedule. */
-			l4x_hybrid_do_regular_work();
+	if (label == 0) {
+		/* We have received a wakeup message from another
+		 * kernel thread. Reschedule. */
+		l4x_hybrid_do_regular_work();
 
-			/* Paranoia */
-			if (!l4_msgtag_is_exception(tag)
-			    || !l4x_is_triggered_exception(u_err)) {
-				LOG_printf("idler%d: error=%d label=%lx"
-				           " exc-val = 0x%lx [!=%lx]"
-				           "tag = %ld pc = %lx\n",
-				           cpu, error, label, u_err,
-					   l4_utcb_exc_typeval(l4_utcb_exc_u(utcb)),
-					   l4_msgtag_label(tag),
-				           l4_utcb_exc_pc(l4_utcb_exc_u(utcb)));
-				enter_kdebug("Uhh, no exc?!");
-			}
-		} else if (unlikely(label == 0x12)) {
-			LOG_printf("non hybrid in idle?!\n");
-			enter_kdebug("non hybrid in idle?!");
-		} else {
-			if (unlikely(l4x_handle_async_event(label, utcb, tag)))
-				l4x_printf("Async return with error\n");
+		/* Paranoia */
+		if (!l4_msgtag_is_exception(tag)
+		    || !l4x_is_triggered_exception(u_err)) {
+			LOG_printf("idler%d: error=%d label=%lx"
+			           " exc-val = 0x%lx [!=%lx]"
+			           "tag = %ld pc = %lx\n",
+			           cpu, error, label, u_err,
+				   l4_utcb_exc_typeval(l4_utcb_exc_u(utcb)),
+				   l4_msgtag_label(tag),
+			           l4_utcb_exc_pc(l4_utcb_exc_u(utcb)));
+			enter_kdebug("Uhh, no exc?!");
 		}
+	} else if (unlikely(label == 0x12)) {
+		LOG_printf("non hybrid in idle?!\n");
+		enter_kdebug("non hybrid in idle?!");
+	} else {
+		if (unlikely(l4x_handle_async_event(label, utcb, tag)))
+			l4x_printf("Async return with error\n");
 	}
 }
 #endif /* vcpu */
@@ -739,7 +686,7 @@ static void l4x_evict_tasks(struct task_struct *exclude)
 			continue;
 		}
 
-		t = mm->context.task;
+		t = ACCESS_ONCE(mm->context.task);
 
 		if (l4_is_invalid_cap(t)) {
 			task_unlock(p);
@@ -755,7 +702,8 @@ static void l4x_evict_tasks(struct task_struct *exclude)
 				}
 			up_read(&mm->mmap_sem);
 			if (!vma)
-				mm->context.task = L4_INVALID_CAP;
+				if (cmpxchg(&mm->context.task, t, L4_INVALID_CAP) != t)
+					t = L4_INVALID_CAP;
 		} else
 			t = L4_INVALID_CAP;
 
@@ -772,35 +720,32 @@ static void l4x_evict_tasks(struct task_struct *exclude)
 	rcu_read_unlock();
 }
 
-static inline void l4x_dispatch_page_fault(struct task_struct *p,
-                                           struct thread_struct *t,
-                                           struct pt_regs *regsp,
-                                           l4_umword_t *d0,
-                                           l4_umword_t *d1,
-                                           int *reply_with_fpage)
+static inline int l4x_dispatch_page_fault(struct task_struct *p,
+                                          struct thread_struct *t,
+                                          struct pt_regs *regsp)
 {
 	TBUF_LOG_USER_PF(fiasco_tbuf_log_3val("U-PF   ",
 	                 TBUF_TID(p->thread.user_thread_id),
 	                 l4x_l4pfa(t), regs_pc(p)));
 
-	if (unlikely(l4x_handle_page_fault_with_exception(t, regsp))) {
-		*reply_with_fpage = 0;
-		return;
-	}
+	if (unlikely(l4x_handle_page_fault_with_exception(t, regsp)))
+		return 0;
 
-	if (l4x_handle_page_fault(p, regsp, l4x_l4pfa(t),
-	                          regs_pc(p), d0, d1)) {
+	if (l4x_handle_page_fault(p, regsp, l4x_l4pfa(t), t->error_code,
+	                          regs_pc(p))) {
+		local_irq_enable();
 		if (!signal_pending(p))
 			force_sig(SIGSEGV, p);
 		l4x_do_signal(regsp, 0);
-		*reply_with_fpage = 0;
-		return;
+		return 0;
 	}
 
+#ifndef CONFIG_L4_VCPU
 	if (need_resched())
 		schedule();
+#endif
 
-	*reply_with_fpage = 1;
+	return 1;
 }
 
 static inline
@@ -984,8 +929,7 @@ asmlinkage void l4x_user_dispatcher(void)
 
 	while (1) {
 		if (l4x_ispf(t)) {
-			l4x_dispatch_page_fault(p, t, task_pt_regs(p),
-			                        &data0, &data1, &reply_with_fpage);
+			reply_with_fpage = l4x_dispatch_page_fault(p, t, task_pt_regs(p));
 		} else {
 			if ((ret = l4x_dispatch_exception(p, t, 0, task_pt_regs(p))))
 				goto only_receive_IPC;
@@ -1023,7 +967,12 @@ reply_IPC:
 
 		/* send the reply message and wait for a new request. */
 		if (reply_with_fpage) {
-			int i = per_cpu(utcb_snd_size, cpu);
+			int i;
+			l4_umword_t data0 = 0, data1 = 0;
+
+			l4x_pf_pfa_to_fp(p, l4x_l4pfa(t), &data0, &data1);
+
+			i = per_cpu(utcb_snd_size, cpu);
 			l4_utcb_mr_u(utcb)->mr[i]     = data0;
 			l4_utcb_mr_u(utcb)->mr[i + 1] = data1;
 		}
@@ -1176,12 +1125,14 @@ void l4x_vcpu_iret(struct task_struct *p,
 	utcb = l4_utcb();
 	vcpu = l4x_vcpu_state_current();
 
+
 	if (copy_ptregs)
 		state_to_vcpu(vcpu, regs, p);
 	else
 		vcpu->saved_state &= ~L4_VCPU_F_USER_MODE;
 
 	if (likely(vcpu->saved_state & L4_VCPU_F_USER_MODE)) {
+		l4x_pte_check_empty(p->active_mm);
 create_task:
 		if (unlikely(p->mm && l4_is_invalid_cap(p->mm->context.task))) {
 			l4_cap_idx_t c = l4x_user_task_create();
@@ -1252,6 +1203,9 @@ create_task:
 		if (l4_ipc_error(tag, utcb) == L4_IPC_SEMAPFAILED) {
 			l4x_evict_tasks(p);
 		} else if (l4_error(tag) == -L4_ENOENT) {
+			/* In case of new task with same cap-idx we need to
+			 * force a new lookup */
+			vcpu->user_task = L4_INVALID_CAP;
 			goto create_task;
 		} else{
 			LOG_printf("l4x: cpu%d, resume returned: %ld/%ld [%x, %lx/%lx]\n",
@@ -1315,7 +1269,7 @@ l4x_vcpu_entry_kern(l4_vcpu_state_t *vcpu)
 	}
 #endif
 
-	mb();
+	smp_mb();
 	l4x_vcpu_iret(p, t, regsp, 0, 0, copy_ptregs);
 }
 
@@ -1346,7 +1300,7 @@ void l4x_vcpu_entry(l4_vcpu_state_t *vcpu)
 	struct thread_struct *t;
 
 	vcpu->state = 0;
-	mb();
+	smp_mb();
 
 	if (likely((vcpu->saved_state & L4_VCPU_F_USER_MODE)))
 		l4x_vcpu_entry_user_arch();
@@ -1371,21 +1325,21 @@ void l4x_vcpu_entry(l4_vcpu_state_t *vcpu)
 		l4x_vcpu_handle_irq(vcpu, regsp);
 		l4x_pre_iret_work(regsp, p, 0, 0);
 	} else if (l4vcpu_is_page_fault_entry(vcpu)) {
-		l4_umword_t data0 = 0, data1 = 0;
-		int reply_with_fpage;
-
-		l4x_dispatch_page_fault(p, t, regsp,
-		                        &data0, &data1, &reply_with_fpage);
+		int reply_with_fpage = l4x_dispatch_page_fault(p, t, regsp);
 
 		l4x_pre_iret_work(regsp, p, 0, 0);
 
-		if (reply_with_fpage)
+		if (reply_with_fpage) {
+			l4_umword_t data0 = 0, data1 = 0;
+			local_irq_disable();
+			l4x_pf_pfa_to_fp(p, l4x_l4pfa(t), &data0, &data1);
 			l4x_vcpu_iret(p, t, regsp, data0, data1, 1);
+		}
 	} else {
 		l4x_dispatch_exception(p, t, vcpu, regsp);
 	}
 
-	mb();
+	smp_mb();
 	l4x_vcpu_iret(p, t, regsp, 0, 0, 1);
 }
 

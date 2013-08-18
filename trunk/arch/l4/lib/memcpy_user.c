@@ -47,18 +47,19 @@ static void log_efault(const char *str, const void *user_addr,
 static inline int __copy_to_user_page(void *to, const void *from,
 				      unsigned long n)
 {
-	unsigned long page, offset;
+	unsigned long page, offset, flags;
 
 #ifdef DEBUG_MEMCPY_TOFS
 	printk("__copy_to_user_page to: %p, from: %p, len: %08lx\n",
 	       to, from, n);
 #endif
-	if ((page = parse_ptabs_write((unsigned long)to, &offset)) != -EFAULT) {
+	if ((page = parse_ptabs_write((unsigned long)to, &offset, &flags)) != -EFAULT) {
 #ifdef DEBUG_MEMCPY_TOFS
 		printk("    __copy_to_user_page writing to: %08lx\n",
 		       (page + offset));
 #endif
 		memcpy((void *)(page + offset), from, n);
+		local_irq_restore(flags);
 		return 0;
 	}
 	log_efault("__copy_to_user_page", to, from, n);
@@ -104,17 +105,19 @@ EXPORT_SYMBOL(copy_to_user);
 static inline int __copy_from_user_page(void *to, const void *from,
 					unsigned long n)
 {
-	unsigned long page, offset;
+	unsigned long page, offset, flags;
 
 #ifdef DEBUG_MEMCPY_FROMFS
 	printk("%s to: %p, from: %p, len: %08lx\n", __func__, to, from, n);
 #endif
-	if ((page = parse_ptabs_read((unsigned long)from, &offset)) != -EFAULT) {
+
+	if ((page = parse_ptabs_read((unsigned long)from, &offset, &flags)) != -EFAULT) {
 #ifdef DEBUG_MEMCPY_FROMFS
 		printk("  %s reading from: %08lx\n",
 		       __func__, (page + offset));
 #endif
 		memcpy(to, (void *)(page + offset), n);
+		local_irq_restore(flags);
 		return 0;
 	}
 	log_efault(__func__, from, to, n);
@@ -169,17 +172,18 @@ EXPORT_SYMBOL(__copy_from_user_ll_nozero);
 
 static inline int __clear_user_page(void * address, unsigned long n)
 {
-	unsigned long page, offset;
+	unsigned long page, offset, flags;
 
 #ifdef DEBUG_MEMCPY_TOFS
 	printk("%s: %p, len: %08lx\n", __func__, address, n);
 #endif
-	page = parse_ptabs_write((unsigned long)address, &offset);
+	page = parse_ptabs_write((unsigned long)address, &offset, &flags);
 	if (page != -EFAULT) {
 #ifdef DEBUG_MEMCPY_TOFS
 		printk("    writing to: %08lx\n", (page + offset));
 #endif
 		memset((void *)(page + offset), 0, n);
+		local_irq_restore(flags);
 		return 0;
 	}
 	log_efault(__func__, address, 0, n);
@@ -264,13 +268,13 @@ do {									   \
 static inline int __strncpy_from_user_page(char * to, const char * from,
 					   unsigned long n)
 {
-	unsigned long page, offset;
+	unsigned long page, offset, flags;
 
 #ifdef DEBUG_MEMCPY_FROMFS
 	printk("%s: to: %p, from: %p, len: %08lx\n",
 	       __func__, to, from, n);
 #endif
-	page = parse_ptabs_read((unsigned long)from, &offset);
+	page = parse_ptabs_read((unsigned long)from, &offset, &flags);
 	if (page != -EFAULT) {
 #ifdef DEBUG_MEMCPY_FROMFS
 		printk("    %s reading from: %08lx len: 0x%lx\n",
@@ -282,6 +286,7 @@ static inline int __strncpy_from_user_page(char * to, const char * from,
 		 *             number of remaining bytes
 		 */
 		__do_strncpy_from_user_page(to, (char *)(page + offset), n);
+		local_irq_restore(flags);
 		return n;
 	}
 	log_efault(__func__, from, to, n);
@@ -342,12 +347,12 @@ EXPORT_SYMBOL(strncpy_from_user);
 static inline int __strnlen_from_user_page(const char *from,
 					   unsigned long n, unsigned long *len)
 {
-	unsigned long page, offset;
+	unsigned long page, offset, flags;
 
 #ifdef DEBUG_MEMCPY_FROMFS
 	printk("%s from: %p, len: %08lx\n", __func__, from, n);
 #endif
-	page = parse_ptabs_read((unsigned long)from, &offset);
+	page = parse_ptabs_read((unsigned long)from, &offset, &flags);
 	if (page != -EFAULT) {
 		int end;
 #ifdef ARCH_x86
@@ -385,6 +390,7 @@ static inline int __strnlen_from_user_page(const char *from,
 			*len += i;
 		}
 #endif
+		local_irq_restore(flags);
 		return end;
 	}
 	log_efault(__func__, from, 0, n);

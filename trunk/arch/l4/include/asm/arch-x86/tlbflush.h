@@ -10,13 +10,26 @@
 #ifdef CONFIG_PARAVIRT
 #include <asm/paravirt.h>
 #else
-/* L4Linux does not handle TLB flushing */
-#define __flush_tlb() do { } while (0)
-#define __flush_tlb_global() do { } while (0)
-#define __flush_tlb_single(addr) do { } while (0)
+#ifdef CONFIG_L4
 void l4x_update_mapping(unsigned long addr);
+static inline void l4x_do_flush(void)
+{
+	preempt_disable();
+	l4x_unmap_log_flush();
+	preempt_enable();
+}
+
+#define __flush_tlb()            l4x_do_flush()
+#define __flush_tlb_global()     l4x_do_flush()
+#define __flush_tlb_single(addr) l4x_do_flush()
+#else
+#define __flush_tlb() __native_flush_tlb()
+#define __flush_tlb_global() __native_flush_tlb_global()
+#define __flush_tlb_single(addr) __native_flush_tlb_single(addr)
+#endif
 #endif
 
+#ifndef CONFIG_L4
 static inline void __native_flush_tlb(void)
 {
 	native_write_cr3(native_read_cr3());
@@ -53,6 +66,7 @@ static inline void __native_flush_tlb_single(unsigned long addr)
 {
 	asm volatile("invlpg (%0)" ::"r" (addr) : "memory");
 }
+#endif
 
 static inline void __flush_tlb_all(void)
 {
@@ -64,7 +78,9 @@ static inline void __flush_tlb_all(void)
 
 static inline void __flush_tlb_one(unsigned long addr)
 {
+#ifdef CONFIG_L4
 	l4x_update_mapping(addr);
+#endif
 		__flush_tlb_single(addr);
 }
 

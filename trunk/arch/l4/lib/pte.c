@@ -1,10 +1,10 @@
 #include <linux/mm.h>
-#include <linux/spinlock.h>
 #include <linux/vmalloc.h>
 
 #include <asm/segment.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
+#include <asm/tlbflush.h>
 
 #include <asm/api/config.h>
 
@@ -24,6 +24,131 @@
 #include <asm/l4x/dma.h>
 #endif
 
+enum {
+	L4X_MM_CONTEXT_UNMAP_LOG_COUNT = 6, // tune this
+};
+
+struct unmap_log_entry_t {
+	struct mm_struct *mm;
+	unsigned long     addr;
+	unsigned char     rights;
+	unsigned char     size;
+
+};
+
+struct unmap_log_t {
+	unsigned cnt;
+	struct unmap_log_entry_t log[L4X_MM_CONTEXT_UNMAP_LOG_COUNT];
+};
+
+static DEFINE_PER_CPU(struct unmap_log_t, unmap_log);
+
+void l4x_pte_check_empty(struct mm_struct *mm)
+{
+	if (this_cpu_read(unmap_log.cnt)) {
+		struct unmap_log_t *log = &__get_cpu_var(unmap_log);
+		int i;
+
+		for (i = 0; i < log->cnt; ++i) {
+			if (mm != log->log[i].mm)
+				continue;
+
+			l4x_printf("L4x: exiting with non-flushed entry: %lx:%lx[%d,%x]\n",
+				   log->log[i].mm->context.task,
+			           log->log[i].addr, log->log[i].size,
+			           log->log[i].rights);
+		}
+
+	}
+}
+
+void l4x_unmap_log_flush(void)
+{
+	unsigned i;
+	struct unmap_log_t *log = &__get_cpu_var(unmap_log);
+	unsigned long flags;
+
+	local_irq_save(flags);
+
+	for (i = 0; i < log->cnt; ++i) {
+		l4_msgtag_t tag;
+		struct mm_struct *mm = log->log[i].mm;
+
+		if (unlikely(l4_is_invalid_cap(mm->context.task)))
+			continue;
+
+		tag = L4XV_FN(l4_msgtag_t,
+		              l4_task_unmap(mm->context.task,
+		                            l4_fpage(log->log[i].addr,
+		                                     log->log[i].size,
+		                                     log->log[i].rights),
+		                            L4_FP_ALL_SPACES));
+		if (l4_error(tag)) {
+			l4x_printf("l4_task_unmap error %ld: t=%lx\n",
+			           l4_error(tag), mm->context.task);
+			WARN_ON(1);
+		}
+		else
+			if (0)l4x_printf("flushing(%d) %lx:%08lx[%d,%x]\n",
+					i,
+					mm->context.task,
+			           log->log[i].addr, log->log[i].size,
+			           log->log[i].rights);
+	}
+
+	log->cnt = 0;
+	local_irq_restore(flags);
+}
+
+static void empty_func(void *ignored)
+{
+}
+
+static void unmap_log_add(struct mm_struct *mm,
+                          unsigned long uaddr, unsigned long rights)
+{
+	int i, do_flush = 0;
+	struct unmap_log_t *log = &__get_cpu_var(unmap_log);
+	unsigned long flags;
+
+	BUG_ON(!mm);
+
+	local_irq_save(flags);
+
+	BUG_ON(log->cnt >= L4X_MM_CONTEXT_UNMAP_LOG_COUNT);
+
+	i = log->cnt++;
+	log->log[i].addr   = uaddr & PAGE_MASK;
+	log->log[i].mm     = mm;
+	log->log[i].rights = rights;
+	log->log[i].size   = PAGE_SHIFT;
+
+	/* _simple_ merge with previous entries */
+	while (i) {
+		struct unmap_log_entry_t *prev = &log->log[i - 1];
+		struct unmap_log_entry_t *cur  = &log->log[i];
+
+		if (   prev->addr + (1 << prev->size) == cur->addr
+		    && prev->size == cur->size
+		    && (prev->addr & ((1 << (prev->size + 1)) - 1)) == 0
+		    && prev->mm == cur->mm
+		    && prev->rights == cur->rights) {
+			prev->size += 1;
+			log->cnt--;
+			i--;
+		} else
+			break;
+	}
+
+	do_flush = log->cnt == L4X_MM_CONTEXT_UNMAP_LOG_COUNT;
+	local_irq_restore(flags);
+
+	if (do_flush) {
+		on_each_cpu(empty_func, NULL, 1);
+		l4x_unmap_log_flush();
+	}
+}
+
 static void l4x_flush_page(struct mm_struct *mm,
                            unsigned long address,
                            unsigned long vaddr,
@@ -32,40 +157,22 @@ static void l4x_flush_page(struct mm_struct *mm,
 {
 	l4_msgtag_t tag;
 
+	if (IS_ENABLED(CONFIG_ARM))
+		return;
+
 	if (mm && mm->context.l4x_unmap_mode == L4X_UNMAP_MODE_SKIP)
 		return;
 
-	/* some checks: */
-	if (address > 0x80000000UL) {
-		unsigned long remap;
-		remap = find_ioremap_entry(address);
-
-		/* VU: it may happen, that memory is not remapped but mapped in
-		 * user space, if a task mmaps /dev/mem but never accesses it.
-		 * Therefore, we fail silently...
-		 */
-		if (!remap)
-			return;
-
-		address = remap;
-
-	} else if ((address & PAGE_MASK) == 0)
+	if ((address & PAGE_MASK) == 0)
 		address = PAGE0_PAGE_ADDRESS;
 
-#if 0
-	/* only for debugging */
-	else {
-		if ((address >= (unsigned long)high_memory)
-		    && (address < 0x80000000UL)) {
-			printk("flushing non physical page (0x%lx)\n",
-				    address);
-			enter_kdebug("flush_page: non physical page");
-		}
+	if (likely(mm)) {
+		unmap_log_add(mm, vaddr, flush_rights);
+		return;
 	}
-#endif
 
 	/* do the real flush */
-	if (mm && !l4_is_invalid_cap(mm->context.task) && mm->context.task) {
+	if (mm && !l4_is_invalid_cap(mm->context.task)) {
 		/* Direct flush in the child, use virtual address in the
 		 * child address space */
 		tag = L4XV_FN(l4_msgtag_t,
@@ -82,6 +189,7 @@ static void l4x_flush_page(struct mm_struct *mm,
 		                                     flush_rights),
 			                    L4_FP_OTHER_SPACES));
 	}
+
 	if (l4_error(tag))
 		l4x_printf("l4_task_unmap error %ld\n", l4_error(tag));
 }
@@ -124,14 +232,14 @@ unsigned long l4x_set_pte(struct mm_struct *mm,
 	}
 
 	/* Ok, now actually flush or remap the page */
-	L4XV_FN_v(l4x_flush_page(mm, pte_val(old), addr, PAGE_SHIFT, flush_rights));
+	l4x_flush_page(mm, pte_val(old), addr, PAGE_SHIFT, flush_rights);
 	return pte_val(pteval);
 }
 
 void l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte_t pteval)
 {
 	/* Invalidate page */
-	L4XV_FN_v(l4x_flush_page(mm, pte_val(pteval), addr, PAGE_SHIFT, L4_FPAGE_RWX));
+	l4x_flush_page(mm, pte_val(pteval), addr, PAGE_SHIFT, L4_FPAGE_RWX);
 }
 
 

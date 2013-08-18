@@ -112,6 +112,11 @@
  */
 #define X86_PLATFORM_IPI_VECTOR		0xf7
 
+/* Vector for KVM to deliver posted interrupt IPI */
+#ifdef CONFIG_HAVE_KVM
+#define POSTED_INTR_VECTOR		0xf2
+#endif
+
 /*
  * IRQ work vector:
  */
@@ -154,7 +159,7 @@ static inline int invalid_vm86_irq(int irq)
  * static arrays.
  */
 
-#define NR_IRQS_LEGACY			  192 //l4: 16 -> 192
+#define NR_IRQS_LEGACY			  16
 
 #define IO_APIC_VECTOR_LIMIT		( 32 * MAX_IO_APICS )
 
@@ -166,6 +171,15 @@ static inline int invalid_vm86_irq(int irq)
 		(NR_VECTORS + IO_APIC_VECTOR_LIMIT))
 #else /* !CONFIG_X86_IO_APIC: */
 # define NR_IRQS			NR_IRQS_LEGACY
+#endif
+
+#ifdef CONFIG_L4
+#undef NR_IRQS
+#undef NR_IRQS_LEGACY
+
+#define NR_IRQS_HW 64
+#define NR_IRQS_LEGACY NR_IRQS
+#include <asm/generic/irq-vectors.h>
 #endif
 
 #endif /* _ASM_X86_IRQ_VECTORS_H */

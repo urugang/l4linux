@@ -13,12 +13,12 @@
 #include <linux/perf_event.h>		/* perf_sw_event		*/
 #include <linux/hugetlb.h>		/* hstate_index_to_shift	*/
 #include <linux/prefetch.h>		/* prefetchw			*/
+#include <linux/context_tracking.h>	/* exception_enter(), ...	*/
 
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
 #include <asm/pgalloc.h>		/* pgd_*(), ...			*/
 #include <asm/kmemcheck.h>		/* kmemcheck_*(), ...		*/
 #include <asm/fixmap.h>			/* VSYSCALL_START		*/
-#include <asm/context_tracking.h>	/* exception_enter(), ...	*/
 
 /*
  * Page fault error code bits:
@@ -321,7 +321,11 @@ static bool low_pfn(unsigned long pfn)
 
 static void dump_pagetable(unsigned long address)
 {
+#ifdef CONFIG_L4
+	pgd_t *base = current->mm->pgd;
+#else
 	pgd_t *base = __va(read_cr3());
+#endif
 	pgd_t *pgd = &base[pgd_index(address)];
 	pmd_t *pmd;
 	pte_t *pte;
@@ -565,7 +569,7 @@ static int is_f00f_bug(struct pt_regs *regs, unsigned long address)
 	/*
 	 * Pentium F0 0F C7 C8 bug workaround:
 	 */
-	if (boot_cpu_data.f00f_bug) {
+	if (boot_cpu_has_bug(X86_BUG_F00F)) {
 		nr = (address - idt_descr.address) >> 3;
 
 		if (nr == 6) {
@@ -1237,9 +1241,11 @@ good_area:
 dotraplinkage int __kprobes
 l4x_do_page_fault(unsigned long __address, struct pt_regs *regs, unsigned long error_code)
 {
+	enum ctx_state prev_state;
+
 	int r;
-	exception_enter(regs);
+	prev_state = exception_enter();
 	r = __do_page_fault(__address, regs, error_code);
-	exception_exit(regs);
+	exception_exit(prev_state);
 	return r;
 }

@@ -165,10 +165,6 @@ u64 arch_irq_stat_cpu(unsigned int cpu)
 u64 arch_irq_stat(void)
 {
 	u64 sum = atomic_read(&irq_err_count);
-
-#ifdef CONFIG_X86_IO_APIC
-	sum += atomic_read(&irq_mis_count);
-#endif
 	return sum;
 }
 
@@ -184,12 +180,16 @@ unsigned int __irq_entry do_IRQ(int irq, struct pt_regs *regs)
 
 	/* high bit used in ret_from_ code  */
 	unsigned vector = ~regs->orig_ax;
-	//l4/unsigned irq;
+#ifndef CONFIG_L4
+	unsigned irq;
+#endif
 
 	irq_enter();
 	exit_idle();
 
-	//l4/irq = __this_cpu_read(vector_irq[vector]);
+#ifndef CONFIG_L4
+	irq = __this_cpu_read(vector_irq[vector]);
+#endif
 
 	if (!handle_irq(irq, regs)) {
 		ack_APIC_irq();
@@ -227,6 +227,28 @@ void smp_x86_platform_ipi(struct pt_regs *regs)
 
 	set_irq_regs(old_regs);
 }
+
+#ifdef CONFIG_HAVE_KVM
+/*
+ * Handler for POSTED_INTERRUPT_VECTOR.
+ */
+void smp_kvm_posted_intr_ipi(struct pt_regs *regs)
+{
+	struct pt_regs *old_regs = set_irq_regs(regs);
+
+	ack_APIC_irq();
+
+	irq_enter();
+
+	exit_idle();
+
+	inc_irq_stat(kvm_posted_intr_ipis);
+
+	irq_exit();
+
+	set_irq_regs(old_regs);
+}
+#endif
 
 EXPORT_SYMBOL_GPL(vector_used_by_percpu_irq);
 

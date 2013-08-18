@@ -36,7 +36,6 @@
 #include <asm/generic/upage.h>
 #include <asm/generic/log.h>
 #include <asm/generic/memory.h>
-#include <asm/generic/process.h>
 #include <asm/generic/setup.h>
 #include <asm/generic/ioremap.h>
 #include <asm/generic/hybrid.h>
@@ -88,8 +87,8 @@ enum {
 
 #else
 
-#define TBUF_LOG_IDLE(x)
-#define TBUF_LOG_WAKEUP_IDLE(x)
+#define TBUF_LOG_IDLE(x) TBUF_DO_IT(x)
+#define TBUF_LOG_WAKEUP_IDLE(x) TBUF_DO_IT(x)
 #define TBUF_LOG_USER_PF(x)
 #define TBUF_LOG_SWI(x)
 #define TBUF_LOG_EXCP(x)
@@ -170,14 +169,6 @@ static inline int l4x_hybrid_check_after_syscall(l4_utcb_t *utcb)
 	return exc->err == 0x00310000 // after L4 syscall
 	       //|| exc->err == 0x00200000
 	       || exc->err == 0x00500000; // L4 syscall exr
-}
-
-static inline void l4x_dispatch_delete_polling_flag(void)
-{
-}
-
-static inline void l4x_dispatch_set_polling_flag(void)
-{
 }
 
 #ifdef CONFIG_L4_VCPU
@@ -1011,7 +1002,7 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
 
 			   xxxxx:       ebyyyyyy        bl      80f0 <__aeabi_read_tp>
 			 */
-			unsigned long tlsfunc, offset;
+			unsigned long tlsfunc, offset, flags;
 
 			val &= 0x00ffffff;
 			if (val & (1 << 23))
@@ -1021,24 +1012,32 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
 
 			tlsfunc = val;
 
-			val = parse_ptabs_read(val, &offset);
+			val = parse_ptabs_read(val, &offset, &flags);
 			if (val == -EFAULT)
 				goto trap_and_emulate;
 			val += offset;
 
-			if (*(unsigned long *)val != 0xe3e00a0f)
+			if (*(unsigned long *)val != 0xe3e00a0f) {
+				local_irq_restore(flags);
 				goto trap_and_emulate;
+			}
 
-			if (unlikely((val & L4_PAGEMASK) != ((val + 4) & L4_PAGEMASK)))
+			if (unlikely((val & L4_PAGEMASK) != ((val + 4) & L4_PAGEMASK))) {
+				local_irq_restore(flags);
 				goto trap_and_emulate;
+			}
 
-			if (*(unsigned long *)(val + 4) != 0xe240f01f)
+			if (*(unsigned long *)(val + 4) != 0xe240f01f) {
+				local_irq_restore(flags);
 				goto trap_and_emulate;
+			}
 
 			*(unsigned long *)(val +  0) = 0xe3a00103; // mov r0, #0xc0000000
 			*(unsigned long *)(val +  4) = 0xe240f020; // sub pc, r0, #32
 
 			l4_cache_coherent(val, val + 12);
+
+			local_irq_restore(flags);
 
 			regs->ARM_pc = tlsfunc;
 			if (USER_PATCH_GETTLS_SHOW)
@@ -1047,7 +1046,7 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
 		}
 
 		if (val == 0xe240f01f) {
-			unsigned long offset;
+			unsigned long offset, flags;
 
 			// xxxxc:       e3e00a0f        mvn     r0, #61440      ; 0xf000
 			// xxxx0:       e1a0e00f        mov     lr, pc
@@ -1064,13 +1063,15 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
 			if (unlikely(((regs->ARM_lr - 4) & L4_PAGEMASK) != ((regs->ARM_lr - 12) & L4_PAGEMASK)))
 				goto trap_and_emulate;
 
-			val = parse_ptabs_read(regs->ARM_lr - 12, &offset);
+			val = parse_ptabs_read(regs->ARM_lr - 12, &offset, &flags);
 			if (val == -EFAULT)
 				goto trap_and_emulate;
 			val += offset;
 
 			*(unsigned long *)(val + 0) = 0xe3a00103; // mov r0, #0xc0000000
 			*(unsigned long *)(val + 8) = 0xe240f020; // sub pc, r0, #32;
+
+			local_irq_restore(flags);
 
 			l4_cache_coherent(val, val + 12);
 
@@ -1113,7 +1114,7 @@ trap_and_emulate:
 			goto trap_and_emulate_cmpxchg;
 
 		if (val == 0xe243f03f) {
-			unsigned long offset;
+			unsigned long offset, flags;
 
 			// 2fca0:       e3e03a0f        mvn     r3, #61440      ; 0xf000
 			// 2fca4:       e1a0e00f        mov     lr, pc
@@ -1130,7 +1131,7 @@ trap_and_emulate:
 			if (unlikely(((regs->ARM_lr - 4) & L4_PAGEMASK) != ((regs->ARM_lr - 12) & L4_PAGEMASK)))
 				goto trap_and_emulate_cmpxchg;
 
-			val = parse_ptabs_read(regs->ARM_lr - 12, &offset);
+			val = parse_ptabs_read(regs->ARM_lr - 12, &offset, &flags);
 			if (val == -EFAULT)
 				goto trap_and_emulate_cmpxchg;
 			val += offset;
@@ -1139,6 +1140,8 @@ trap_and_emulate:
 			*(unsigned long *)(val + 8) = 0xe243f040;  // sub pc, r3, #64
 
 			l4_cache_coherent(val, val + 12);
+
+			local_irq_restore(flags);
 
 			regs->ARM_pc = regs->ARM_lr - 12;
 			if (USER_PATCH_CMPXCHG_SHOW)
@@ -1181,7 +1184,7 @@ trap_and_emulate_cmpxchg:
 			goto trap_and_emulate_dmb;
 
 		if (val == 0xe24cf05f) {
-			unsigned long offset;
+			unsigned long offset, flags;
 
 			// xxxxc:       e3e0ca0f        mvn     ip, #61440      ; 0xf000
 			// xxxx0:       e1a0e00f        mov     lr, pc
@@ -1198,7 +1201,7 @@ trap_and_emulate_cmpxchg:
 			if (unlikely(((regs->ARM_lr - 4) & L4_PAGEMASK) != ((regs->ARM_lr - 12) & L4_PAGEMASK)))
 				goto trap_and_emulate_dmb;
 
-			val = parse_ptabs_read(regs->ARM_lr - 12, &offset);
+			val = parse_ptabs_read(regs->ARM_lr - 12, &offset, &flags);
 			if (val == -EFAULT)
 				goto trap_and_emulate_dmb;
 			val += offset;
@@ -1207,6 +1210,8 @@ trap_and_emulate_cmpxchg:
 			*(unsigned long *)(val + 8) = 0xe24cf060;  // sub pc, ip, #96     ; 0x60
 
 			l4_cache_coherent(val, val + 12);
+
+			local_irq_restore(flags);
 
 			regs->ARM_pc = regs->ARM_lr - 12;
 			return 1; // handled

@@ -5,10 +5,7 @@
 #include <asm/uaccess.h>
 #include <asm/generic/memory.h>
 
-/* #define DEBUG_PUT_USER */
-/* #define DEBUG_GET_USER */
-
-//#define LOG_EFAULT
+/* #define LOG_EFAULT */
 #ifdef LOG_EFAULT
 #include <l4/sys/kdebug.h>
 static void log_efault(const char *str, const void *address)
@@ -28,16 +25,17 @@ static void log_efault(const char *str, const void *address)
 
 long __get_user_1(unsigned char *val, const void __user *address)
 {
-	unsigned long page, offset;
+	unsigned long page, offset, flags;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
 		*val = *(unsigned char*)address;
 		return 0;
 	}
 
-	page = parse_ptabs_read((unsigned long)address, &offset);
+	page = parse_ptabs_read((unsigned long)address, &offset, &flags);
 	if (page != -EFAULT) {
 		*val = *(unsigned char *)(page + offset);
+		local_irq_restore(flags);
 		return 0;
 	}
 	log_efault(__func__, address);
@@ -55,9 +53,11 @@ long __get_user_2(unsigned short *val, const void __user *address)
 	}
 
 	if (((unsigned long)address & ~PAGE_MASK) != ~PAGE_MASK) {
-		page = parse_ptabs_read((unsigned long)address, &offset);
+		unsigned long flags;
+		page = parse_ptabs_read((unsigned long)address, &offset, &flags);
 		if (page != -EFAULT) {
 			*val = *(unsigned short *)(page + offset);
+			local_irq_restore(flags);
 			return 0;
 		}
 	} else {
@@ -77,13 +77,6 @@ EXPORT_SYMBOL(__get_user_2);
 long __get_user_4(unsigned int *val, const void __user *address)
 {
 	unsigned long page, offset;
-#ifdef DEBUG_GET_USER
-	printk("%d (%s): get_user_long %p, tid=" PRINTF_L4TASK_FORM
-	       " frm: %p\n",
-	       current->pid, current->comm, address,
-	       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
-	       __builtin_return_address(0));
-#endif
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
 		*val = *(unsigned long*)address;
@@ -92,9 +85,11 @@ long __get_user_4(unsigned int *val, const void __user *address)
 
 	if (((unsigned long)address & ~PAGE_MASK)
 			<= (PAGE_SIZE - sizeof(*val))) {
-		page = parse_ptabs_read((unsigned long)address, &offset);
+		unsigned long flags;
+		page = parse_ptabs_read((unsigned long)address, &offset, &flags);
 		if (page != -EFAULT) {
 			*val = *(unsigned long *)(page + offset);
+			local_irq_restore(flags);
 			return 0;
 		}
 	} else {
@@ -131,14 +126,6 @@ long __get_user_8(unsigned long long *val, const void __user *address)
 {
 	unsigned long page, offset;
 
-#ifdef DEBUG_GET_USER
-	printk("%d (%s): get_user_8 %p, tid=" PRINTF_L4TASK_FORM
-	       " frm: %p\n",
-	       current->pid, current->comm, address,
-	       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
-	       __builtin_return_address(0));
-#endif
-
 	if (segment_eq(get_fs(), KERNEL_DS)) {
 		*val = *(unsigned long*)address;
 		return 0;
@@ -146,9 +133,11 @@ long __get_user_8(unsigned long long *val, const void __user *address)
 
 	if (((unsigned long)address & ~PAGE_MASK)
 			<= (PAGE_SIZE - sizeof(*val))) {
-		page = parse_ptabs_read((unsigned long)address, &offset);
+		unsigned long flags;
+		page = parse_ptabs_read((unsigned long)address, &offset, &flags);
 		if (page != -EFAULT) {
 			*val = *(unsigned long *)(page + offset);
+			local_irq_restore(flags);
 			return 0;
 		}
 	} else {
@@ -166,16 +155,17 @@ EXPORT_SYMBOL(__get_user_8);
 
 long __put_user_1(unsigned char val, const void __user *address)
 {
-	unsigned long page, offset;
+	unsigned long page, offset, flags;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
 		*(unsigned char*)address = val;
 		return 0;
 	}
 
-	page = parse_ptabs_write((unsigned long)address, &offset);
+	page = parse_ptabs_write((unsigned long)address, &offset, &flags);
 	if (page != -EFAULT) {
 		*(unsigned char *)(page + offset) = val;
+		local_irq_restore(flags);
 		return 0;
 	}
 	log_efault(__func__, address);
@@ -193,9 +183,11 @@ long __put_user_2(unsigned short val, const void __user *address)
 	}
 
 	if (((unsigned long)address & ~PAGE_MASK) != ~PAGE_MASK) {
-		page = parse_ptabs_write((unsigned long)address, &offset);
+		unsigned long flags;
+		page = parse_ptabs_write((unsigned long)address, &offset, &flags);
 		if (page != -EFAULT) {
 			*(unsigned short *)(page + offset) = val;
+			local_irq_restore(flags);
 			return 0;
 		}
 	} else {
@@ -221,9 +213,11 @@ long __put_user_4(unsigned int val, const void __user *address)
 	}
 
 	if (((unsigned long)address & ~PAGE_MASK) <= (PAGE_SIZE - sizeof(val))) {
-		page = parse_ptabs_write((unsigned long)address, &offset);
+		unsigned long flags;
+		page = parse_ptabs_write((unsigned long)address, &offset, &flags);
 		if (page != -EFAULT) {
 			*(unsigned long *)(page + offset) = val;
+			local_irq_restore(flags);
 			return 0;
 		}
 	} else {
@@ -264,9 +258,11 @@ long __put_user_8(unsigned long long val, const void __user *address)
 	}
 
 	if (((unsigned long)address & ~PAGE_MASK) <= (PAGE_SIZE - sizeof(val))) {
-		page = parse_ptabs_write((unsigned long)address, &offset);
+		unsigned long flags;
+		page = parse_ptabs_write((unsigned long)address, &offset, &flags);
 		if (page != -EFAULT) {
 			*(unsigned long long*)(page + offset) = val;
+			local_irq_restore(flags);
 			return 0;
 		}
 	} else {

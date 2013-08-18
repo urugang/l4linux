@@ -45,7 +45,7 @@ void __init l4x_init_IRQ(void)
 	l4lx_irq_init();
 	l4x_init_softirq_stack();
 
-	for (i = 0; i < NR_IRQS; i++) {
+	for (i = 0; i < L4X_IRQS_V_STATIC_BASE; i++) {
 		l4x_alloc_irq_desc_data(i);
 		irq_set_chip_and_handler_name(i, &l4x_irq_dev_chip, handle_edge_eoi_irq, "edge-eoi");
 	}

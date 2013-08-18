@@ -44,7 +44,6 @@ return_address-y := ../../../arm/kernel/return_address.o
 sys_oabi-compat-y := ../../../arm/kernel/sys_oabi-compat.o
 compat-y        := ../../../arm/kernel/compat.o
 crash_dump-y    := ../../../arm/kernel/crash_dump.o
-smp_tlb-y       := ../../../arm/kernel/smp_tlb.o
 sched_clock-y   := ../../../arm/kernel/sched_clock.o
 devtree-y       := ../../../arm/kernel/devtree.o
 topology-y      := ../../../arm/kernel/topology.o

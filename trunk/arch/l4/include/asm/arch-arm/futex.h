@@ -52,13 +52,16 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	u32 val;
 
 #ifdef CONFIG_L4
-	L4X_FUTEX_TRANSLATE_UADDR(uaddr);
-	if (uaddr == NULL) /* Cheat in-kernel test */
+	unsigned long flags;
+	if (!current->mm) /* Cheat in-kernel test */
 		return -EFAULT;
-#endif
 
+	if ((uaddr = l4x_futex_translate_uaddr_nocheck(uaddr, &flags)) == ERR_PTR(-EFAULT))
+		return -EFAULT;
+#else
 	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
 		return -EFAULT;
+#endif
 
 	smp_mb();
 	__asm__ __volatile__("@futex_atomic_cmpxchg_inatomic\n"
@@ -74,6 +77,10 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	: "r" (oldval), "r" (newval), "r" (uaddr), "Ir" (-EFAULT)
 	: "cc", "memory");
 	smp_mb();
+
+#ifdef CONFIG_L4
+	l4x_futex_translate_uaddr_end(flags);
+#endif
 
 	*uval = val;
 	return ret;
@@ -103,13 +110,16 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	u32 val;
 
 #ifdef CONFIG_L4
-	L4X_FUTEX_TRANSLATE_UADDR(uaddr);
-	if (uaddr == NULL) /* Cheat in-kernel test */
+	unsigned long flags;
+	if (!current->mm) /* Cheat in-kernel test */
 		return -EFAULT;
-#endif
 
+	if ((uaddr = l4x_futex_translate_uaddr_nocheck(uaddr, &flags)) == ERR_PTR(-EFAULT))
+		return -EFAULT;
+#else
 	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
 		return -EFAULT;
+#endif
 
 	__asm__ __volatile__("@futex_atomic_cmpxchg_inatomic\n"
 	"1:	" TUSER(ldr) "	%1, [%4]\n"
@@ -120,6 +130,10 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	: "+r" (ret), "=&r" (val)
 	: "r" (oldval), "r" (newval), "r" (uaddr), "Ir" (-EFAULT)
 	: "cc", "memory");
+
+#ifdef CONFIG_L4
+	l4x_futex_translate_uaddr_end(flags);
+#endif
 
 	*uval = val;
 	return ret;
@@ -135,16 +149,20 @@ futex_atomic_op_inuser (int encoded_op, u32 __user *uaddr)
 	int oparg = (encoded_op << 8) >> 20;
 	int cmparg = (encoded_op << 20) >> 20;
 	int oldval = 0, ret, tmp;
-
 #ifdef CONFIG_L4
-	L4X_FUTEX_TRANSLATE_UADDR_NOCHECK(uaddr);
+	unsigned long flags;
 #endif
 
 	if (encoded_op & (FUTEX_OP_OPARG_SHIFT << 28))
 		oparg = 1 << oparg;
 
+#ifdef CONFIG_L4
+	if ((uaddr = l4x_futex_translate_uaddr_nocheck(uaddr, &flags)) == ERR_PTR(-EFAULT))
+		return -EFAULT;
+#else
 	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
 		return -EFAULT;
+#endif
 
 	pagefault_disable();	/* implies preempt_disable() */
 
@@ -167,6 +185,10 @@ futex_atomic_op_inuser (int encoded_op, u32 __user *uaddr)
 	default:
 		ret = -ENOSYS;
 	}
+
+#ifdef CONFIG_L4
+	l4x_futex_translate_uaddr_end(flags);
+#endif
 
 	pagefault_enable();	/* subsumes preempt_enable() */
 

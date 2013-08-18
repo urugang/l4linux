@@ -21,17 +21,36 @@
  * in the TPIDRPRW. TPIDRPRW only exists on V6K and V7
  */
 #if defined(CONFIG_SMP) && !defined(CONFIG_CPU_V6)
+
+#ifdef CONFIG_L4
+#include <l4/sys/thread.h>
+#endif
+
 static inline void set_my_cpu_offset(unsigned long off)
 {
-	/* Set TPIDRPRW -- L4Linux TPIDRURW */
-	asm volatile("mcr p15, 0, %0, c13, c0, 2" : : "r" (off) : "memory");
+	/* Set TPIDRPRW */
+#ifdef CONFIG_L4
+	l4_thread_arm_set_tpidruro(L4_INVALID_CAP, off);
+#else
+	asm volatile("mcr p15, 0, %0, c13, c0, 4" : : "r" (off) : "memory");
+#endif
 }
 
 static inline unsigned long __my_cpu_offset(void)
 {
 	unsigned long off;
-	/* Read TPIDRPRW -- L4Linux TPIDRURW */
-	asm("mrc p15, 0, %0, c13, c0, 2" : "=r" (off) : : "memory");
+	register unsigned long *sp asm ("sp");
+
+	/*
+	 * Read TPIDRPRW.
+	 * We want to allow caching the value, so avoid using volatile and
+	 * instead use a fake stack read to hazard against barrier().
+	 */
+#ifdef CONFIG_L4
+	asm("mrc p15, 0, %0, c13, c0, 3" : "=r" (off) : "Q" (*sp));
+#else
+	asm("mrc p15, 0, %0, c13, c0, 4" : "=r" (off) : "Q" (*sp));
+#endif
 	return off;
 }
 #define __my_cpu_offset __my_cpu_offset()

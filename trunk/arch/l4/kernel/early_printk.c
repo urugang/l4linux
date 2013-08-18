@@ -25,52 +25,22 @@ static struct console early_kdb_console = {
 	.index =	-1,
 };
 
-/* Direct interface for emergencies */
-static struct console *early_console = &early_kdb_console;
-static int early_console_initialized = 0;
-
-asmlinkage void early_printk(const char *fmt, ...)
-{
-	char buf[512];
-	int n;
-	va_list ap;
-
-	va_start(ap,fmt);
-	n = vscnprintf(buf,512,fmt,ap);
-	early_console->write(early_console,buf,n);
-	va_end(ap);
-}
-
-static int keep_early;
-
 int __init setup_early_printk(char *buf)
 {
 	if (!buf)
 		return 0;
 
-	if (early_console_initialized)
+	if (early_console)
 		return 0;
-	early_console_initialized = 1;
 
-	if (strstr(buf,"keep"))
-		keep_early = 1;
+	if (strstr(buf, "keep"))
+		early_kdb_console.flags &= ~CON_BOOT;
+	else
+		early_kdb_console.flags |= CON_BOOT;
 
 	early_console = &early_kdb_console;
 	register_console(early_console);
 	return 0;
-}
-
-void __init disable_early_printk(void)
-{
-	if (!early_console_initialized || !early_console)
-		return;
-	if (!keep_early) {
-		printk("disabling early console\n");
-		unregister_console(early_console);
-		early_console_initialized = 0;
-	} else {
-		printk("keeping early console\n");
-	}
 }
 
 __setup("earlyprintk=", setup_early_printk);

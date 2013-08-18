@@ -166,7 +166,7 @@
 # define v6wbi_always_flags	(-1UL)
 #endif
 
-#define v7wbi_tlb_flags_smp	(TLB_WB | TLB_DCLEAN | TLB_BARRIER | \
+#define v7wbi_tlb_flags_smp	(TLB_WB | TLB_BARRIER | \
 				 TLB_V7_UIS_FULL | TLB_V7_UIS_PAGE | \
 				 TLB_V7_UIS_ASID | TLB_V7_UIS_BP)
 #define v7wbi_tlb_flags_up	(TLB_WB | TLB_DCLEAN | TLB_BARRIER | \
@@ -319,6 +319,10 @@ extern struct cpu_tlb_fns cpu_tlb;
 #define tlb_op(f, regs, arg)	__tlb_op(f, "p15, 0, %0, " regs, arg)
 #define tlb_l2_op(f, regs, arg)	__tlb_op(f, "p15, 1, %0, " regs, arg)
 
+#ifdef CONFIG_L4
+#include <asm/generic/tlb.h>
+#endif
+
 static inline void local_flush_tlb_all(void)
 {
 #ifndef CONFIG_L4
@@ -370,6 +374,12 @@ static inline void local_flush_tlb_mm(struct mm_struct *mm)
 
 	if (tlb_flag(TLB_BARRIER))
 		dsb();
+#else /* L4 */
+#ifdef CONFIG_SMP
+	BUG();
+#else
+	l4x_del_task(mm);
+#endif
 #endif /* L4 */
 }
 
@@ -405,6 +415,12 @@ local_flush_tlb_page(struct vm_area_struct *vma, unsigned long uaddr)
 
 	if (tlb_flag(TLB_BARRIER))
 		dsb();
+#else /* L4 */
+#ifdef CONFIG_SMP
+	BUG();
+#else
+	l4x_unmap_page(vma->vm_mm, uaddr);
+#endif
 #endif /* L4 */
 }
 
@@ -443,8 +459,8 @@ static inline void local_flush_bp_all(void)
 	const int zero = 0;
 #endif /* L4 */
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
-#ifndef CONFIG_L4
 
+#ifndef CONFIG_L4
 	if (tlb_flag(TLB_V7_UIS_BP))
 		asm("mcr p15, 0, %0, c7, c1, 6" : : "r" (zero));
 	else if (tlb_flag(TLB_V6_BP))

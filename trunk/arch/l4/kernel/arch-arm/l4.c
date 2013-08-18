@@ -52,7 +52,7 @@ static void __init l4x_mach_init_irq(void)
 	/* Call our generic IRQ handling code */
 	l4lx_irq_init();
 
-	for (i = 0; i < NR_IRQS; i++)
+	for (i = 0; i < L4X_IRQS_V_STATIC_BASE; i++)
 		l4x_setup_irq(i);
 }
 

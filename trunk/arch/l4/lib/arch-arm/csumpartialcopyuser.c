@@ -20,19 +20,19 @@ add_with_carry(unsigned int x, unsigned int y)
      return temp;
 }
 
-__wsum csum_partial_copy_from_user(const void *src, void *dst, 
+__wsum csum_partial_copy_from_user(const void *src, void *dst,
                                    int len, __wsum _sum, int *err_ptr)
 {
      unsigned long page, offset;
      unsigned long len1, len2;
      unsigned long chksumgap;
      unsigned long sum = _sum;
+     unsigned long flags, flags2;
 
-     if (segment_eq(get_fs(),KERNEL_DS)) {
-	  return csum_partial_copy_nocheck(src, dst, len, _sum);
-     }
+     if (segment_eq(get_fs(), KERNEL_DS))
+	     return csum_partial_copy_nocheck(src, dst, len, _sum);
 
-     page = parse_ptabs_read((unsigned long)src, &offset);
+     page = parse_ptabs_read((unsigned long)src, &offset, &flags);
      if (page == -EFAULT)
 	  goto exit_err;
 
@@ -46,14 +46,16 @@ __wsum csum_partial_copy_from_user(const void *src, void *dst,
 #endif
 	       sum = csum_partial_copy_nocheck((char *)(page + offset), dst, len1 - 1, sum);
 	       chksumgap = ((unsigned char*)page)[PAGE_SIZE - 1];
-	    
+
 	       src += len1 + 1;
 	       dst += len1 + 1;
-	    
-	       page = parse_ptabs_read((unsigned long)src, &offset);
-	       if (page == -EFAULT)
+
+	       page = parse_ptabs_read((unsigned long)src, &offset, &flags2);
+	       if (page == -EFAULT) {
+		    local_irq_restore(flags);
 		    goto exit_err;
-	    
+	       }
+
 	       chksumgap += ((unsigned char*)page)[0] << 8;
 	       ((short*)dst)[-1] = chksumgap; /* copy data */
 
@@ -67,12 +69,15 @@ __wsum csum_partial_copy_from_user(const void *src, void *dst,
 	       len -= len1;
 
 	       if (len) {
-		    page = parse_ptabs_read((unsigned long)src, &offset);
-		    if (page == -EFAULT)
+		    page = parse_ptabs_read((unsigned long)src, &offset, &flags2);
+		    if (page == -EFAULT) {
+		         local_irq_restore(flags);
 			 goto exit_err;
+		    }
 	       }
 	  }
      }
+     local_irq_restore(flags);
      return sum;
 
  exit_err:
