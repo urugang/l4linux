@@ -111,10 +111,8 @@ static struct file_operations l4x_hybrid_fops = {
 
 static void l4x_create_seq_entry(char *name, mode_t mode, struct file_operations *f)
 {
-	struct proc_dir_entry *entry;
-	entry = create_proc_entry(name, mode, l4_proc_dir);
-	if (entry)
-		entry->proc_fops = f;
+	if (!proc_create(name, mode, l4_proc_dir, f))
+		pr_err("l4x: Failed to create proc direcotry\n");
 }
 
 static int __init l4x_proc_init(void)

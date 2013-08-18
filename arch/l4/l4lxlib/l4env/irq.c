@@ -193,7 +193,7 @@ static L4_CV void irq_thread(void *data)
 		state = 0;
 		wait_for_irq_message(irq);
 		if (state)
-			printk("nesting with irq %d\n", state);
+			LOG_printf("nesting with irq %d\n", state);
 		state = irq;
 
 		l4x_do_IRQ(irq, ctx);

@@ -22,6 +22,9 @@
 #include <asm/generic/memory.h>
 #include <asm/generic/setup.h>
 #include <asm/generic/tamed.h>
+#ifndef CONFIG_SMP
+#include <asm/generic/tlb.h>
+#endif
 
 void cpu_dcache_clean_area(void *addr, int sz)
 { l4_cache_clean_data((unsigned long)addr, (unsigned long)addr + sz - 1); }
@@ -109,8 +112,14 @@ void __glue(_USER, _clear_user_highpage)(struct page *page, unsigned long vaddr)
 }
 
 void __glue(_TLB, _flush_user_tlb_range)(unsigned long start, unsigned long end,
-                                          struct vm_area_struct *mm)
-{}
+                                          struct vm_area_struct *vma)
+{
+#ifdef CONFIG_SMP
+	BUG();
+#else
+	l4x_unmap_page_range(vma->vm_mm, start, end);
+#endif
+}
 
 void __glue(_CACHE, _flush_user_cache_range)(unsigned long start, unsigned long end,
                                             unsigned int flags)

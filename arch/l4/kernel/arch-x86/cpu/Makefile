@@ -14,7 +14,6 @@ CFLAGS_common.o		:= $(nostackp)
 
 obj-y			:= intel_cacheinfo.o scattered.o topology.o
 obj-y			+= proc.o capflags.o powerflags.o common.o
-obj-y			+= vmware.o hypervisor.o mshyperv.o
 obj-y			+= rdrand.o
 obj-y			+= match.o
 
@@ -31,7 +30,7 @@ obj-$(CONFIG_CPU_SUP_UMC_32)		+= umc.o
 obj-$(CONFIG_PERF_EVENTS)		+= perf_event.o
 
 ifdef CONFIG_PERF_EVENTS
-obj-$(CONFIG_CPU_SUP_AMD)		+= perf_event_amd.o
+obj-$(CONFIG_CPU_SUP_AMD)		+= perf_event_amd.o perf_event_amd_uncore.o
 obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_p6.o perf_event_knc.o perf_event_p4.o
 obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_lbr.o perf_event_intel_ds.o perf_event_intel.o
 obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_uncore.o
@@ -42,15 +41,17 @@ endif
 
 obj-$(CONFIG_X86_LOCAL_APIC)		+= perfctr-watchdog.o perf_event_amd_ibs.o
 
+obj-$(CONFIG_HYPERVISOR_GUEST)		+= vmware.o hypervisor.o mshyperv.o
+
 b                      := ../../../../x86/kernel/cpu
 
 quiet_cmd_mkcapflags = MKCAP   $@
-      cmd_mkcapflags = $(PERL) $(srctree)/$(src)/$(b)/mkcapflags.pl $< $@
+      cmd_mkcapflags = $(CONFIG_SHELL) $(srctree)/$(src)/../../../../x86/kernel/cpu/mkcapflags.sh $< $@
 
 cpufeature = $(src)/../../../../x86/include/asm/cpufeature.h
 
 targets += capflags.c
-$(obj)/capflags.c: $(cpufeature) $(src)/$(b)/mkcapflags.pl FORCE
+$(obj)/capflags.c: $(cpufeature) $(src)/../../../../x86/kernel/cpu/mkcapflags.sh FORCE
 	$(call if_changed,mkcapflags)
 
 KBUILD_CFLAGS += -I$(srctree)/arch/x86/kernel/cpu
@@ -60,19 +61,15 @@ cyrix-y		       := $(b)/cyrix.o
 centaur-y	       := $(b)/centaur.o
 transmeta-y	       := $(b)/transmeta.o
 intel_cacheinfo-y      := $(b)/intel_cacheinfo.o
-rise-y		       := $(b)/rise.o
-nexgen-y	       := $(b)/nexgen.o
 umc-y		       := $(b)/umc.o
 proc-y		       := $(b)/proc.o
 bugs-y		       := $(b)/bugs.o
 bugs_64-y	       := $(b)/bugs_64.o
 perfctr-watchdog-y     := $(b)/perfctr-watchdog.o
 perf_event_amd_ibs-y   := $(b)/perf_event_amd_ibs.o
-feature_names-y        := $(b)/feature_names.o
 powerflags-y           := $(b)/powerflags.o
 vmware-y               := $(b)/vmware.o
 hypervisor-y           := $(b)/hypervisor.o
-sched-y                := $(b)/sched.o
 mshyperv-y             := $(b)/mshyperv.o
 scattered-y            := $(b)/scattered.o
 topology-y             := $(b)/topology.o
@@ -82,8 +79,9 @@ perf_event_p4-y        := $(b)/perf_event_p4.o
 perf_event_intel_ds-y  := $(b)/perf_event_intel_ds.o
 perf_event_intel_lbr-y := $(b)/perf_event_intel_lbr.o
 perf_event_intel-y     := $(b)/perf_event_intel.o
-perf_event_amd-y       := $(b)/perf_event_amd.o
 perf_event_intel_uncore-y:= $(b)/perf_event_intel_uncore.o
+perf_event_amd-y       := $(b)/perf_event_amd.o
+perf_event_amd_uncore-y := $(b)/perf_event_amd_uncore.o
 perf_event_knc-y       := $(b)/perf_event_knc.o
 rdrand-y               := $(b)/rdrand.o
 match-y                := $(b)/match.o

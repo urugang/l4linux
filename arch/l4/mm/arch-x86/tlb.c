@@ -14,6 +14,8 @@
 #include <asm/uv/uv.h>
 #include <linux/debugfs.h>
 
+#include <asm/generic/mmu.h>
+
 DEFINE_PER_CPU_SHARED_ALIGNED(struct tlb_state, cpu_tlbstate)
 			= { &init_mm, 0, };
 
@@ -48,9 +50,7 @@ void leave_mm(int cpu)
 		BUG();
 	if (cpumask_test_cpu(cpu, mm_cpumask(active_mm))) {
 		cpumask_clear_cpu(cpu, mm_cpumask(active_mm));
-#ifndef CONFIG_L4
 		load_cr3(swapper_pg_dir);
-#endif
 	}
 }
 EXPORT_SYMBOL_GPL(leave_mm);
@@ -151,6 +151,12 @@ void flush_tlb_current_task(void)
 
 	preempt_disable();
 
+	if (IS_ENABLED(CONFIG_L4)) {
+		l4x_unmap_log_flush();
+		preempt_enable();
+		return;
+	}
+
 	local_flush_tlb();
 	if (cpumask_any_but(mm_cpumask(mm), smp_processor_id()) < nr_cpu_ids)
 		flush_tlb_others(mm_cpumask(mm), mm, 0UL, TLB_FLUSH_ALL);
@@ -190,6 +196,13 @@ void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 	unsigned act_entries, tlb_entries = 0;
 
 	preempt_disable();
+
+	if (IS_ENABLED(CONFIG_L4)) {
+		l4x_unmap_log_flush();
+		preempt_enable();
+		return;
+	}
+
 	if (current->active_mm != mm)
 		goto flush_all;
 
@@ -243,6 +256,12 @@ void flush_tlb_page(struct vm_area_struct *vma, unsigned long start)
 
 	preempt_disable();
 
+	if (IS_ENABLED(CONFIG_L4)) {
+		l4x_unmap_log_flush();
+		preempt_enable();
+		return;
+	}
+
 	if (current->active_mm == mm) {
 		if (current->mm)
 			__flush_tlb_one(start);
@@ -265,7 +284,13 @@ static void do_flush_tlb_all(void *info)
 
 void flush_tlb_all(void)
 {
+#ifdef CONFIG_L4
+	preempt_disable();
+	l4x_unmap_log_flush();
+	preempt_enable();
+#else
 	on_each_cpu(do_flush_tlb_all, NULL, 1);
+#endif
 }
 
 static void do_kernel_range_flush(void *info)

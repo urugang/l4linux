@@ -28,13 +28,14 @@ static inline bool is_smp(void)
 /* all SMP configurations have the extended CPUID registers */
 static inline int tlb_ops_need_broadcast(void)
 {
-#ifdef CONFIG_L4
-	return 0;
-#endif
 	if (!is_smp())
 		return 0;
 
+#ifdef CONFIG_L4
+	return 1;
+#else
 	return ((read_cpuid_ext(CPUID_EXT_MMFR3) >> 12) & 0xf) < 2;
+#endif
 }
 
 #if !defined(CONFIG_SMP) || __LINUX_ARM_ARCH__ >= 7
@@ -55,7 +56,7 @@ static inline int cache_ops_need_broadcast(void)
 /*
  * Logical CPU mapping.
  */
-extern int __cpu_logical_map[];
+extern u32 __cpu_logical_map[];
 #define cpu_logical_map(cpu)	__cpu_logical_map[cpu]
 /*
  * Retrieve logical cpu index corresponding to a given MPIDR[23:0]

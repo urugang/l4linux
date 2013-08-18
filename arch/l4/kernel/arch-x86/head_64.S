@@ -137,8 +137,10 @@ startup_64:
 	movq	%rdi, %rax
 	shrq	$PUD_SHIFT, %rax
 	andl	$(PTRS_PER_PUD-1), %eax
-	movq	%rdx, (4096+0)(%rbx,%rax,8)
-	movq	%rdx, (4096+8)(%rbx,%rax,8)
+	movq	%rdx, 4096(%rbx,%rax,8)
+	incl	%eax
+	andl	$(PTRS_PER_PUD-1), %eax
+	movq	%rdx, 4096(%rbx,%rax,8)
 
 	addq	$8192, %rbx
 	movq	%rdi, %rax
@@ -222,6 +224,7 @@ ENTRY(secondary_startup_64)
 	btl	$20,%edi		/* No Execute supported? */
 	jnc     1f
 	btsl	$_EFER_NX, %eax
+	btsq	$_PAGE_BIT_NX,early_pmd_flags(%rip)
 1:	wrmsr				/* Make changes effective */
 
 	/* Setup cr0 */
@@ -481,7 +484,7 @@ NEXT_PAGE(init_level4_pgt)
 	.quad   level3_ident_pgt - __START_KERNEL_map + _KERNPG_TABLE
 	.org    init_level4_pgt + L4_START_KERNEL*8, 0
 	/* (2^48-(2*1024*1024*1024))/(2^39) = 511 */
-#endif
+	.quad   level3_kernel_pgt - __START_KERNEL_map + _PAGE_TABLE
 
 NEXT_PAGE(level3_ident_pgt)
 	.quad	level2_ident_pgt - __START_KERNEL_map + _KERNPG_TABLE

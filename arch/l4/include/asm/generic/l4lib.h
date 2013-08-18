@@ -4,6 +4,15 @@
 #include <linux/stringify.h>
 
 #ifdef ARCH_arm
+
+//#define L4X_ASSUME_READONLY_TEXT
+
+#ifdef L4X_ASSUME_READONLY_TEXT
+#define L4XROWC(ro, rw) ro
+#else
+#define L4XROWC(ro, rw) rw
+#endif
+
 #define L4_EXTERNAL_FUNC(func) \
 	asm(".section \".data.l4externals.str\"                         \n" \
 	    "9: .string \"" __stringify(func) "\"                       \n" \
@@ -11,14 +20,19 @@
 	    \
 	    "7: .long 9b                                                \n" \
 	    \
+	    L4XROWC(".section \".data.l4externals.jmptbl\"", "")       "\n" \
+	    ".p2align 2\n" \
 	    "8: .long " __stringify(func##_resolver) "                  \n" \
+	    L4XROWC(".previous\n", "")                                 "\n" \
+	    L4XROWC("6: .long 8b", "")                                 "\n" \
 	    \
 	    ".globl " __stringify(func) "                               \n" \
 	    ".weak " __stringify(func) "                                \n" \
 	    ".type " __stringify(func) ", #function                     \n" \
 	    ".type " __stringify(func##_resolver) ", #function          \n" \
-	    __stringify(func) ":             ldr pc, 8b                 \n" \
-	    __stringify(func##_resolver) ":  adr ip, 8b                 \n" \
+	    __stringify(func) ":    " L4XROWC("ldr ip, 6b", "")  "      \n" \
+	    "                       ldr pc, " L4XROWC("[ip]", "8b") "   \n" \
+	    __stringify(func##_resolver) ":" L4XROWC("", "adr ip, 8b") "\n" \
 	    "                                push {ip}                  \n" \
 	    "                                ldr ip, 7b                 \n" \
 	    "                                push {ip}                  \n" \

@@ -87,14 +87,6 @@ static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *pt
 	ptep->pte_low = 0;
 }
 
-static inline void pte_clear_unmap(pte_t *ptep, int unmap)
-{
-	if (unmap)
-		pte_clear(NULL, 0, ptep);
-	else
-		ptep->pte_low = 0;
-}
-
 #if defined(CONFIG_HIGHPTE)
 #define pte_offset_map(dir, address)					\
 	((pte_t *)kmap_atomic(pmd_page(*(dir))) +		\

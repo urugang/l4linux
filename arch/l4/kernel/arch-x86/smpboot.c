@@ -157,7 +157,11 @@ static void __cpuinit smp_callin(void)
 	/*
 	 * (This works even if the APIC is not enabled.)
 	 */
-	phys_id = smp_processor_id(); //l4/read_apic_id();
+#ifdef CONFIG_L4
+	phys_id = raw_smp_processor_id();
+#else
+	phys_id = read_apic_id();
+#endif
 	if (cpumask_test_cpu(cpuid, cpu_callin_mask)) {
 		panic("%s: phys CPU#%d, CPU#%d already present??\n", __func__,
 					phys_id, cpuid);
@@ -253,7 +257,7 @@ notrace static void __cpuinit start_secondary(void *unused)
 	 * fragile that we want to limit the things done here to the
 	 * most necessary things.
 	 */
-	l4x_cpu_ipi_setup(smp_processor_id());
+	l4x_cpu_ipi_setup(raw_smp_processor_id());
 	cpu_init();
 	x86_cpuinit.early_percpu_clock_init();
 	preempt_disable();
@@ -271,7 +275,7 @@ notrace static void __cpuinit start_secondary(void *unused)
 
 	/* otherwise gcc will move up smp_processor_id before the cpu_init */
 	barrier();
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	/*
 	 * Check TSC synchronization with the BP:
 	 */
@@ -298,7 +302,7 @@ notrace static void __cpuinit start_secondary(void *unused)
 	x86_cpuinit.setup_percpu_clockev();
 
 	wmb();
-	cpu_idle();
+	cpu_startup_entry(CPUHP_ONLINE);
 }
 
 void __init smp_store_boot_cpu_info(void)
@@ -386,15 +390,15 @@ static bool __cpuinit match_mc(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
 
 void __cpuinit set_cpu_sibling_map(int cpu)
 {
-	bool has_mc = boot_cpu_data.x86_max_cores > 1;
 	bool has_smt = smp_num_siblings > 1;
+	bool has_mp = has_smt || boot_cpu_data.x86_max_cores > 1;
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
 	struct cpuinfo_x86 *o;
 	int i;
 
 	cpumask_set_cpu(cpu, cpu_sibling_setup_mask);
 
-	if (!has_smt && !has_mc) {
+	if (!has_mp) {
 		cpumask_set_cpu(cpu, cpu_sibling_mask(cpu));
 		cpumask_set_cpu(cpu, cpu_llc_shared_mask(cpu));
 		cpumask_set_cpu(cpu, cpu_core_mask(cpu));
@@ -408,7 +412,7 @@ void __cpuinit set_cpu_sibling_map(int cpu)
 		if ((i == cpu) || (has_smt && match_smt(c, o)))
 			link_mask(sibling, cpu, i);
 
-		if ((i == cpu) || (has_mc && match_llc(c, o)))
+		if ((i == cpu) || (has_mp && match_llc(c, o)))
 			link_mask(llc_shared, cpu, i);
 
 	}
@@ -420,7 +424,7 @@ void __cpuinit set_cpu_sibling_map(int cpu)
 	for_each_cpu(i, cpu_sibling_setup_mask) {
 		o = &cpu_data(i);
 
-		if ((i == cpu) || (has_mc && match_mc(c, o))) {
+		if ((i == cpu) || (has_mp && match_mc(c, o))) {
 			link_mask(core, cpu, i);
 
 			/*

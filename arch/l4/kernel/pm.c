@@ -276,15 +276,13 @@ void l4x_virtual_mem_register(unsigned long address, pte_t pte)
 
 void l4x_virtual_mem_unregister(unsigned long address)
 {
-	struct list_head *p, *tmp;
-	unsigned long flags;
+	struct l4x_virtual_mem_struct *e, *tmp;
 
-	list_for_each_safe(p, tmp, &virtual_pages) {
-		struct l4x_virtual_mem_struct *e
-		 = list_entry(p, struct l4x_virtual_mem_struct, list);
+	list_for_each_entry_safe(e, tmp, &virtual_pages, list) {
 		if (e->address == address) {
+			unsigned long flags;
 			spin_lock_irqsave(&virtual_pages_lock, flags);
-			list_del(p);
+			list_del(&e->list);
 			spin_unlock_irqrestore(&virtual_pages_lock, flags);
 			kfree(e);
 		}
@@ -293,11 +291,8 @@ void l4x_virtual_mem_unregister(unsigned long address)
 
 static void l4x_virtual_mem_handle_pages(enum l4x_virtual_mem_type t)
 {
-	struct list_head *p;
-	list_for_each(p, &virtual_pages) {
-		struct l4x_virtual_mem_struct *e
-		 = list_entry(p, struct l4x_virtual_mem_struct, list);
-
+	struct l4x_virtual_mem_struct *e;
+	list_for_each_entry(e, &virtual_pages, list) {
 		if (t == L4X_VIRTUAL_MEM_TYPE_MAP) {
 			if (0)
 				l4x_printf("map virtual %lx -> %" PTE_VAL_FMTTYPE "x\n",
@@ -460,7 +455,6 @@ static struct kobj_attribute wakeup_src_del_attr =
 	__ATTR(wakeup_irq_remove, 0600, wakeup_srcs_show, wakeup_irq_del_store);
 static struct kobj_attribute wakeup_src_type_attr =
 	__ATTR(wakeup_irq_type, 0600, wakeup_src_type_show, wakeup_src_type_store);
-
 
 static __init int l4x_pm_init(void)
 {

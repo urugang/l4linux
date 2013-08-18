@@ -30,15 +30,6 @@ static inline unsigned long l4x_get_cpu_mode(struct pt_regs *r)
 	return processor_mode(r);
 }
 
-static inline void l4x_make_up_kernel_regs(struct pt_regs *r)
-{
-	register unsigned long sp asm("sp");
-	raw_local_save_flags(r->ARM_cpsr);
-	l4x_set_cpu_mode(r, L4X_MODE_KERNEL);
-	r->ARM_pc = (unsigned long)__builtin_return_address(0);
-	r->ARM_sp = sp;
-}
-
 #ifdef CONFIG_L4_VCPU
 static inline void vcpu_to_ptregs(l4_vcpu_state_t *v,
                                   struct pt_regs *regs)

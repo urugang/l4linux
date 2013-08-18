@@ -34,7 +34,6 @@
 #include <asm/generic/task.h>
 #include <asm/generic/upage.h>
 #include <asm/generic/memory.h>
-#include <asm/generic/process.h>
 #include <asm/generic/setup.h>
 #include <asm/generic/ioremap.h>
 #include <asm/generic/hybrid.h>
@@ -142,16 +141,6 @@ static inline int l4x_hybrid_check_after_syscall(l4_utcb_t *utcb)
 	        && (exc->err & 4))
 	       || (exc->trapno == 0xff /* L4 syscall exr'd */
 	           && exc->err == 0);
-}
-
-static inline void l4x_dispatch_delete_polling_flag(void)
-{
-	current_thread_info()->status &= ~TS_POLLING;
-}
-
-static inline void l4x_dispatch_set_polling_flag(void)
-{
-	current_thread_info()->status |= TS_POLLING;
 }
 
 #ifdef CONFIG_L4_VCPU

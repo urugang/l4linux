@@ -57,10 +57,8 @@
  */
 #ifdef CONFIG_L4
 #define KERNEL_IMAGE_SIZE	(16 * 1024 * 1024)
-#define KERNEL_IMAGE_START	_AC(0x0000000000200000, UL)
 #else
 #define KERNEL_IMAGE_SIZE	(512 * 1024 * 1024)
-#define KERNEL_IMAGE_START	_AC(0xffffffff80000000, UL)
 #endif /* L4 */
 
 #endif /* _ASM_X86_PAGE_64_DEFS_H */

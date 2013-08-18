@@ -10,9 +10,6 @@
 #include <asm/apicdef.h>
 #include <asm/irq_vectors.h>
 
-/* the defines are from irq_vectors out of the mach-default directory */
-#define NR_IRQS_HW		64
-
 static inline int irq_canonicalize(int irq)
 {
 	return ((irq == 2) ? 9 : irq);
@@ -43,5 +40,10 @@ extern DECLARE_BITMAP(used_vectors, NR_VECTORS);
 extern int vector_used_by_percpu_irq(unsigned int vector);
 
 extern void init_ISA_irqs(void);
+
+#ifdef CONFIG_X86_LOCAL_APIC
+void arch_trigger_all_cpu_backtrace(void);
+#define arch_trigger_all_cpu_backtrace arch_trigger_all_cpu_backtrace
+#endif
 
 #endif /* __ASM_L4__ARCH_X86__IRQ_H__ */

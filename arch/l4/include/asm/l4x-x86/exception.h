@@ -30,17 +30,6 @@ static inline unsigned long l4x_get_cpu_mode(struct pt_regs *r)
 	return r->cs & 3;
 }
 
-static inline void l4x_make_up_kernel_regs(struct pt_regs *r)
-{
-#ifdef CONFIG_X86_64
-	register unsigned long current_stack_pointer asm("rsp");
-#endif
-	l4x_set_cpu_mode(r, L4X_MODE_KERNEL);
-	r->ip = (unsigned long)__builtin_return_address(0);
-	r->sp = current_stack_pointer;
-	r->flags = native_save_fl();
-}
-
 #ifdef CONFIG_L4_VCPU
 
 #define V2P(p, pr, v, vr) do { (p)->pr = (v)->vr; } while (0)
@@ -130,7 +119,8 @@ static inline void utcb_exc_to_ptregs(l4_exc_regs_t *exc, struct pt_regs *ptregs
 	UE2P(ptregs, si,    exc, RN(si));
 	UE2P(ptregs, bp,    exc, RN(bp));
 	UE2P(ptregs, ip,    exc, ip);
-	UE2P(ptregs, flags, exc, flags);
+	ptregs->flags = exc->flags | X86_EFLAGS_IF;
+	ptregs->cs    = (ptregs->cs & ~3) | 3;
 	UE2P(ptregs, sp,    exc, sp);
 #ifdef CONFIG_X86_32
 	ptregs->fs = exc->fs;

@@ -1,6 +1,7 @@
 /*
  * Main & misc. file.
  */
+#include <linux/ctype.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -225,7 +226,7 @@ struct l4x_phys_virt_mem {
 enum { L4X_PHYS_VIRT_ADDRS_MAX_ITEMS = 50 };
 
 /* Default memory size */
-static unsigned long l4x_mainmem_size = CONFIG_L4_MEMSIZE << 20;
+static unsigned long l4x_mainmem_size;
 
 static struct l4x_phys_virt_mem l4x_phys_virt_addrs[L4X_PHYS_VIRT_ADDRS_MAX_ITEMS] __nosavedata;
 
@@ -521,45 +522,45 @@ L4_CV l4_utcb_t *l4_utcb_wrap(void)
 /*
  * Full fledged name resolving, including cap allocation.
  */
-int l4x_re_resolve_name(const char *name, l4_cap_idx_t *cap)
+static int
+l4x_re_resolve_name_noctx(const char *name, unsigned len, l4_cap_idx_t *cap)
 {
-	const char *n = name;
-	int r;
+	int r, l;
 	l4re_env_cap_entry_t const *entry;
-	L4XV_V(f);
 
-	for (; *n && *n != '/'; ++n)
+	for (l = 0; l < len && name[l] != '/'; ++l)
 		;
 
-	L4XV_L(f);
-	entry = l4re_env_get_cap_l(name, n - name, l4re_env());
-	if (!entry) {
-		L4XV_U(f);
+	entry = l4re_env_get_cap_l(name, l, l4re_env());
+	if (!entry)
 		return -ENOENT;
-	}
 
-	if (!*n) {
+	if (len == l) {
 		// full name resolved, no slashes, return
 		*cap = entry->cap;
-		L4XV_U(f);
 		return 0;
 	}
 
-	if (l4_is_invalid_cap(*cap = l4x_cap_alloc())) {
-		L4XV_U(f);
+	if (l4_is_invalid_cap(*cap = l4x_cap_alloc()))
 		return -ENOMEM;
-	}
 
-	r = l4re_ns_query_srv(entry->cap, n + 1, *cap);
+	r = l4re_ns_query_srv(entry->cap, &name[l + 1], *cap);
 	if (r) {
 		l4x_printf("Failed to query name '%s': %s(%d)\n",
 		           name, l4sys_errtostr(r), r);
-		L4XV_U(f);
-		return -ENOENT;
+		goto free_cap;
 	}
 
-	L4XV_U(f);
 	return 0;
+
+free_cap:
+	l4x_cap_free(*cap);
+	return -ENOENT;
+}
+
+int l4x_re_resolve_name(const char *name, l4_cap_idx_t *cap)
+{
+	return L4XV_FN_i(l4x_re_resolve_name_noctx(name, strlen(name), cap));
 }
 
 int l4x_query_and_get_ds(const char *name, const char *logprefix,
@@ -1030,7 +1031,7 @@ static void l4x_register_region(const l4re_ds_t ds, void *start,
 
 	ds_size = l4re_ds_size(ds);
 
-	LOG_printf("%15s: virt: %p to %p [%zu KiB]\n",
+	LOG_printf("%15s: Virt: %p to %p [%zu KiB]\n",
 	           tag, start, start + ds_size - 1, ds_size >> 10);
 
 	while (offset < ds_size) {
@@ -1045,9 +1046,9 @@ static void l4x_register_region(const l4re_ds_t ds, void *start,
 
 		l4x_v2p_add_item(phys_addr, start + offset, phys_size);
 
-		LOG_printf("%15s: Phys: 0x%08lx to 0x%08lx, Size: %8zu\n",
+		LOG_printf("%15s: Phys: 0x%08lx to 0x%08lx, [%zu KiB]\n",
 		           tag, phys_addr,
-		           phys_addr + phys_size, phys_size);
+		           phys_addr + phys_size - 1, phys_size >> 10);
 
 		offset += phys_size;
 	}
@@ -1121,66 +1122,133 @@ void __init l4x_setup_memory(char *cmdl,
                              unsigned long *main_mem_size)
 {
 	int res;
-	char *memstr;
-	char *memtypestr;
 	char *str;
 	void *a;
 	l4_addr_t memory_area_id = (l4_addr_t)&_text;
 	int virt_phys_alignment = L4_SUPERPAGESHIFT;
 	l4_uint32_t dm_flags = L4RE_MA_CONTINUOUS | L4RE_MA_PINNED;
 	int i;
-	unsigned long mem_chunk_sz[10];
+	unsigned long mem_chunk_sz[ARRAY_SIZE(l4x_ds_mainmem)];
 	unsigned num_mem_chunk = 0;
 
-	/* See if we find a mem=xxx option in the command line */
-	if ((memstr = strstr(cmdl, "mem="))) {
-		l4x_mainmem_size = 0;
-		memstr += 4;
+	/* See if we find a mem-related options in the command line */
+	for (i = 0; i < ARRAY_SIZE(l4x_ds_mainmem); ++i) {
+		l4x_ds_mainmem[i] = L4_INVALID_CAP;
+		mem_chunk_sz[i] = 0;
+	}
+
+	if ((str = strstr(cmdl, "l4memds="))) {
+		str += 8;
+
 		while (1) {
-			res = memparse(memstr, &memstr);
+			long sz;
+			l4_cap_idx_t cap;
+			char *s = str;
+			while (*s && !isspace(*s) && *s != ',')
+				s++;
+
+			res = l4x_re_resolve_name_noctx(str, s - str, &cap);
 			if (res) {
-				mem_chunk_sz[num_mem_chunk++] = res;
-				l4x_mainmem_size += res;
+				LOG_printf("L4x: Memory cap name '%.*s' failed/invalid (%d).\n",
+				           s - str, str, res);
+				l4x_exit_l4linux();
 			}
+
+			sz = l4re_ds_size(cap);
+			if (sz < 0) {
+				LOG_printf("L4x: Cannot query size of '%.*s' dataspace.\n",
+				           s - str, str);
+				l4x_exit_l4linux();
+			}
+
+			l4x_ds_mainmem[num_mem_chunk] = cap;
+			mem_chunk_sz[num_mem_chunk] = sz;
+
+			LOG_printf("L4x: Memory dataspace %d has %ldKiB\n",
+			           num_mem_chunk, sz >> 10);
+
+			num_mem_chunk++;
 
 			if (num_mem_chunk == ARRAY_SIZE(mem_chunk_sz))
 				break;
 
-			if (*memstr == ',' || *memstr == '+')
-				memstr++;
+			if (*s == ',')
+				str = s + 1;
 			else
 				break;
 		}
-		if (num_mem_chunk == 0) {
-			LOG_printf("Invalid mem= configuration.\n");
-			l4x_exit_l4linux();
-		}
-	} else
-		mem_chunk_sz[num_mem_chunk++] = l4x_mainmem_size;
+	}
 
-	if ((memtypestr = strstr(cmdl, "l4memtype="))) {
-		memtypestr += 9;
+	if ((str = strstr(cmdl, "mem="))) {
+		str += 4;
+		i = 0;
+		while (1) {
+			res = memparse(str, &str);
+			if (res) {
+				if (mem_chunk_sz[i] == 0)
+					mem_chunk_sz[i] = res;
+				i++;
+			}
+
+			if (i == ARRAY_SIZE(mem_chunk_sz))
+				break;
+
+			if (*str == ',' || *str == '+')
+				str++;
+			else
+				break;
+		}
+
+		if (i > num_mem_chunk)
+			num_mem_chunk = i;
+	}
+
+	if (num_mem_chunk == 0)
+		num_mem_chunk = 1;
+
+	if (mem_chunk_sz[0] == 0)
+		mem_chunk_sz[0] = CONFIG_L4_MEMSIZE << 20;
+
+	l4x_mainmem_size = 0;
+	for (i = 0; i < num_mem_chunk; ++i)
+		l4x_mainmem_size += mem_chunk_sz[i];
+
+	if (l4x_mainmem_size == 0) {
+		LOG_printf("l4x: Invalid memory configuration.\n");
+		l4x_exit_l4linux();
+	}
+
+	LOG_printf("L4x: Memory size: %ldMB\n", l4x_mainmem_size >> 20);
+
+	// just to avoid strange things are going on
+	if (l4x_mainmem_size < (4 << 20)) {
+		LOG_printf("Not enough main memory - aborting!\n");
+		l4x_exit_l4linux();
+	}
+
+	if ((str = strstr(cmdl, "l4memtype="))) {
+		str += 9;
 		do {
-			memtypestr++;
-			if (!strncmp(memtypestr, "floating", 8)) {
+			str++;
+			if (!strncmp(str, "floating", 8)) {
 				dm_flags &= ~L4RE_MA_PINNED;
-				memtypestr += 8;
-			} else if (!strncmp(memtypestr, "pinned", 6)) {
+				str += 8;
+			} else if (!strncmp(str, "pinned", 6)) {
 				dm_flags |= L4RE_MA_PINNED;
-				memtypestr += 6;
-			} else if (!strncmp(memtypestr, "distributed", 11)) {
+				str += 6;
+			} else if (!strncmp(str, "distributed", 11)) {
 				dm_flags &= ~L4RE_MA_CONTINUOUS;
-				memtypestr += 11;
-			} else if (!strncmp(memtypestr, "continuous", 10)) {
+				str += 11;
+			} else if (!strncmp(str, "continuous", 10)) {
 				dm_flags |= L4RE_MA_CONTINUOUS;
-				memtypestr += 10;
+				str += 10;
 			} else {
 				LOG_printf("Unknown l4memtype option, use:\n"
 				           "  floating, pinned, distributed, continuous\n"
 				           "as a comma separated list\n");
 				l4x_exit_l4linux();
 			}
-		} while (*memtypestr == ',');
+		} while (*str == ',');
 	}
 
 	if ((str = strstr(cmdl, "l4memalign="))) {
@@ -1188,13 +1256,16 @@ void __init l4x_setup_memory(char *cmdl,
 		if (val > L4_SUPERPAGESHIFT
 		    && val < sizeof(unsigned long) * 8) {
 			virt_phys_alignment = val;
-			LOG_printf("l4x: Set virt/phys alignment to %d\n",
+			LOG_printf("L4x: Setting virt/phys alignment to %d\n",
 			           virt_phys_alignment);
 		}
 	}
 
 	for (i = 0; i < num_mem_chunk; ++i) {
 		l4_uint32_t f = dm_flags;
+
+		if (!l4_is_invalid_cap(l4x_ds_mainmem[i]))
+			continue;
 
 		if ((mem_chunk_sz[i] % L4_SUPERPAGESIZE) == 0) {
 			if (num_mem_chunk == 1)
@@ -1224,14 +1295,6 @@ void __init l4x_setup_memory(char *cmdl,
 			           mem_chunk_sz[i] >> 10);
 	}
 
-	LOG_printf("Main memory size: %ldMB\n", l4x_mainmem_size >> 20);
-
-	// just to avoid strange things are going on
-	if (l4x_mainmem_size < (4 << 20)) {
-		LOG_printf("Not enough main memory - aborting!\n");
-		l4x_exit_l4linux();
-	}
-
 	if (dm_flags & L4RE_MA_PINNED) {
 		l4_addr_t p;
 		l4_size_t ps;
@@ -1241,7 +1304,7 @@ void __init l4x_setup_memory(char *cmdl,
 			memory_area_id &= ~((1 << virt_phys_alignment) - 1);
 			memory_area_id |= p;
 
-			LOG_printf("Adjusted memory start: %08lx\n",
+			LOG_printf("L4x: Adjusted memory start: %08lx\n",
 			           memory_area_id);
 		}
 	}
@@ -1252,7 +1315,7 @@ void __init l4x_setup_memory(char *cmdl,
 	if (l4re_rm_reserve_area(&memory_area_id, l4x_mainmem_size,
 	                         L4RE_RM_SEARCH_ADDR,
 	                         virt_phys_alignment)) {
-		LOG_printf("Error reserving memory area\n");
+		LOG_printf("L4x: Error reserving memory area\n");
 		l4x_exit_l4linux();
 	}
 
@@ -1260,16 +1323,15 @@ void __init l4x_setup_memory(char *cmdl,
 
 	a = l4x_main_memory_start;
 	for (i = 0; i < num_mem_chunk; ++i) {
-		if (l4re_rm_attach(&a, mem_chunk_sz[i],
-				   L4RE_RM_IN_AREA | L4RE_RM_EAGER_MAP,
-				   l4x_ds_mainmem[i], 0,
-				   MAX_ORDER + PAGE_SHIFT)) {
-			LOG_printf("Error attaching to L4Linux main memory\n");
+		res = l4re_rm_attach(&a, mem_chunk_sz[i],
+		                     L4RE_RM_IN_AREA | L4RE_RM_EAGER_MAP,
+		                     l4x_ds_mainmem[i], 0,
+		                     MAX_ORDER + PAGE_SHIFT);
+		if (res) {
+			LOG_printf("L4x: Error attaching to L4Linux main memory: %d\n", res);
 			l4x_exit_l4linux();
 		}
-		l4x_register_region(l4x_ds_mainmem[i], a,
-	                            0, "Main memory");
-
+		l4x_register_region(l4x_ds_mainmem[i], a, 0, "Main memory");
 		a = (char *)a + mem_chunk_sz[i];
 	}
 
@@ -1592,7 +1654,10 @@ void l4x_cpu_ipi_setup(unsigned cpu)
 	l4_msgtag_t t;
 	l4_cap_idx_t c;
 	char s[14];
-	L4XV_V(f);
+
+#ifdef CONFIG_L4_VCPU
+	BUG_ON(per_cpu(l4x_vcpu_ptr, cpu)->state & L4_VCPU_F_IRQ);
+#endif
 
 	snprintf(s, sizeof(s), "ipi%d", cpu);
 	s[sizeof(s) - 1] = 0;
@@ -1613,9 +1678,7 @@ void l4x_cpu_ipi_setup(unsigned cpu)
 	}
 #endif
 
-	L4XV_L(f);
-
-	c = l4x_cap_alloc();
+	c = l4x_cap_alloc_noctx();
 	if (l4_is_invalid_cap(c)) {
 		LOG_printf("Failed to alloc cap\n");
 		l4x_exit_l4linux();
@@ -1644,7 +1707,6 @@ void l4x_cpu_ipi_setup(unsigned cpu)
 		LOG_printf("Failed to attach IPI IRQ%d\n", cpu);
 		l4x_exit_l4linux();
 	}
-	L4XV_U(f);
 
 	// now commit and make cap visible to child, it can run now
 	mb();
@@ -1686,17 +1748,17 @@ static L4_CV void __cpuinit __cpu_starter(void *data)
 
 #ifdef CONFIG_L4_VCPU
 	l4x_vcpu_init(per_cpu(l4x_vcpu_ptr, cpu));
+#else
+	l4x_global_cli();
 #endif
 
 #ifdef ARCH_x86
 	l4x_load_percpu_gdt_descriptor(get_cpu_gdt_table(cpu));
 	l4x_stack_set((struct thread_info *)(stack_start & ~(THREAD_SIZE - 1)),
 	              l4_utcb());
-	l4x_global_cli();
 	asm volatile ("movl (stack_start), %esp; jmp *(initial_code)");
 #endif
 #ifdef ARCH_arm
-	l4x_global_cli();
 	l4x_arm_secondary_start_kernel();
 #endif
 	panic("CPU startup failed");
@@ -2043,9 +2105,15 @@ static L4_CV void __init cpu0_startup(void *data)
 	             "movl %%eax, %%fs  \n"  // fs == ds for percpu
 		     : : : "eax", "memory");
 #endif
-#ifdef CONFIG_L4_VCPU
-	l4x_vcpu_init(this_cpu_read(l4x_vcpu_ptr));
+#ifdef ARCH_arm
+	set_my_cpu_offset(0);
 #endif
+#ifdef CONFIG_L4_VCPU
+	l4x_vcpu_init(per_cpu(l4x_vcpu_ptr, 0));
+#else
+	local_irq_disable();
+#endif
+
 	*ti = (struct thread_info) INIT_THREAD_INFO(init_task);
 	ti->task->stack = ti;
 
@@ -2056,7 +2124,6 @@ static L4_CV void __init cpu0_startup(void *data)
 	legacy_pic = &null_legacy_pic;
 #endif
 
-	local_irq_disable();
 #ifdef CONFIG_X86
 	setup_clear_cpu_cap(X86_FEATURE_SEP);
 #endif
@@ -3428,6 +3495,9 @@ void l4x_prepare_irq_thread(struct thread_info *ti, unsigned _cpu)
 
 #if defined(CONFIG_SMP) && defined(ARCH_x86)
 	l4x_load_percpu_gdt_descriptor(get_cpu_gdt_table(_cpu));
+#endif
+#ifdef CONFIG_ARM
+	set_my_cpu_offset(per_cpu_offset(_cpu));
 #endif
 }
 #endif
