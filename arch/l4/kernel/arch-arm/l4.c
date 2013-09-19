@@ -154,7 +154,7 @@ static void __init l4x_mach_init(void)
 	l4x_arm_devices_init();
 }
 
-static inline void l4x_stop(char mode, const char *cmd)
+static inline void l4x_stop(enum reboot_mode mode, const char *cmd)
 {
 	local_irq_disable();
 	l4x_exit_l4linux();

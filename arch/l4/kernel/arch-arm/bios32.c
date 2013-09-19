@@ -447,7 +447,8 @@ static int pcibios_init_resources(int busnr, struct pci_sys_data *sys)
 	return 0;
 }
 
-static void pcibios_init_hw(struct hw_pci *hw, struct list_head *head)
+static void pcibios_init_hw(struct device *parent, struct hw_pci *hw,
+			    struct list_head *head)
 {
 	struct pci_sys_data *sys = NULL;
 	int ret;
@@ -482,7 +483,7 @@ static void pcibios_init_hw(struct hw_pci *hw, struct list_head *head)
 			if (hw->scan)
 				sys->bus = hw->scan(nr, sys);
 			else
-				sys->bus = pci_scan_root_bus(NULL, sys->busnr,
+				sys->bus = pci_scan_root_bus(parent, sys->busnr,
 						hw->ops, sys, &sys->resources);
 
 			if (!sys->bus)
@@ -499,7 +500,7 @@ static void pcibios_init_hw(struct hw_pci *hw, struct list_head *head)
 	}
 }
 
-void pci_common_init(struct hw_pci *hw)
+void pci_common_init_dev(struct device *parent, struct hw_pci *hw)
 {
 	struct pci_sys_data *sys;
 	LIST_HEAD(head);
@@ -507,7 +508,7 @@ void pci_common_init(struct hw_pci *hw)
 	pci_add_flags(PCI_REASSIGN_ALL_RSRC);
 	if (hw->preinit)
 		hw->preinit();
-	pcibios_init_hw(hw, &head);
+	pcibios_init_hw(parent, hw, &head);
 	if (hw->postinit)
 		hw->postinit();
 

@@ -81,7 +81,7 @@ static inline void __flush_tlb_one(unsigned long addr)
 #ifdef CONFIG_L4
 	l4x_update_mapping(addr);
 #endif
-		__flush_tlb_single(addr);
+	__flush_tlb_single(addr);
 }
 
 #define TLB_FLUSH_ALL	-1UL

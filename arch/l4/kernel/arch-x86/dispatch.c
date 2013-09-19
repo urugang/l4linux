@@ -322,7 +322,7 @@ static inline void l4x_pte_add_access_flag(pte_t *ptep)
 
 static inline void l4x_pte_add_access_and_dirty_flags(pte_t *ptep)
 {
-	ptep->pte |= _PAGE_ACCESSED + _PAGE_DIRTY;
+	ptep->pte |= _PAGE_ACCESSED | _PAGE_DIRTY | _PAGE_SOFT_DIRTY;
 }
 
 static inline

@@ -186,37 +186,44 @@ endif
 # Note that GCC does not numerically define an architecture version
 # macro, but instead defines a whole series of macros which makes
 # testing for a specific architecture or later rather impossible.
-arch-$(CONFIG_CPU_32v7)		:=-D__LINUX_ARM_ARCH__=7 $(call cc-option,-march=armv7-a,-march=armv5t -Wa$(comma)-march=armv7-a)
-arch-$(CONFIG_CPU_32v6)		:=-D__LINUX_ARM_ARCH__=6 $(call cc-option,-march=armv6,-march=armv5t -Wa$(comma)-march=armv6)
+arch-$(CONFIG_CPU_32v7M)	=-D__LINUX_ARM_ARCH__=7 -march=armv7-m -Wa,-march=armv7-m
+arch-$(CONFIG_CPU_32v7)		=-D__LINUX_ARM_ARCH__=7 $(call cc-option,-march=armv7-a,-march=armv5t -Wa$(comma)-march=armv7-a)
+arch-$(CONFIG_CPU_32v6)		=-D__LINUX_ARM_ARCH__=6 $(call cc-option,-march=armv6,-march=armv5t -Wa$(comma)-march=armv6)
 # Only override the compiler option if ARMv6. The ARMv6K extensions are
 # always available in ARMv7
 ifeq ($(CONFIG_CPU_32v6),y)
-arch-$(CONFIG_CPU_32v6K)	:=-D__LINUX_ARM_ARCH__=6 $(call cc-option,-march=armv6k,-march=armv5t -Wa$(comma)-march=armv6k)
+arch-$(CONFIG_CPU_32v6K)	=-D__LINUX_ARM_ARCH__=6 $(call cc-option,-march=armv6k,-march=armv5t -Wa$(comma)-march=armv6k)
 endif
-arch-$(CONFIG_CPU_32v5)		:=-D__LINUX_ARM_ARCH__=5 $(call cc-option,-march=armv5te,-march=armv4t)
-arch-$(CONFIG_CPU_32v4T)	:=-D__LINUX_ARM_ARCH__=4 -march=armv4t
-arch-$(CONFIG_CPU_32v4)		:=-D__LINUX_ARM_ARCH__=4 -march=armv4
-arch-$(CONFIG_CPU_32v3)		:=-D__LINUX_ARM_ARCH__=3 -march=armv3
+arch-$(CONFIG_CPU_32v5)		=-D__LINUX_ARM_ARCH__=5 $(call cc-option,-march=armv5te,-march=armv4t)
+arch-$(CONFIG_CPU_32v4T)	=-D__LINUX_ARM_ARCH__=4 -march=armv4t
+arch-$(CONFIG_CPU_32v4)		=-D__LINUX_ARM_ARCH__=4 -march=armv4
+arch-$(CONFIG_CPU_32v3)		=-D__LINUX_ARM_ARCH__=3 -march=armv3
+
+# Evaluate arch cc-option calls now
+arch-y := $(arch-y)
 
 # This selects how we optimise for the processor.
-tune-$(CONFIG_CPU_ARM7TDMI)	:=-mtune=arm7tdmi
-tune-$(CONFIG_CPU_ARM720T)	:=-mtune=arm7tdmi
-tune-$(CONFIG_CPU_ARM740T)	:=-mtune=arm7tdmi
-tune-$(CONFIG_CPU_ARM9TDMI)	:=-mtune=arm9tdmi
-tune-$(CONFIG_CPU_ARM940T)	:=-mtune=arm9tdmi
-tune-$(CONFIG_CPU_ARM946E)	:=$(call cc-option,-mtune=arm9e,-mtune=arm9tdmi)
-tune-$(CONFIG_CPU_ARM920T)	:=-mtune=arm9tdmi
-tune-$(CONFIG_CPU_ARM922T)	:=-mtune=arm9tdmi
-tune-$(CONFIG_CPU_ARM925T)	:=-mtune=arm9tdmi
-tune-$(CONFIG_CPU_ARM926T)	:=-mtune=arm9tdmi
-tune-$(CONFIG_CPU_FA526)	:=-mtune=arm9tdmi
-tune-$(CONFIG_CPU_SA110)	:=-mtune=strongarm110
-tune-$(CONFIG_CPU_SA1100)	:=-mtune=strongarm1100
-tune-$(CONFIG_CPU_XSCALE)	:=$(call cc-option,-mtune=xscale,-mtune=strongarm110) -Wa,-mcpu=xscale
-tune-$(CONFIG_CPU_XSC3)		:=$(call cc-option,-mtune=xscale,-mtune=strongarm110) -Wa,-mcpu=xscale
-tune-$(CONFIG_CPU_FEROCEON)	:=$(call cc-option,-mtune=marvell-f,-mtune=xscale)
-tune-$(CONFIG_CPU_V6)		:=$(call cc-option,-mtune=arm1136j-s,-mtune=strongarm)
-tune-$(CONFIG_CPU_V6K)		:=$(call cc-option,-mtune=arm1136j-s,-mtune=strongarm)
+tune-$(CONFIG_CPU_ARM7TDMI)	=-mtune=arm7tdmi
+tune-$(CONFIG_CPU_ARM720T)	=-mtune=arm7tdmi
+tune-$(CONFIG_CPU_ARM740T)	=-mtune=arm7tdmi
+tune-$(CONFIG_CPU_ARM9TDMI)	=-mtune=arm9tdmi
+tune-$(CONFIG_CPU_ARM940T)	=-mtune=arm9tdmi
+tune-$(CONFIG_CPU_ARM946E)	=$(call cc-option,-mtune=arm9e,-mtune=arm9tdmi)
+tune-$(CONFIG_CPU_ARM920T)	=-mtune=arm9tdmi
+tune-$(CONFIG_CPU_ARM922T)	=-mtune=arm9tdmi
+tune-$(CONFIG_CPU_ARM925T)	=-mtune=arm9tdmi
+tune-$(CONFIG_CPU_ARM926T)	=-mtune=arm9tdmi
+tune-$(CONFIG_CPU_FA526)	=-mtune=arm9tdmi
+tune-$(CONFIG_CPU_SA110)	=-mtune=strongarm110
+tune-$(CONFIG_CPU_SA1100)	=-mtune=strongarm1100
+tune-$(CONFIG_CPU_XSCALE)	=$(call cc-option,-mtune=xscale,-mtune=strongarm110) -Wa,-mcpu=xscale
+tune-$(CONFIG_CPU_XSC3)		=$(call cc-option,-mtune=xscale,-mtune=strongarm110) -Wa,-mcpu=xscale
+tune-$(CONFIG_CPU_FEROCEON)	=$(call cc-option,-mtune=marvell-f,-mtune=xscale)
+tune-$(CONFIG_CPU_V6)		=$(call cc-option,-mtune=arm1136j-s,-mtune=strongarm)
+tune-$(CONFIG_CPU_V6K)		=$(call cc-option,-mtune=arm1136j-s,-mtune=strongarm)
+
+# Evaluate tune cc-option calls now
+tune-y := $(tune-y)
 
 ifeq ($(CONFIG_AEABI),y)
 CFLAGS_ABI	:=-mabi=aapcs-linux -mno-thumb-interwork
@@ -271,15 +278,13 @@ export L4DIR
 
 
 # Extra Libs
-L4LX_E_L-$(CONFIG_L4_VCPU)         += libvcpu
-L4LX_E_L-$(CONFIG_L4_USE_L4SHMC)   += shmc
-L4LX_E_L-$(CONFIG_L4_BLK_DRV)      += generic_blk
-L4LX_E_L-$(CONFIG_L4_EXTERNAL_RTC) += rtc
-L4LX_E_L-$(CONFIG_L4_NET_ANKH_DRV) += ankh
-L4LX_E_L-$(CONFIG_L4_IRQ_OMEGA0)   += omega0
-L4LX_E_L-$(CONFIG_L4_PDSPBLK_DRV)  += pers_dsp
-L4LX_E_L-$(CONFIG_L4_TCG_STPM)     += stpm-client
-L4LX_E_L-$(CONFIG_L4_FERRET)       += ferret
+L4MODS-$(CONFIG_L4_VCPU)         += libvcpu
+L4MODS-$(CONFIG_L4_USE_L4SHMC)   += shmc
+L4MODS-$(CONFIG_L4_BLK_DRV)      += generic_blk
+L4MODS-$(CONFIG_L4_EXTERNAL_RTC) += rtc
+L4MODS-$(CONFIG_L4_NET_ANKH_DRV) += ankh
+L4MODS-$(CONFIG_L4_TCG_STPM)     += stpm-client
+L4MODS-$(CONFIG_L4_FERRET)       += ferret
 
 L4INC		= -I$(L4OBJ)/include/$(L4_MK_ARCH)/$(L4_MK_API) \
 		  -I$(L4OBJ)/include/$(L4_MK_ARCH) \
@@ -313,7 +318,7 @@ L4_REQUIRED_MODS		:= libc_be_minimal_log_io \
                                    libc_minimal libc_minimal_l4re \
 				   libsupc++_minimal log l4re_c-util \
                                    $(if $(CONFIG_L4_LINK_LIBIO_DIRECT),libio-direct,libio) \
-				   $(L4LX_E_L-y)
+				   $(L4MODS-y)
 
 L4_EXT_CFLAGS			:= $(call L4_BID_PKG_CONFIG_CALL,$(L4OBJ),--cflags --define-variable=libc_variant=libc,$(L4_REQUIRED_MODS))
 ifneq ($(call L4_BID_PKG_CONFIG_FAILED,$(L4_EXT_CFLAGS)),)
@@ -448,6 +453,14 @@ endif # config-targets == 1
 archclean:
 	$(Q)rm -rf $(objtree)/arch/i386
 	$(Q)rm -rf $(objtree)/arch/x86_64
+	$(Q)$(MAKE) $(clean)=$(boot)
+	$(Q)$(MAKE) $(clean)=arch/x86/tools
+
+PHONY += kvmconfig
+kvmconfig:
+	$(if $(wildcard $(objtree)/.config),, $(error You need an existing .config for this target))
+	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/kconfig/merge_config.sh -m -O $(objtree) $(objtree)/.config arch/x86/configs/kvm_guest.config
+	$(Q)yes "" | $(MAKE) oldconfig
 
 ifeq ($(BASEARCH),x86)
 # Syscall table generation

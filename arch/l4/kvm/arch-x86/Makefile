@@ -7,16 +7,17 @@ CFLAGS_x86.o := -I.
 CFLAGS_svm.o := -I.
 CFLAGS_vmx.o := -I.
 
-kvm-y			+= $(addprefix ../../../../virt/kvm/, ioapic.o \
-				coalesced_mmio.o irq_comm.o eventfd.o \
-				irqchip.o)
-kvm-$(CONFIG_KVM_DEVICE_ASSIGNMENT)	+= $(addprefix ../../../../virt/kvm/, \
-				assigned-dev.o iommu.o)
-kvm-$(CONFIG_KVM_ASYNC_PF)	+= $(addprefix ../../../../virt/kvm/, async_pf.o)
+KVM := ../../../../virt/kvm
+
+kvm-y			+= kvm_main.o $(KVM)/ioapic.o \
+				$(KVM)/coalesced_mmio.o $(KVM)/irq_comm.o \
+				$(KVM)/eventfd.o $(KVM)/irqchip.o
+kvm-$(CONFIG_KVM_DEVICE_ASSIGNMENT)	+= $(KVM)/assigned-dev.o $(KVM)/iommu.o
+kvm-$(CONFIG_KVM_ASYNC_PF)	+= $(KVM)/async_pf.o
 
 kvm-y			+= x86.o mmu.o $(b)/emulate.o $(b)/i8259.o $(b)/irq.o $(b)/lapic.o \
 			   $(b)/i8254.o $(b)/cpuid.o $(b)/pmu.o
-kvm-y			+= kvm-l4.o kvm_main.o
+kvm-y			+= kvm-l4.o
 kvm-intel-y		+= vmx.o
 kvm-amd-y		+= svm.o
 

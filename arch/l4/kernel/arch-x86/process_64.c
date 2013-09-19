@@ -89,11 +89,11 @@ void __show_regs(struct pt_regs *regs, int all)
 
 #ifdef CONFIG_L4
 	gs = fs = shadowgs = ~0;
-#else
+#else /* L4 */
 	rdmsrl(MSR_FS_BASE, fs);
 	rdmsrl(MSR_GS_BASE, gs);
 	rdmsrl(MSR_KERNEL_GS_BASE, shadowgs);
-#endif
+#endif /* L4 */
 
 	if (!all)
 		return;
@@ -103,12 +103,12 @@ void __show_regs(struct pt_regs *regs, int all)
 	cr2 = ~0UL;
 	cr3 = ~0UL;
 	cr4 = ~0UL;
-#else
+#else /* L4 */
 	cr0 = read_cr0();
 	cr2 = read_cr2();
 	cr3 = read_cr3();
 	cr4 = read_cr4();
-#endif
+#endif /* L4 */
 
 	printk(KERN_DEFAULT "FS:  %016lx(%04x) GS:%016lx(%04x) knlGS:%016lx\n",
 	       fs, fsindex, gs, gsindex, shadowgs);
@@ -121,12 +121,19 @@ void __show_regs(struct pt_regs *regs, int all)
 	get_debugreg(d0, 0);
 	get_debugreg(d1, 1);
 	get_debugreg(d2, 2);
-	printk(KERN_DEFAULT "DR0: %016lx DR1: %016lx DR2: %016lx\n", d0, d1, d2);
 	get_debugreg(d3, 3);
 	get_debugreg(d6, 6);
 	get_debugreg(d7, 7);
+
+	/* Only print out debug registers if they are in their non-default state. */
+	if ((d0 == 0) && (d1 == 0) && (d2 == 0) && (d3 == 0) &&
+	    (d6 == DR6_RESERVED) && (d7 == 0x400))
+		return;
+
+	printk(KERN_DEFAULT "DR0: %016lx DR1: %016lx DR2: %016lx\n", d0, d1, d2);
 	printk(KERN_DEFAULT "DR3: %016lx DR6: %016lx DR7: %016lx\n", d3, d6, d7);
-#endif
+#endif /* L4 */
+
 }
 
 void release_thread(struct task_struct *dead_task)

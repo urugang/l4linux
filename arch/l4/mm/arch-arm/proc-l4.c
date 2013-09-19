@@ -29,7 +29,7 @@
 void cpu_dcache_clean_area(void *addr, int sz)
 { l4_cache_clean_data((unsigned long)addr, (unsigned long)addr + sz - 1); }
 
-void cpu_do_switch_mm(unsigned long pgd_phys, struct mm_struct *mm) {}
+void cpu_do_switch_mm(phys_addr_t pgd_phys, struct mm_struct *mm) {}
 
 extern unsigned long l4x_set_pte(struct mm_struct *mm, unsigned long addr, pte_t pteptr, pte_t pteval);
 extern void          l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte_t ptep);

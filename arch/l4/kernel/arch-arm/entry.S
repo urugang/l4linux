@@ -140,8 +140,7 @@ ENTRY(sys_oabi_call_table)
 
 
 
-
-	.macro  usr_ret, reg
+	.macro	usr_ret, reg
 #ifdef CONFIG_ARM_THUMB
 	bx	\reg
 #else
@@ -149,6 +148,18 @@ ENTRY(sys_oabi_call_table)
 #endif
 	.endm
 
+	.macro	kuser_pad, sym, size
+	.if	(. - \sym) & 3
+	.rept	4 - (. - \sym) & 3
+	.byte	0
+	.endr
+	.endif
+	.rept	(\size - (. - \sym)) / 4
+	.word	0xe7fddef1
+	.endr
+	.endm
+
+#ifdef CONFIG_KUSER_HELPERS
 	.align	5
 	.section .upage,"ax",%progbits
 	.globl	__kuser_helper_start
@@ -240,20 +251,15 @@ kuser_cmpxchg64_fixup:
 #error "incoherent kernel configuration"
 #endif
 
-	/* pad to next slot */
-	.rept	(16 - (. - __kuser_cmpxchg64)/4)
-	.word	0
-	.endr
+	kuser_pad __kuser_cmpxchg64, 64
 
-	.align	5
-
-__kuser_memory_barrier:                   @ 0x0fa0
+__kuser_memory_barrier:				@ 0x0fa0
 	smp_dmb	arm
 	usr_ret	lr
 
-	.align	5
+	kuser_pad __kuser_memory_barrier, 32
 
-__kuser_cmpxchg:                          @ 0x0fc0
+__kuser_cmpxchg:				@ 0x0fc0
 
 #if defined(CONFIG_NEEDS_SYSCALL_FOR_CMPXCHG)
 
@@ -263,10 +269,10 @@ __kuser_cmpxchg:                          @ 0x0fc0
 	 * A special ghost syscall is used for that (see traps.c).
 	 */
 	stmfd	sp!, {r7, lr}
-	mov	r7, #0xff00		@ 0xfff0 into r7 for EABI
-	orr	r7, r7, #0xf0
-	swi	#0x9ffff0
+	ldr	r7, 1f			@ it's 20 bits
+	swi	__ARM_NR_cmpxchg
 	ldmfd	sp!, {r7, pc}
+1:	.word	__ARM_NR_cmpxchg
 
 #elif __LINUX_ARM_ARCH__ < 6
 
@@ -337,13 +343,14 @@ kuser_cmpxchg32_fixup:
 
 #endif
 
-	.align	5
+	kuser_pad __kuser_cmpxchg, 32
 
 __kuser_get_tls:				@ 0x0fe0
 	ldr	r0, [pc, #(16 - 8)]	@ read TLS, set in kuser_get_tls_init
 	usr_ret	lr
 	mrc	p15, 0, r0, c13, c0, 3	@ 0xffff0fe8 hardware TLS code
-	.rep	4
+	kuser_pad __kuser_get_tls, 16
+	.rep	3
 	.word	0			@ 0xffff0ff0 software TLS value, then
 	.endr				@ pad up to __kuser_helper_version
 
@@ -352,3 +359,6 @@ __kuser_helper_version:				@ 0xffff0ffc
 
 	.globl	__kuser_helper_end
 __kuser_helper_end:
+
+#endif
+

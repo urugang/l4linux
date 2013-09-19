@@ -68,7 +68,7 @@ static void __iomem *__ioremap_caller(resource_size_t phys_addr,
 		unsigned long size, unsigned long prot_val, void *caller)
 {
 	return __l4x_ioremap(phys_addr, size, prot_val);
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned long offset, vaddr;
 	resource_size_t pfn, last_pfn, last_addr;
 	const resource_size_t unaligned_phys_addr = phys_addr;
@@ -183,7 +183,7 @@ err_free_area:
 err_free_memtype:
 	free_memtype(phys_addr, phys_addr + size);
 	return NULL;
-#endif
+#endif /* L4 */
 }
 
 /**
@@ -268,7 +268,7 @@ void iounmap(volatile void __iomem *addr)
 {
 	/* Maybe we also need to consider the VMAs */
 	l4x_iounmap(addr);
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	struct vm_struct *p, *o;
 
 	if ((void __force *)addr <= high_memory)
@@ -307,7 +307,7 @@ void iounmap(volatile void __iomem *addr)
 	o = remove_vm_area((void __force *)addr);
 	BUG_ON(p != o || o == NULL);
 	kfree(p);
-#endif
+#endif /* L4 */
 }
 EXPORT_SYMBOL(iounmap);
 
@@ -378,7 +378,7 @@ static unsigned long slot_virt[FIX_BTMAPS_SLOTS] __initdata;
 
 void __init early_ioremap_init(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	pmd_t *pmd;
 	int i;
 
@@ -413,7 +413,7 @@ void __init early_ioremap_init(void)
 		printk(KERN_WARNING "FIX_BTMAP_BEGIN:     %d\n",
 		       FIX_BTMAP_BEGIN);
 	}
-#endif
+#endif /* L4 */
 }
 
 void __init early_ioremap_reset(void)
@@ -525,15 +525,15 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 	}
 
 	if (slot < 0) {
-		printk(KERN_INFO "early_iomap(%08llx, %08lx) not found slot\n",
-			 (u64)phys_addr, size);
+		printk(KERN_INFO "%s(%08llx, %08lx) not found slot\n",
+		       __func__, (u64)phys_addr, size);
 		WARN_ON(1);
 		return NULL;
 	}
 
 	if (early_ioremap_debug) {
-		printk(KERN_INFO "early_ioremap(%08llx, %08lx) [%d] => ",
-		       (u64)phys_addr, size, slot);
+		printk(KERN_INFO "%s(%08llx, %08lx) [%d] => ",
+		       __func__, (u64)phys_addr, size, slot);
 		dump_stack();
 	}
 
@@ -608,7 +608,7 @@ void __init early_iounmap(void __iomem *addr, unsigned long size)
 
 	printk("%s(%p, %ld, -)\n", __func__, addr, size);
 	enter_kdebug("early_iounmap");
-#endif
+#endif /* L4 */
 
 	slot = -1;
 	for (i = 0; i < FIX_BTMAPS_SLOTS; i++) {

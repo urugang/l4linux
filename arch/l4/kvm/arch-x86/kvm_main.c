@@ -976,7 +976,7 @@ int kvm_get_dirty_log(struct kvm *kvm,
 	// TODO
 	// mark whole slot dirty 
 	memset(memslot->dirty_bitmap, 0xff, n);
-#endif
+#endif /* L4 */
 	
 	if (copy_to_user(log->dirty_bitmap, memslot->dirty_bitmap, n))
 		goto out;
@@ -2933,7 +2933,8 @@ int kvm_io_bus_register_dev(struct kvm *kvm, enum kvm_bus bus_idx, gpa_t addr,
 	struct kvm_io_bus *new_bus, *bus;
 
 	bus = kvm->buses[bus_idx];
-	if (bus->dev_count > NR_IOBUS_DEVS - 1)
+	/* exclude ioeventfd which is limited by maximum fd */
+	if (bus->dev_count - bus->ioeventfd_count > NR_IOBUS_DEVS - 1)
 		return -ENOSPC;
 
 	new_bus = kzalloc(sizeof(*bus) + ((bus->dev_count + 1) *
@@ -3188,6 +3189,7 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 
 out_undebugfs:
 	unregister_syscore_ops(&kvm_syscore_ops);
+	misc_deregister(&kvm_dev);
 out_unreg:
 	kvm_async_pf_deinit();
 out_free:
