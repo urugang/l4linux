@@ -451,7 +451,7 @@ static void amd_e400_idle(void)
 		default_idle();
 }
 
-void __cpuinit select_idle_routine(const struct cpuinfo_x86 *c)
+void select_idle_routine(const struct cpuinfo_x86 *c)
 {
 #ifdef CONFIG_L4
 	x86_idle = default_idle;

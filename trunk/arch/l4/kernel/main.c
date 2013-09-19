@@ -1737,7 +1737,7 @@ void l4x_cpu_ipi_stop(unsigned cpu)
 #endif
 }
 
-static L4_CV void __cpuinit __cpu_starter(void *data)
+static L4_CV void __cpu_starter(void *data)
 {
 	int cpu = *(int *)data;
 
@@ -1767,7 +1767,7 @@ static L4_CV void __cpuinit __cpu_starter(void *data)
 
 static struct l4lx_thread_start_info_t l4x_cpu_bootup_state;
 
-void __cpuinit l4x_cpu_spawn(int cpu, struct task_struct *idle)
+void l4x_cpu_spawn(int cpu, struct task_struct *idle)
 {
 	char name[8];
 
@@ -1879,7 +1879,7 @@ void l4x_smp_process_IPI(int vector, struct pt_regs *regs)
 }
 #endif
 
-void __cpuinit check_tsc_sync_source(int cpu)
+void check_tsc_sync_source(int cpu)
 {
 	LOG_printf("%s(%d)\n", __func__, cpu);
 }

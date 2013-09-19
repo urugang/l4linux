@@ -137,7 +137,7 @@ atomic_t init_deasserted;
  * Report back to the Boot Processor during boot time or to the caller processor
  * during CPU online.
  */
-static void __cpuinit smp_callin(void)
+static void smp_callin(void)
 {
 	int cpuid, phys_id;
 	unsigned long timeout;
@@ -250,7 +250,7 @@ static int enable_start_cpu0;
 /*
  * Activate a secondary processor.
  */
-notrace static void __cpuinit start_secondary(void *unused)
+static void notrace start_secondary(void *unused)
 {
 	/*
 	 * Don't put *anything* before cpu_init(), SMP booting is too
@@ -269,7 +269,7 @@ notrace static void __cpuinit start_secondary(void *unused)
 	/* switch away from the initial page table */
 #ifndef CONFIG_L4
 	load_cr3(swapper_pg_dir);
-#endif
+#endif /* L4 */
 	__flush_tlb_all();
 #endif
 
@@ -280,7 +280,7 @@ notrace static void __cpuinit start_secondary(void *unused)
 	 * Check TSC synchronization with the BP:
 	 */
 	check_tsc_sync_target();
-#endif
+#endif /* L4 */
 
 	/*
 	 * We need to hold vector_lock so there the set of online cpus
@@ -318,7 +318,7 @@ void __init smp_store_boot_cpu_info(void)
  * The bootstrap kernel entry code has set these up. Save them for
  * a given CPU
  */
-void __cpuinit smp_store_cpu_info(int id)
+void smp_store_cpu_info(int id)
 {
 	struct cpuinfo_x86 *c = &cpu_data(id);
 
@@ -331,7 +331,7 @@ void __cpuinit smp_store_cpu_info(int id)
 	identify_secondary_cpu(c);
 }
 
-static bool __cpuinit
+static bool
 topology_sane(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o, const char *name)
 {
 	int cpu1 = c->cpu_index, cpu2 = o->cpu_index;
@@ -348,7 +348,7 @@ do {									\
 	cpumask_set_cpu((c2), cpu_##_m##_mask(c1));			\
 } while (0)
 
-static bool __cpuinit match_smt(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
+static bool match_smt(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
 {
 	if (cpu_has_topoext) {
 		int cpu1 = c->cpu_index, cpu2 = o->cpu_index;
@@ -366,7 +366,7 @@ static bool __cpuinit match_smt(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
 	return false;
 }
 
-static bool __cpuinit match_llc(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
+static bool match_llc(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
 {
 	int cpu1 = c->cpu_index, cpu2 = o->cpu_index;
 
@@ -377,7 +377,7 @@ static bool __cpuinit match_llc(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
 	return false;
 }
 
-static bool __cpuinit match_mc(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
+static bool match_mc(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
 {
 	if (c->phys_proc_id == o->phys_proc_id) {
 		if (cpu_has(c, X86_FEATURE_AMD_DCM))
@@ -388,7 +388,7 @@ static bool __cpuinit match_mc(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
 	return false;
 }
 
-void __cpuinit set_cpu_sibling_map(int cpu)
+void set_cpu_sibling_map(int cpu)
 {
 	bool has_smt = smp_num_siblings > 1;
 	bool has_mp = has_smt || boot_cpu_data.x86_max_cores > 1;
@@ -518,7 +518,7 @@ void __inquire_remote_apic(int apicid)
  * INIT, INIT, STARTUP sequence will reset the chip hard for us, and this
  * won't ... remember to clear down the APIC, etc later.
  */
-int __cpuinit
+int
 wakeup_secondary_cpu_via_nmi(int apicid, unsigned long start_eip)
 {
 	unsigned long send_status, accept_status = 0;
@@ -552,7 +552,7 @@ wakeup_secondary_cpu_via_nmi(int apicid, unsigned long start_eip)
 	return (send_status | accept_status);
 }
 
-static int __cpuinit
+static int
 wakeup_secondary_cpu_via_init(int phys_apicid, unsigned long start_eip)
 {
 	unsigned long send_status, accept_status = 0;
@@ -678,7 +678,7 @@ wakeup_secondary_cpu(int phys_apicid, unsigned long start_eip)
 #endif /* L4 */
 
 /* reduce the number of lines printed when booting a large cpu count system */
-static void __cpuinit announce_cpu(int cpu, int apicid)
+static void announce_cpu(int cpu, int apicid)
 {
 	static int current_node = -1;
 	int node = early_cpu_to_node(cpu);
@@ -721,7 +721,7 @@ static int wakeup_cpu0_nmi(unsigned int cmd, struct pt_regs *regs)
  * We'll change this code in the future to wake up hard offlined CPU0 if
  * real platform and request are available.
  */
-static int __cpuinit
+static int
 wakeup_cpu_via_init_nmi(int cpu, unsigned long start_ip, int apicid,
 	       int *cpu0_nmi_registered)
 {
@@ -754,7 +754,7 @@ wakeup_cpu_via_init_nmi(int cpu, unsigned long start_ip, int apicid,
 
 	return boot_error;
 }
-#endif
+#endif /* L4 */
 
 /*
  * NOTE - on most systems this is a PHYSICAL apic ID, but on multiquad
@@ -762,12 +762,12 @@ wakeup_cpu_via_init_nmi(int cpu, unsigned long start_ip, int apicid,
  * Returns zero if CPU booted OK, else error code from
  * ->wakeup_secondary_cpu.
  */
-static int __cpuinit do_boot_cpu(int apicid, int cpu, struct task_struct *idle)
+static int do_boot_cpu(int apicid, int cpu, struct task_struct *idle)
 {
 #ifndef CONFIG_L4
 	volatile u32 *trampoline_status =
 		(volatile u32 *) __va(real_mode_header->trampoline_status);
-#endif
+#endif /* L4 */
 	/* start_ip had better be page-aligned! */
 	unsigned long start_ip = real_mode_header->trampoline_start;
 
@@ -836,13 +836,13 @@ static int __cpuinit do_boot_cpu(int apicid, int cpu, struct task_struct *idle)
 	 */
 #ifdef CONFIG_L4
 	boot_error = wakeup_secondary_cpu(apicid, start_ip);
-#else
+#else /* L4 */
 	if (apic->wakeup_secondary_cpu)
 		boot_error = apic->wakeup_secondary_cpu(apicid, start_ip);
 	else
 		boot_error = wakeup_cpu_via_init_nmi(cpu, start_ip, apicid,
 						     &cpu0_nmi_registered);
-#endif
+#endif /* L4 */
 
 	if (!boot_error) {
 		/*
@@ -882,7 +882,7 @@ static int __cpuinit do_boot_cpu(int apicid, int cpu, struct task_struct *idle)
 				pr_err("CPU%d: Not responding\n", cpu);
 			if (apic->inquire_remote_apic)
 				apic->inquire_remote_apic(apicid);
-#endif
+#endif /* L4 */
 		}
 	}
 
@@ -900,7 +900,7 @@ static int __cpuinit do_boot_cpu(int apicid, int cpu, struct task_struct *idle)
 		per_cpu(x86_cpu_to_apicid, cpu) = BAD_APICID;
 	}
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	/* mark "stuck" area as not stuck */
 	*trampoline_status = 0;
 
@@ -921,10 +921,12 @@ static int __cpuinit do_boot_cpu(int apicid, int cpu, struct task_struct *idle)
 	return boot_error;
 }
 
-int __cpuinit native_cpu_up(unsigned int cpu, struct task_struct *tidle)
+int native_cpu_up(unsigned int cpu, struct task_struct *tidle)
 {
 	int apicid = apic->cpu_present_to_apicid(cpu);
-	//l4/unsigned long flags;
+#ifndef CONFIG_L4
+	unsigned long flags;
+#endif /* L4 */
 	int err;
 
 	WARN_ON(irqs_disabled());
@@ -967,11 +969,11 @@ int __cpuinit native_cpu_up(unsigned int cpu, struct task_struct *tidle)
 	 * Check TSC synchronization with the AP (keep irqs disabled
 	 * while doing so):
 	 */
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	local_irq_save(flags);
 	check_tsc_sync_source(cpu);
 	local_irq_restore(flags);
-#endif
+#endif /* L4 */
 
 	while (!cpu_online(cpu)) {
 		L4XV_FN_v(l4_sleep(10)); //cpu_relax();
@@ -1013,7 +1015,7 @@ static __init void disable_smp(void)
  */
 static int __init smp_sanity_check(unsigned max_cpus)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	preempt_disable();
 
 #if !defined(CONFIG_X86_BIGSMP) && defined(CONFIG_X86_32)
@@ -1089,7 +1091,7 @@ static int __init smp_sanity_check(unsigned max_cpus)
 	}
 
 	verify_local_APIC();
-#endif
+#endif /* L4 */
 
 	/*
 	 * If SMP should be disabled, then really disable it!
@@ -1187,7 +1189,7 @@ void __init native_smp_prepare_cpus(unsigned int max_cpus)
 		apic->setup_portio_remap();
 
 	smpboot_setup_io_apic();
-#endif
+#endif /* L4 */
 	/*
 	 * Set up local APIC timer on boot CPU.
 	 */

@@ -35,6 +35,7 @@
 #include <linux/smp.h>
 #include <linux/mm.h>
 
+#include <asm/trace/irq_vectors.h>
 #include <asm/irq_remapping.h>
 #include <asm/perf_event.h>
 #include <asm/x86_init.h>
@@ -61,7 +62,7 @@
 
 unsigned int num_processors;
 
-unsigned disabled_cpus __cpuinitdata;
+unsigned disabled_cpus;
 
 /* Processor that is doing the boot up */
 unsigned int boot_cpu_physical_apicid = -1U;
@@ -558,7 +559,7 @@ static DEFINE_PER_CPU(struct clock_event_device, lapic_events);
  * Setup the local APIC timer for this CPU. Copy the initialized values
  * of the boot CPU and register the clock event in the framework.
  */
-static void __cpuinit setup_APIC_timer(void)
+static void setup_APIC_timer(void)
 {
 #ifndef CONFIG_L4
 	struct clock_event_device *levt = &__get_cpu_var(lapic_events);
@@ -888,7 +889,7 @@ void __init setup_boot_APIC_clock(void)
 #endif
 }
 
-void __cpuinit setup_secondary_APIC_clock(void)
+void setup_secondary_APIC_clock(void)
 {
 	setup_APIC_timer();
 }
@@ -943,21 +944,39 @@ void __irq_entry smp_apic_timer_interrupt(struct pt_regs *regs)
 	/*
 	 * NOTE! We'd better ACK the irq immediately,
 	 * because timer handling can be slow.
-	 */
-	ack_APIC_irq();
-	/*
+	 *
 	 * update_process_times() expects us to have done irq_enter().
 	 * Besides, if we don't timer interrupts ignore the global
 	 * interrupt lock, which is the WrongThing (tm) to do.
 	 */
-	irq_enter();
-	exit_idle();
+	entering_ack_irq();
 	local_apic_timer_interrupt();
-	irq_exit();
+	exiting_irq();
 
 	set_irq_regs(old_regs);
 }
-#endif
+
+void __irq_entry smp_trace_apic_timer_interrupt(struct pt_regs *regs)
+{
+	struct pt_regs *old_regs = set_irq_regs(regs);
+
+	/*
+	 * NOTE! We'd better ACK the irq immediately,
+	 * because timer handling can be slow.
+	 *
+	 * update_process_times() expects us to have done irq_enter().
+	 * Besides, if we don't timer interrupts ignore the global
+	 * interrupt lock, which is the WrongThing (tm) to do.
+	 */
+	entering_ack_irq();
+	trace_local_timer_entry(LOCAL_TIMER_VECTOR);
+	local_apic_timer_interrupt();
+	trace_local_timer_exit(LOCAL_TIMER_VECTOR);
+	exiting_irq();
+
+	set_irq_regs(old_regs);
+}
+#endif /* L4 */
 
 int setup_profiling_timer(unsigned int multiplier)
 {
@@ -1042,7 +1061,7 @@ void clear_local_APIC(void)
 			apic_write(APIC_ESR, 0);
 		apic_read(APIC_ESR);
 	}
-#endif
+#endif /* L4 */
 }
 
 /**
@@ -1080,7 +1099,7 @@ void disable_local_APIC(void)
 		wrmsr(MSR_IA32_APICBASE, l, h);
 	}
 #endif
-#endif
+#endif /* L4 */
 }
 
 /*
@@ -1108,7 +1127,7 @@ void lapic_shutdown(void)
 
 
 	local_irq_restore(flags);
-#endif
+#endif /* L4 */
 }
 
 /*
@@ -1248,7 +1267,7 @@ void __init init_bsp_APIC(void)
 }
 
 #ifndef CONFIG_L4
-static void __cpuinit lapic_setup_esr(void)
+static void lapic_setup_esr(void)
 {
 	unsigned int oldvalue, value, maxlvt;
 
@@ -1296,7 +1315,7 @@ static void __cpuinit lapic_setup_esr(void)
  * Used to setup local APIC while initializing BSP or bringin up APs.
  * Always called with preemption disabled.
  */
-void __cpuinit setup_local_APIC(void)
+void setup_local_APIC(void)
 {
 #ifndef CONFIG_L4
 	int cpu = smp_processor_id();
@@ -1493,7 +1512,7 @@ void __cpuinit setup_local_APIC(void)
 #endif
 }
 
-void __cpuinit end_local_APIC_setup(void)
+void end_local_APIC_setup(void)
 {
 #ifndef CONFIG_L4
 	lapic_setup_esr();
@@ -1956,13 +1975,11 @@ int __init APIC_init_uniprocessor(void)
 /*
  * This interrupt should _never_ happen with our APIC/SMP architecture
  */
-void smp_spurious_interrupt(struct pt_regs *regs)
+static inline void __smp_spurious_interrupt(void)
 {
 #ifndef CONFIG_L4
 	u32 v;
 
-	irq_enter();
-	exit_idle();
 	/*
 	 * Check if this really is a spurious interrupt and ACK it
 	 * if it is a vectored one.  Just in case...
@@ -1977,14 +1994,31 @@ void smp_spurious_interrupt(struct pt_regs *regs)
 	/* see sw-dev-man vol 3, chapter 7.4.13.5 */
 	pr_info("spurious APIC interrupt on CPU#%d, "
 		"should never happen.\n", smp_processor_id());
-	irq_exit();
-#endif
+#endif /* L4 */
+}
+
+void smp_spurious_interrupt(struct pt_regs *regs)
+{
+	entering_irq();
+	__smp_spurious_interrupt();
+	exiting_irq();
+}
+
+void smp_trace_spurious_interrupt(struct pt_regs *regs)
+{
+#ifndef CONFIG_L4
+	entering_irq();
+	trace_spurious_apic_entry(SPURIOUS_APIC_VECTOR);
+	__smp_spurious_interrupt();
+	trace_spurious_apic_exit(SPURIOUS_APIC_VECTOR);
+	exiting_irq();
+#endif /* L4 */
 }
 
 /*
  * This interrupt should never happen with our APIC/SMP architecture
  */
-void smp_error_interrupt(struct pt_regs *regs)
+static inline void __smp_error_interrupt(struct pt_regs *regs)
 {
 	u32 v0, v1;
 	u32 i = 0;
@@ -1999,8 +2033,6 @@ void smp_error_interrupt(struct pt_regs *regs)
 		"Illegal register address",	/* APIC Error Bit 7 */
 	};
 
-	irq_enter();
-	exit_idle();
 	/* First tickle the hardware, only then report what went on. -- REW */
 	v0 = apic_read(APIC_ESR);
 	apic_write(APIC_ESR, 0);
@@ -2021,7 +2053,24 @@ void smp_error_interrupt(struct pt_regs *regs)
 
 	apic_printk(APIC_DEBUG, KERN_CONT "\n");
 
-	irq_exit();
+}
+
+void smp_error_interrupt(struct pt_regs *regs)
+{
+	entering_irq();
+	__smp_error_interrupt(regs);
+	exiting_irq();
+}
+
+void smp_trace_error_interrupt(struct pt_regs *regs)
+{
+#ifndef CONFIG_L4
+	entering_irq();
+	trace_error_apic_entry(ERROR_APIC_VECTOR);
+	__smp_error_interrupt(regs);
+	trace_error_apic_exit(ERROR_APIC_VECTOR);
+	exiting_irq();
+#endif /* L4 */
 }
 
 /**
@@ -2113,7 +2162,7 @@ void disconnect_bsp_APIC(int virt_wire_setup)
 	apic_write(APIC_LVT1, value);
 }
 
-void __cpuinit generic_processor_info(int apicid, int version)
+void generic_processor_info(int apicid, int version)
 {
 	int cpu, max = nr_cpu_ids;
 	bool boot_cpu_detected = physid_isset(boot_cpu_physical_apicid,
@@ -2357,7 +2406,7 @@ static void lapic_resume(void)
 	apic_write(APIC_SPIV, apic_pm_state.apic_spiv);
 	apic_write(APIC_LVT0, apic_pm_state.apic_lvt0);
 	apic_write(APIC_LVT1, apic_pm_state.apic_lvt1);
-#if defined(CONFIG_X86_MCE_P4THERMAL) || defined(CONFIG_X86_MCE_INTEL)
+#if defined(CONFIG_X86_MCE_INTEL)
 	if (maxlvt >= 5)
 		apic_write(APIC_LVTTHMR, apic_pm_state.apic_thmr);
 #endif
@@ -2387,7 +2436,7 @@ static struct syscore_ops lapic_syscore_ops = {
 	.suspend	= lapic_suspend,
 };
 
-static void __cpuinit apic_pm_activate(void)
+static void apic_pm_activate(void)
 {
 	apic_pm_state.active = 1;
 }
@@ -2412,7 +2461,7 @@ static void apic_pm_activate(void) { }
 
 #ifdef CONFIG_X86_64
 
-static int __cpuinit apic_cluster_num(void)
+static int apic_cluster_num(void)
 {
 	int i, clusters, zeros;
 	unsigned id;
@@ -2457,10 +2506,10 @@ static int __cpuinit apic_cluster_num(void)
 	return clusters;
 }
 
-static int __cpuinitdata multi_checked;
-static int __cpuinitdata multi;
+static int multi_checked;
+static int multi;
 
-static int __cpuinit set_multi(const struct dmi_system_id *d)
+static int set_multi(const struct dmi_system_id *d)
 {
 	if (multi)
 		return 0;
@@ -2469,7 +2518,7 @@ static int __cpuinit set_multi(const struct dmi_system_id *d)
 	return 0;
 }
 
-static const __cpuinitconst struct dmi_system_id multi_dmi_table[] = {
+static const struct dmi_system_id multi_dmi_table[] = {
 	{
 		.callback = set_multi,
 		.ident = "IBM System Summit2",
@@ -2481,7 +2530,7 @@ static const __cpuinitconst struct dmi_system_id multi_dmi_table[] = {
 	{}
 };
 
-static void __cpuinit dmi_check_multi(void)
+static void dmi_check_multi(void)
 {
 	if (multi_checked)
 		return;
@@ -2498,7 +2547,7 @@ static void __cpuinit dmi_check_multi(void)
  * multi-chassis.
  * Use DMI to check them
  */
-__cpuinit int apic_is_clustered_box(void)
+int apic_is_clustered_box(void)
 {
 	dmi_check_multi();
 	if (multi)

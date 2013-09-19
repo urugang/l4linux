@@ -131,7 +131,7 @@ static void l4x_fpu_get_info(l4_utcb_t *utcb)
 static inline int l4x_msgtag_copy_ureg(l4_utcb_t *u)
 {
 	if (tls_emu || has_tls_reg) {
-		l4_utcb_mr_u(u)->mr[25] = current_thread_info()->tp_value;
+		l4_utcb_mr_u(u)->mr[25] = current_thread_info()->tp_value[0];
 		return 0x8000;
 	}
 	return 0;
@@ -264,7 +264,7 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #endif /* VCPU */
 
 #ifdef CONFIG_L4_ARM_UPAGE_TLS
-	*(unsigned long *)(upage_addr + UPAGE_USER_TLS_OFFSET) = task_thread_info(next)->tp_value;
+	*(unsigned long *)(upage_addr + UPAGE_USER_TLS_OFFSET) = task_thread_info(next)->tp_value[0];
 #endif
 
 #if defined(CONFIG_SMP) && !defined(CONFIG_L4_VCPU)
@@ -328,7 +328,7 @@ state_to_vcpu(l4_vcpu_state_t *vcpu, struct pt_regs *regs,
               struct task_struct *p)
 {
 	ptregs_to_vcpu(vcpu, regs);
-	vcpu->r.tpidruro = task_thread_info(p)->tp_value;
+	vcpu->r.tpidruro = task_thread_info(p)->tp_value[0];
 }
 
 static inline void vcpu_to_thread_struct(l4_vcpu_state_t *v,
@@ -360,7 +360,7 @@ static inline void thread_struct_to_utcb(struct task_struct *p,
                                          unsigned int send_size)
 {
 	ptregs_to_utcb_exc(task_pt_regs(p), l4_utcb_exc_u(utcb));
-	l4_utcb_exc_u(utcb)->tpidruro = task_thread_info(current)->tp_value;
+	l4_utcb_exc_u(utcb)->tpidruro = task_thread_info(current)->tp_value[0];
 #ifndef CONFIG_L4_VCPU
 	per_cpu(utcb_snd_size, smp_processor_id()) = send_size;
 #endif
@@ -952,7 +952,7 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
 			if ((op & 0xf800) == 0x6800) // ldr
 				targetreg = op & 7;
 			if (targetreg != -1)
-				regs->uregs[targetreg] = current_thread_info()->tp_value;
+				regs->uregs[targetreg] = current_thread_info()->tp_value[0];
 			else
 				LOG_printf("Lx: Unknown thumb opcode %hx at %lx\n", op, pc);
 			regs->ARM_pc += 2;
@@ -963,7 +963,7 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
 				targetreg = (op >> 12) & 0xf;
 
 			if (targetreg != -1)
-				regs->uregs[targetreg] = current_thread_info()->tp_value;
+				regs->uregs[targetreg] = current_thread_info()->tp_value[0];
 			else
 				LOG_printf("Lx: Unknown opcode %lx at %lx\n", op, pc);
 			regs->ARM_pc += 4;
@@ -1085,7 +1085,7 @@ trap_and_emulate:
 		if (USER_PATCH_GETTLS_SHOW)
 			printk("   failed... emulating get-tls-func lr=%lx\n", regs->ARM_lr);
 #endif
-		regs->ARM_r0 = current_thread_info()->tp_value;
+		regs->ARM_r0 = current_thread_info()->tp_value[0];
 		regs->ARM_pc = regs->ARM_lr;
 #ifdef CONFIG_ARM_THUMB
 		if (regs->ARM_lr & 1)

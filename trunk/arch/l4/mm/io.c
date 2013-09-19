@@ -213,7 +213,7 @@ static inline void remap_area_pte(pte_t * pte, unsigned long address, unsigned l
 			BUG();
 		}
 		set_pte(pte, pfn_pte(pfn, __pgprot(_PAGE_PRESENT | _PAGE_RW |
-					_PAGE_DIRTY | _PAGE_ACCESSED | flags)));
+					_PAGE_DIRTY | _PAGE_ACCESSED | _PAGE_SOFT_DIRTY | flags)));
 		address += PAGE_SIZE;
 		pfn++;
 		pte++;

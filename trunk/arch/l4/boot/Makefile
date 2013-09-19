@@ -23,8 +23,12 @@ objects-y := ldr.o res.o image.o
 
 include $(L4OBJ)/l4defs.mk.inc
 
-KBUILD_CFLAGS	:= $(filter-out -mregparm=3,$(KBUILD_CFLAGS)) \
-                   $(L4INC) -I$(L4OBJ)/include/uclibc \
+KBUILD_CFLAGS   := $(filter-out -mregparm=3,$(KBUILD_CFLAGS))
+KBUILD_CFLAGS   := $(filter-out -mabi=aapcs-linux,$(KBUILD_CFLAGS))
+KBUILD_CFLAGS   := $(filter-out -mapcs,$(KBUILD_CFLAGS))
+KBUILD_CFLAGS   := $(filter-out -msoft-float,$(KBUILD_CFLAGS))
+
+KBUILD_CFLAGS	+= $(L4INC) -I$(L4OBJ)/include/uclibc \
 		   -Wall -fno-strict-aliasing -O2 -pipe \
 		   -DARCH_$(L4_MK_ARCH) -g \
 		   -I$(obj) -DL4SYS_USE_UTCB_WRAP=1

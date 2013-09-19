@@ -85,7 +85,7 @@ static const u32 host_save_user_msrs[] = {
 	MSR_FS_BASE,
 #endif
 	MSR_IA32_SYSENTER_CS, MSR_IA32_SYSENTER_ESP, MSR_IA32_SYSENTER_EIP,
-#endif
+#endif /* L4 */
 };
 
 #define NR_HOST_SAVE_USER_MSRS ARRAY_SIZE(host_save_user_msrs)
@@ -449,7 +449,7 @@ static inline void invlpga(unsigned long addr, u32 asid)
 {
 	asm volatile (__ex(SVM_INVLPGA) : : "a"(addr), "c"(asid));
 }
-#endif
+#endif /* L4 */
 
 static int get_npt_level(void)
 {
@@ -624,7 +624,7 @@ static void svm_hardware_disable(void *garbage)
 	cpu_svm_disable();
 
 	amd_pmu_disable_virt();
-#endif
+#endif /* L4 */
 }
 
 static int svm_hardware_enable(void *garbage)
@@ -633,7 +633,7 @@ static int svm_hardware_enable(void *garbage)
 	struct svm_cpu_data *sd;
 #ifndef CONFIG_L4
 	uint64_t efer;
-#endif
+#endif /* L4 */
 	struct desc_ptr gdt_descr;
 	struct desc_struct *gdt;
 	int me = raw_smp_processor_id();
@@ -642,7 +642,7 @@ static int svm_hardware_enable(void *garbage)
 	rdmsrl(MSR_EFER, efer);
 	if (efer & EFER_SVME)
 		return -EBUSY;
-#endif
+#endif /* L4 */
 
 	if (!has_svm()) {
 		pr_err("%s: err EOPNOTSUPP on %d\n", __func__, me);
@@ -705,7 +705,7 @@ static int svm_hardware_enable(void *garbage)
 	svm_init_erratum_383();
 
 	amd_pmu_enable_virt();
-#endif
+#endif /* L4 */
 
 	return 0;
 }
@@ -934,7 +934,7 @@ static __init int svm_hardware_setup(void)
 		r = -EOPNOTSUPP;
 		goto err;
 	}
-#endif
+#endif /* L4 */
 
 	return 0;
 
@@ -1050,7 +1050,10 @@ static void svm_write_tsc_offset(struct kvm_vcpu *vcpu, u64 offset)
 		g_tsc_offset = svm->vmcb->control.tsc_offset -
 			       svm->nested.hsave->control.tsc_offset;
 		svm->nested.hsave->control.tsc_offset = offset;
-	}
+	} else
+		trace_kvm_write_tsc_offset(vcpu->vcpu_id,
+					   svm->vmcb->control.tsc_offset,
+					   offset);
 
 	svm->vmcb->control.tsc_offset = offset + g_tsc_offset;
 
@@ -1068,6 +1071,11 @@ static void svm_adjust_tsc_offset(struct kvm_vcpu *vcpu, s64 adjustment, bool ho
 	svm->vmcb->control.tsc_offset += adjustment;
 	if (is_guest_mode(vcpu))
 		svm->nested.hsave->control.tsc_offset += adjustment;
+	else
+		trace_kvm_write_tsc_offset(vcpu->vcpu_id,
+				     svm->vmcb->control.tsc_offset - adjustment,
+				     svm->vmcb->control.tsc_offset);
+
 	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
 }
 
@@ -1690,7 +1698,7 @@ static void new_asid(struct vcpu_svm *svm, struct svm_cpu_data *sd)
 	// redefine meaning for tlb_ctl: On L4 this means flush ASID for
 	// current VM, the actual ASID will be ignored by the kernel
 	svm->vmcb->control.tlb_ctl = TLB_CONTROL_FLUSH_ALL_ASID;
-#endif
+#endif /* L4 */
 }
 
 static void svm_set_dr7(struct kvm_vcpu *vcpu, unsigned long value)
@@ -3535,7 +3543,7 @@ static void reload_tss(struct kvm_vcpu *vcpu)
 	sd->tss_desc->type = 9; /* available 32/64-bit TSS */
 	load_TR_desc();
 }
-#endif
+#endif /* L4 */
 
 static void pre_svm_run(struct vcpu_svm *svm)
 {
@@ -3926,7 +3934,7 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 #endif
 		);
 
-#endif
+#endif /* L4 */
 
 #ifdef CONFIG_L4
 	if (l4x_kvm_dbg()) {
@@ -3937,7 +3945,7 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 
 	if (l4x_kvm_svm_run(&svm->vcpu, (unsigned long)svm->vmcb))
 		printk(KERN_ERR "l4-vm-run failed\n");
-#endif
+#endif /* L4 */
 
 #ifndef CONFIG_L4
 #ifdef CONFIG_X86_64
@@ -3952,7 +3960,7 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 	reload_tss(vcpu);
 
 	local_irq_disable();
-#endif // l4
+#endif /* L4 */
 
 	vcpu->arch.cr2 = svm->vmcb->save.cr2;
 	vcpu->arch.regs[VCPU_REGS_RAX] = svm->vmcb->save.rax;

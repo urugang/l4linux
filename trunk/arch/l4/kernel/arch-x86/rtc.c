@@ -42,8 +42,9 @@ EXPORT_SYMBOL(rtc_lock);
  * jump to the next second precisely 500 ms later. Check the Motorola
  * MC146818A or Dallas DS12887 data sheet for details.
  */
-int mach_set_rtc_mmss(unsigned long nowtime)
+int mach_set_rtc_mmss(const struct timespec *now)
 {
+	unsigned long nowtime = now->tv_sec;
 	struct rtc_time tm;
 	int retval = 0;
 
@@ -62,7 +63,7 @@ int mach_set_rtc_mmss(unsigned long nowtime)
 	return retval;
 }
 
-unsigned long mach_get_cmos_time(void)
+void mach_get_cmos_time(struct timespec *now)
 {
 	unsigned int status, year, mon, day, hour, min, sec, century = 0;
 	unsigned long flags;
@@ -111,7 +112,8 @@ unsigned long mach_get_cmos_time(void)
 	} else
 		year += CMOS_YEARS_OFFS;
 
-	return mktime(year, mon, day, hour, min, sec);
+	now->tv_sec = mktime(year, mon, day, hour, min, sec);
+	now->tv_nsec = 0;
 }
 
 /* Routines for accessing the CMOS RAM/RTC. */
@@ -148,7 +150,7 @@ int update_persistent_clock(struct timespec now)
 #ifdef CONFIG_L4_EXTERNAL_RTC
 	return -1;
 #else
-	return x86_platform.set_wallclock(now.tv_sec);
+	return x86_platform.set_wallclock(&now);
 #endif
 }
 
@@ -166,12 +168,7 @@ void read_persistent_clock(struct timespec *ts)
 	ts->tv_sec = seconds;
 	ts->tv_nsec = 0;
 #else
-	unsigned long retval;
-
-	retval = x86_platform.get_wallclock();
-
-	ts->tv_sec = retval;
-	ts->tv_nsec = 0;
+	x86_platform.get_wallclock(ts);
 #endif
 }
 

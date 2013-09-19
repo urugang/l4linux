@@ -5,14 +5,17 @@
 obj-y		:= process.o sys_arm.o time.o traps.o stacktrace.o \
 		   switch_to.o setup.o l4.o signal.o irq.o \
 		   ptrace.o entry.o dispatch.o mach_setup.o io.o elf.o \
-		   return_address.o head.o opcodes.o sched_clock.o
+		   return_address.o head.o opcodes.o
 
 obj-$(CONFIG_ATAGS)		+= atags_parse.o
 obj-$(CONFIG_ATAGS_PROC)	+= atags_proc.o
 obj-$(CONFIG_DEPRECATED_PARAM_STRUCT) += atags_compat.o
 
 obj-$(CONFIG_CPU_IDLE)				+= cpuidle.o
-obj-$(CONFIG_SMP)				+= smp.o smp_tlb.o platsmp.o
+obj-$(CONFIG_SMP)				+= smp.o platsmp.o
+ifdef CONFIG_MMU
+obj-$(CONFIG_SMP)				+= smp_tlb.o
+endif
 obj-$(CONFIG_MODULES)				+= armksyms.o module.o
 obj-$(CONFIG_ISA_DMA_API)			+= dma.o
 obj-$(CONFIG_HOTPLUG_CPU)			+= hotplug.o
@@ -44,7 +47,6 @@ return_address-y := ../../../arm/kernel/return_address.o
 sys_oabi-compat-y := ../../../arm/kernel/sys_oabi-compat.o
 compat-y        := ../../../arm/kernel/compat.o
 crash_dump-y    := ../../../arm/kernel/crash_dump.o
-sched_clock-y   := ../../../arm/kernel/sched_clock.o
 devtree-y       := ../../../arm/kernel/devtree.o
 topology-y      := ../../../arm/kernel/topology.o
 opcodes-y       := ../../../arm/kernel/opcodes.o

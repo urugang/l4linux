@@ -129,9 +129,9 @@ void __check_kvm_seq(struct mm_struct *mm)
 
 
 void __iomem *
-__arm_ioremap(unsigned long phys_addr, size_t size, unsigned int flags)
+__arm_ioremap(phys_addr_t phys_addr, size_t size, unsigned int mtype)
 {
-	return __l4x_ioremap(phys_addr, size, flags);
+	return __l4x_ioremap(phys_addr, size, mtype);
 }
 EXPORT_SYMBOL(__arm_ioremap);
 

@@ -130,7 +130,6 @@ static void evdev_event(struct input_handle *handle,
 			unsigned int type, unsigned int code, int value)
 {
 	struct l4x_input_event e;
-	L4XV_V(flags);
 
 	e.time      = l4lx_kinfo->clock;
 	e.type      = type;
@@ -138,14 +137,10 @@ static void evdev_event(struct input_handle *handle,
 	e.value     = value;
 	e.stream_id = (unsigned long)handle->dev;
 
-	L4XV_L(flags);
-	l4x_srv_input_add_event(&e);
-	L4XV_U(flags);
+	L4XV_FN_v(l4x_srv_input_add_event(&e));
 
 	if (type == EV_SYN) {
-		L4XV_L(flags);
-		l4x_srv_input_trigger();
-		L4XV_U(flags);
+		L4XV_FN_v(l4x_srv_input_trigger());
 		return;
 	}
 
@@ -236,16 +231,12 @@ static struct input_handler evdev_handler = {
 
 static int __init l4evsrv_init(void)
 {
-	L4XV_V(flags);
-
 	if (!enable)
 		return 0;
 
 	printk("L4Re::Event Service\n");
 
-	L4XV_L(flags);
-	l4x_srv_input_init(l4x_cpu_thread_get_cap(0), &l4x_input_ops);
-	L4XV_U(flags);
+	L4XV_FN_v(l4x_srv_input_init(l4x_cpu_thread_get_cap(0), &l4x_input_ops));
 
 	return input_register_handler(&evdev_handler);
 }
