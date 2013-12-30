@@ -419,7 +419,7 @@ static int l4ser_setup(const char *val, struct kernel_param *kp)
 module_param_call(add, l4ser_setup, NULL, NULL, 0200);
 MODULE_PARM_DESC(add, "Use l4ser.add=name to add an another port, name queried in cap environment");
 
-MODULE_AUTHOR("Adam Lackorzynski <adam@os.inf.tu-dresden.de");
+MODULE_AUTHOR("Adam Lackorzynski <adam@os.inf.tu-dresden.de>");
 MODULE_DESCRIPTION("L4 serial driver");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_CHARDEV_MAJOR(SERIAL_L4SER_MAJOR);

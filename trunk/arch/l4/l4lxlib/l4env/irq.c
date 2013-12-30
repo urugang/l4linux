@@ -256,6 +256,33 @@ static void migrate_irq(unsigned irq, unsigned to_cpu)
  * Hardware (device) interrupts.
  */
 
+static void create_irq_thread(unsigned irq, struct l4x_irq_desc_private *p)
+{
+	char thread_name[7];
+
+	// we're done if the IRQ thread already exists
+	if (l4lx_thread_is_valid(p->irq_thread)) {
+		dd_printk("%s: irqthread %d: already there\n", __func__, irq);
+		return;
+	}
+
+	pr_info("%s: creating IRQ thread for %d (IRQ-cap %lx)\n",
+	        __func__, irq, p->irq_cap);
+
+	set_irq_cpu(irq, smp_processor_id());
+
+	sprintf(thread_name, "IRQ%d", irq);
+	p->irq_thread = l4lx_thread_create(irq_thread,
+	                                   smp_processor_id(),
+	                                   NULL, &irq, sizeof(irq),
+	                                   l4x_cap_alloc(),
+	                                   l4lx_irq_prio_get(irq),
+	                                   0, 0, thread_name, NULL);
+
+	if (!l4lx_thread_is_valid(p->irq_thread))
+		enter_kdebug("Error creating IRQ-thread!");
+}
+
 /*
  * There are two possible ways this funtion is called:
  * - from request_irq(...) and friends with properly set up
@@ -275,60 +302,53 @@ static void migrate_irq(unsigned irq, unsigned to_cpu)
  *
  * Seems to be called with irq_desc[irq].lock held.
  */
-unsigned int l4lx_irq_dev_startup(struct irq_data *data)
+unsigned int l4lx_irq_io_startup(struct irq_data *data)
 {
-	char thread_name[7];
 	unsigned irq = data->irq;
 	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 
 	if (!p)
 		return 0;
 
-	/* First test whether a capability has been register with
-	 * this IRQ number */
-	p->irq_cap = l4x_have_irqcap(irq);
-	if (l4_is_invalid_cap(p->irq_cap)) {
-		/* No, get IRQ from IO service */
-		p->irq_cap = l4x_cap_alloc();
-		if (l4_is_invalid_cap(p->irq_cap)) {
-			LOG_printf("irq-startup: failed to get cap\n");
-			return 0;
-		}
-		if (l4io_request_irq(irq, p->irq_cap)) {
-			/* "reset" handler ... */
-			//irq_desc[irq].chip = &no_irq_type;
-			/* ... and bail out  */
-			LOG_printf("irq-startup: did not get irq %d\n", irq);
-			l4x_cap_free(p->irq_cap);
-			return 0;
-		}
+	BUG_ON(!l4_is_invalid_cap(p->irq_cap));
+
+	if (l4_is_invalid_cap(p->irq_cap = l4x_cap_alloc())) {
+		pr_err("l4x-irq: failed to get IRQ cap\n");
+		return 0;
 	}
 
-	// we're done if the IRQ thread already exists
-	if (!l4lx_thread_is_valid(p->irq_thread)) {
+	if (l4_error(l4_icu_set_mode(l4io_request_icu(),
+	                             irq, p->trigger)) < 0) {
+		pr_err("l4x-irq: Failed to set type for IRQ %d\n", irq);
+		WARN_ON(1);
+		goto err;
+	}
 
-		printk("%s: creating IRQ thread for %d (IRQ-cap %lx)\n",
-		       __func__, irq, p->irq_cap);
+	if (l4io_request_irq(irq, p->irq_cap)) {
+			pr_err("l4x-irq: Did not get IRQ %d from IO service\n", irq);
+			goto err;
+	}
 
-		set_irq_cpu(irq, smp_processor_id());
-
-		sprintf(thread_name, "IRQ%d", irq);
-		p->irq_thread = l4lx_thread_create(irq_thread,
-		                                   smp_processor_id(),
-		                                   NULL, &irq, sizeof(irq),
-		                                   l4x_cap_alloc(),
-		                                   l4lx_irq_prio_get(irq),
-		                                   0, thread_name, NULL);
-		if (!l4lx_thread_is_valid(p->irq_thread))
-			enter_kdebug("Error creating IRQ-thread!");
-
-	} else
-		dd_printk("%s: irqthread %d: already there\n", __func__, irq);
+	create_irq_thread(irq, p);
 
 	if (!p->enabled)
-		send_msg(irq, CMD_IRQ_ENABLE);
+		l4lx_irq_dev_enable(data);
 
-	return 1;
+	return 0;
+err:
+	l4x_cap_free(p->irq_cap);
+	p->irq_cap = L4_INVALID_CAP;
+	return 0;
+}
+
+unsigned int l4lx_irq_plain_startup(struct irq_data *data)
+{
+	struct l4x_irq_desc_private *p = irq_get_chip_data(data->irq);
+	p->irq_cap = l4x_have_irqcap(data->irq);
+	BUG_ON(l4_is_invalid_cap(p->irq_cap));
+	create_irq_thread(data->irq, p);
+	l4lx_irq_dev_enable(data);
+	return 0;
 }
 
 #ifdef CONFIG_SMP
@@ -349,18 +369,20 @@ int l4lx_irq_dev_set_affinity(struct irq_data *data,
 }
 #endif
 
-void l4lx_irq_dev_shutdown(struct irq_data *data)
+void l4lx_irq_io_shutdown(struct irq_data *data)
 {
 	struct l4x_irq_desc_private *p = irq_get_chip_data(data->irq);
 
 	dd_printk("%s: %u\n", __func__, data->irq);
 	l4lx_irq_dev_disable(data);
 
-	if (l4_is_invalid_cap(l4x_have_irqcap(data->irq))) {
-		l4io_release_irq(data->irq, p->irq_cap);
-		l4x_cap_free(p->irq_cap);
-		p->irq_cap = L4_INVALID_CAP;
-	}
+	l4io_release_irq(data->irq, p->irq_cap);
+	l4x_cap_free(p->irq_cap);
+	p->irq_cap = L4_INVALID_CAP;
+}
+
+void l4lx_irq_plain_shutdown(struct irq_data *data)
+{
 }
 
 void l4lx_irq_dev_enable(struct irq_data *data)

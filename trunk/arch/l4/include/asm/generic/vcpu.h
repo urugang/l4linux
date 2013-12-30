@@ -2,10 +2,9 @@
 #define __ASM_L4__GENERIC__VCPU_H__
 
 #include <l4/sys/vcpu.h>
-#include <asm/percpu.h>
-#include <linux/percpu-defs.h>
+#include <linux/threads.h>
 
-DECLARE_PER_CPU(l4_vcpu_state_t *, l4x_vcpu_ptr);
+extern l4_vcpu_state_t *l4x_vcpu_ptr[NR_CPUS];
 
 #ifdef CONFIG_L4_VCPU
 

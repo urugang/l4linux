@@ -36,14 +36,4 @@ int l4lx_memory_map_virtual_range(unsigned long address, unsigned long size,
  */
 int l4lx_memory_unmap_virtual_page(unsigned long address);
 
-/**
- * \brief Return if something is mapped at given address
- * \ingroup memory
- *
- * \param	address		Address to query
- *
- * \return	1 if a page is mapped, 0 if not
- */
-int l4lx_memory_page_mapped(unsigned long address);
-
 #endif /* ! __ASM_L4__L4LXAPI__MEMORY_H__ */

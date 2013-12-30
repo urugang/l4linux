@@ -377,9 +377,14 @@ EXPORT_SYMBOL(l4x_global_halt);
 
 #ifdef CONFIG_PM
 
-static l4_vcpu_state_t buf_vcpu;
-static l4_buf_regs_t buf_utcb_buf_regs;
-static l4_msg_regs_t buf_utcb_msg_regs;
+struct l4x_pm_event_data {
+	unsigned valid;
+	l4_vcpu_state_t vcpu;
+	l4_buf_regs_t utcb_buf_regs;
+	l4_msg_regs_t utcb_msg_regs;
+};
+
+static struct l4x_pm_event_data pm_event;
 
 void l4x_global_wait_save(void)
 {
@@ -391,11 +396,12 @@ void l4x_global_wait_save(void)
 	l4x_srv_setup_recv_wrap(utcb);
 	vcpu->i.tag = l4_ipc_wait(utcb, &vcpu->i.label, L4_IPC_NEVER);
 
-	memcpy(&buf_vcpu, vcpu, sizeof(*vcpu));
-	memcpy(&buf_utcb_buf_regs, l4_utcb_br_u(utcb),
+	memcpy(&pm_event.vcpu, vcpu, sizeof(*vcpu));
+	memcpy(&pm_event.utcb_buf_regs, l4_utcb_br_u(utcb),
 	       L4_UTCB_GENERIC_BUFFERS_SIZE);
-	memcpy(&buf_utcb_msg_regs, l4_utcb_mr_u(utcb),
+	memcpy(&pm_event.utcb_msg_regs, l4_utcb_mr_u(utcb),
 	       L4_UTCB_GENERIC_DATA_SIZE);
+	pm_event.valid = 1;
 }
 
 void l4x_global_saved_event_inject(void)
@@ -404,18 +410,22 @@ void l4x_global_saved_event_inject(void)
 	l4_utcb_t *utcb = l4x_utcb_current();
 	unsigned long flags;
 
-	printk("Resume event replay: Wakeup source label=%lx\n",
-	       buf_vcpu.i.label);
+	if (!pm_event.valid)
+		return;
+
+	pr_info("Resume event replay: Wakeup source label=%lx\n",
+	        pm_event.vcpu.i.label);
 
 	local_irq_save(flags);
 
-	memcpy(vcpu, &buf_vcpu, sizeof(*vcpu));
+	memcpy(vcpu, &pm_event.vcpu, sizeof(*vcpu));
 	/* Might be called from different CPU than saved, so leave TCR
 	 * intact */
-	memcpy(l4_utcb_br_u(utcb), &buf_utcb_buf_regs,
+	memcpy(l4_utcb_br_u(utcb), &pm_event.utcb_buf_regs,
 	       L4_UTCB_GENERIC_BUFFERS_SIZE);
-	memcpy(l4_utcb_mr_u(utcb), &buf_utcb_msg_regs,
+	memcpy(l4_utcb_mr_u(utcb), &pm_event.utcb_msg_regs,
 	       L4_UTCB_GENERIC_DATA_SIZE);
+	pm_event.valid = 0;
 
 	do_vcpu_irq(vcpu);
 
@@ -490,7 +500,7 @@ void l4x_tamed_start(unsigned vcpu)
 	  l4lx_thread_create(cli_sem_thread, vcpu,
 	                     tamed_per_nr(stack_mem, nr) + sizeof(tamed_per_nr(stack_mem, 0)),
 	                     &nr, sizeof(nr), l4x_cap_alloc_noctx(),
-	                     CONFIG_L4_PRIO_TAMER, 0, s, NULL);
+	                     CONFIG_L4_PRIO_TAMER, 0, 0, s, NULL);
 	tamed_per_nr(cli_sem_thread_id, nr) =
 		l4lx_thread_get_cap(tamed_per_nr(cli_sem_thread_th, nr));
 
@@ -520,7 +530,8 @@ void l4x_tamed_shutdown(unsigned vcpu)
 
 	if (!found) {
 		// none found, shutdown thread
-		l4lx_thread_shutdown(tamed_per_nr(cli_sem_thread_th, nr), NULL, 1);
+		l4lx_thread_shutdown(tamed_per_nr(cli_sem_thread_th, nr),
+				     1, NULL, 1);
 		tamed_per_nr(cli_sem_thread_id, nr) = L4_INVALID_CAP;
 		LOG_printf("Tamer%d was destroyed\n", nr);
 	}

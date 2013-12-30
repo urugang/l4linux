@@ -38,9 +38,9 @@ void printascii(const char *buf)
 }
 #endif
 
-void __init l4x_setup_irq(unsigned int irq)
+void __init l4x_setup_irq(unsigned int irq, struct irq_chip *chip)
 {
-	irq_set_chip_and_handler(irq, &l4x_irq_dev_chip, handle_level_irq);
+	irq_set_chip_and_handler(irq, chip, handle_level_irq);
 	set_irq_flags(irq, IRQF_VALID);
 	l4x_alloc_irq_desc_data(irq);
 }
@@ -52,8 +52,10 @@ static void __init l4x_mach_init_irq(void)
 	/* Call our generic IRQ handling code */
 	l4lx_irq_init();
 
-	for (i = 0; i < L4X_IRQS_V_STATIC_BASE; i++)
-		l4x_setup_irq(i);
+	for (i = 0; i < L4X_IRQS_V_DYN_BASE; i++)
+		l4x_setup_irq(i, &l4x_irq_io_chip);
+	for (; i < L4X_IRQS_V_STATIC_BASE; ++i)
+		l4x_setup_irq(i, &l4x_irq_plain_chip);
 }
 
 #ifdef CONFIG_L4_CLK_NOOP

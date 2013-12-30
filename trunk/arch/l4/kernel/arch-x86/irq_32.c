@@ -177,17 +177,17 @@ asmlinkage void do_softirq(void)
 		/* build the stack frame on the softirq stack */
 		isp = (u32 *) ((char *)irqctx + sizeof(*irqctx));
 
-		if (!l4x_is_vcpu()) {
-			l4x_stack_set(&irqctx->tinfo, l4_utcb());
-			per_cpu(l4x_current_ti, smp_processor_id()) = &irqctx->tinfo;
-		}
+#ifndef CONFIG_L4_VCPU
+		l4x_stack_set(&irqctx->tinfo, l4_utcb());
+		per_cpu(l4x_current_ti, smp_processor_id()) = &irqctx->tinfo;
+#endif
 
 		call_on_stack(__do_softirq, isp);
 
-		if (!l4x_is_vcpu()) {
-			per_cpu(l4x_current_ti, smp_processor_id()) = curctx;
-			l4x_stack_set(curctx, l4_utcb());
-		}
+#ifndef CONFIG_L4_VCPU
+		per_cpu(l4x_current_ti, smp_processor_id()) = curctx;
+		l4x_stack_set(curctx, l4_utcb());
+#endif
 
 		/*
 		 * Shouldn't happen, we returned above if in_interrupt():

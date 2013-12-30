@@ -79,6 +79,8 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
 
 	/* kernel access */
 	if (segment_eq(get_fs(), KERNEL_DS)) {
+		if (L4X_CHECK_IN_KERNEL_ACCESS && l4x_check_kern_region(to, n, 1))
+			return -EFAULT;
 		memcpy(to, from, n);
 		return 0;
 	}
@@ -130,6 +132,8 @@ copy_from_user(void *to, const void __user *from, unsigned long n)
 	unsigned long copy_size = (unsigned long)from & ~PAGE_MASK;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
+		if (L4X_CHECK_IN_KERNEL_ACCESS && l4x_check_kern_region((void *)from, n, 0))
+			return -EFAULT;
 		memcpy(to, from, n);
 		return 0;
 	}
@@ -161,7 +165,7 @@ copy_from_user(void *to, const void __user *from, unsigned long n)
 }
 EXPORT_SYMBOL(copy_from_user);
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 unsigned long
 __copy_from_user_ll_nozero(void *to, const void __user *from, unsigned long n)
 {
@@ -199,6 +203,8 @@ unsigned long clear_user(void *address, unsigned long n)
 #endif
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
+		if (L4X_CHECK_IN_KERNEL_ACCESS && l4x_check_kern_region(address, n, 1))
+			return -EFAULT;
 		memset(address, 0, n);
 		return 0;
 	}
@@ -313,6 +319,8 @@ long strncpy_from_user(char *dst, const char *src, long count)
 	if (segment_eq(get_fs(), KERNEL_DS)) {
 		/* strncpy the data but deliver back the bytes copied */
 		long c = 0;
+		if (L4X_CHECK_IN_KERNEL_ACCESS && l4x_check_kern_region(dst, count, 1))
+			return -EFAULT;
 		while (c++ < count && (*dst++ = *src++) != '\0')
 			/* nothing */;
 		return c;
@@ -355,28 +363,27 @@ static inline int __strnlen_from_user_page(const char *from,
 	page = parse_ptabs_read((unsigned long)from, &offset, &flags);
 	if (page != -EFAULT) {
 		int end;
-#ifdef ARCH_x86
-		int res;
-#endif
 #ifdef DEBUG_MEMCPY_FROMFS
 		printk("    %s reading from: %08lx\n",
 		       __func__, (page + offset));
 #endif
-#ifdef ARCH_x86
-		__asm__ __volatile__(
-			"0:	repne; scasb\n"
-			"	sete %b1\n"
-			:"=c" (res),  "=a" (end)
-			:"0" (n), "1" (0), "D" ((page + offset))
-			);
-		/* after finishing the search operation 'end' is either
-		 * - zero: max number of bytes searched
-		 * - non zero: end of string reached, res containing
-		 *      the number of remaining bytes
-		 */
-		*len += n - res;
-#endif
-#ifdef ARCH_arm
+#ifdef CONFIG_X86
+		{
+			int res;
+			__asm__ __volatile__(
+				"0:	repne; scasb\n"
+				"	sete %b1\n"
+				:"=c" (res),  "=a" (end)
+				:"0" (n), "1" (0), "D" ((page + offset))
+				);
+			/* after finishing the search operation 'end' is either
+			 * - zero: max number of bytes searched
+			 * - non zero: end of string reached, res containing
+			 *      the number of remaining bytes
+			 */
+			*len += n - res;
+		}
+#elif defined(CONFIG_ARM)
 		{
 			unsigned long i, p = page + offset;
 			end = 0;
@@ -389,6 +396,8 @@ static inline int __strnlen_from_user_page(const char *from,
 			}
 			*len += i;
 		}
+#else
+#error Add your architecture here
 #endif
 		local_irq_restore(flags);
 		return end;
@@ -414,6 +423,8 @@ long strnlen_user(const char *src, long n)
 #endif
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
+		if (L4X_CHECK_IN_KERNEL_ACCESS && l4x_check_kern_region((void *)src, n, 0))
+			return -EFAULT;
 		len = strnlen(src, n);
 #ifdef DEBUG_MEMCPY_KERNEL
 		printk("kernel strnlen_user %p, %ld = %ld\n", src, n, len);

@@ -96,7 +96,7 @@ int l4x_kvm_svm_run(struct kvm_vcpu *kvcpu, unsigned long vmcb)
 
 	L4XV_L(f);
 	cpu = smp_processor_id();
-	vcpu = this_cpu_read(l4x_vcpu_ptr);
+	vcpu = l4x_vcpu_ptr[cpu];
 
 	orig_state        = vcpu->state;
 	vcpu->state       = L4_VCPU_F_FPU_ENABLED;

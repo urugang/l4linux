@@ -210,42 +210,53 @@ void l4lx_irq_init(void)
 	                                  &cpu, sizeof(cpu),
 	                                  l4x_cap_alloc(),
 	                                  l4lx_irq_prio_get(1),
-	                                  0, thread_name, NULL);
+	                                  0, 0, thread_name, NULL);
 	if (!l4lx_thread_is_valid(irq_ths[cpu]))
 		enter_kdebug("Error creating IRQ-thread!");
 }
 
-unsigned int l4lx_irq_dev_startup(struct irq_data *data)
+unsigned int l4lx_irq_io_startup(struct irq_data *data)
 {
 	unsigned irq = data->irq;
 
-	irq_caps[irq] = l4x_have_irqcap(irq);
+	BUG_ON(!l4_is_invalid_cap(irq_caps[irq]));
+
+	irq_caps[irq] = l4x_cap_alloc();
 	if (l4_is_invalid_cap(irq_caps[irq])) {
-		/* No, get IRQ from IO service */
-		irq_caps[irq] = l4x_cap_alloc();
-		if (l4_is_invalid_cap(irq_caps[irq])) {
-			LOG_printf("irq-startup: did not get cap\n");
-			return 0;
-		}
-		if (l4io_request_irq(irq, irq_caps[irq])) {
-			LOG_printf("irq-startup: did not get irq %d\n", irq);
-			l4x_cap_free(irq_caps[irq]);
-			return 0;
-		}
+		pr_err("l4x-irq: Failed to get IRQ cap\n");
+		return 0;
+	}
+
+	if (l4io_request_irq(irq, irq_caps[irq])) {
+		pr_err("l4x-irq: Did not get IRQ %d from IO service\n", irq);
+		WARN_ON(1);
+		goto err;
 	}
 
 	l4lx_irq_dev_enable(data);
-
-	return 1;
+	return 0;
+err:
+	l4x_cap_free(irq_caps[irq]);
+	return 0;
 }
 
-void l4lx_irq_dev_shutdown(struct irq_data *data)
+unsigned int l4lx_irq_plain_startup(struct irq_data *data)
+{
+	irq_caps[data->irq] = l4x_have_irqcap(data->irq);
+	BUG_ON(l4_is_invalid_cap(irq_caps[data->irq]));
+	l4lx_irq_dev_enable(data);
+	return 0;
+}
+
+void l4lx_irq_io_shutdown(struct irq_data *data)
 {
 	l4lx_irq_dev_disable(data);
-	if (l4_is_invalid_cap(l4x_have_irqcap(data->irq))) {
-		l4io_release_irq(data->irq, irq_caps[data->irq]);
-		l4x_cap_free(irq_caps[data->irq]);
-	}
+	l4io_release_irq(data->irq, irq_caps[data->irq]);
+	l4x_cap_free(irq_caps[data->irq]);
+}
+
+void l4lx_irq_plain_shutdown(struct irq_data *data)
+{
 }
 
 void l4lx_irq_dev_enable(struct irq_data *data)

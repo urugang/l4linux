@@ -188,6 +188,7 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
                                  void *stack_pointer,
                                  void *stack_data, unsigned stack_data_size,
                                  l4_cap_idx_t l4cap, int prio,
+                                 l4_utcb_t *utcbp,
                                  l4_vcpu_state_t **vcpu_state,
                                  const char *name,
                                  struct l4lx_thread_start_info_t *deferstart)
@@ -195,14 +196,14 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 	l4_sched_param_t schedp;
 	l4_msgtag_t res;
 	struct l4lx_thread_start_info_t si_buf, *si;
+#ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
 	char l4lx_name[20] = "l4lx.";
+#endif
 	l4_utcb_t *utcb;
 	l4_umword_t *sp, *sp_data;
-
-	/* Prefix name with 'l4lx.' */
-	strncpy(l4lx_name + strlen(l4lx_name), name,
-	        sizeof(l4lx_name) - strlen(l4lx_name));
-	l4lx_name[sizeof(l4lx_name) - 1] = 0;
+#if defined(CONFIG_L4_VCPU) || defined(CONFIG_KVM)
+	int vcpu_state_allocated = 0;
+#endif
 
 	if (l4_is_invalid_cap(l4cap))
 		return 0;
@@ -214,7 +215,7 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 	if (!stack_pointer) {
 		stack_pointer = l4lx_thread_stack_alloc(l4cap);
 		if (!stack_pointer) {
-			LOG_printf("no more stacks, bye");
+			LOG_printf("l4x: Out of thread stacks\n");
 			goto out_rel_cap;
 		}
 	}
@@ -242,16 +243,24 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 #endif
 
 #ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
+	/* Prefix name with 'l4lx.' */
+	strncpy(l4lx_name + strlen(l4lx_name), name,
+	        sizeof(l4lx_name) - strlen(l4lx_name));
+	l4lx_name[sizeof(l4lx_name) - 1] = 0;
 	l4_debugger_set_object_name(l4cap, l4lx_name);
 #endif
 
-	utcb = l4lx_thread_ku_alloc_alloc_u();
-	if (!utcb)
-		goto out_rel_cap;
+	if (!utcbp) {
+		utcb = l4lx_thread_ku_alloc_alloc_u();
+		if (!utcb)
+			goto out_rel_cap;
+	} else
+		utcb = utcbp;
 
 #if defined(CONFIG_L4_VCPU) || defined(CONFIG_KVM)
-	if (vcpu_state) {
+	if (vcpu_state && !*vcpu_state) {
 		*vcpu_state = (l4_vcpu_state_t *)l4lx_thread_ku_alloc_alloc_v();
+		vcpu_state_allocated = 1;
 		if (!*vcpu_state)
 			goto out_free_utcb;
 	}
@@ -304,8 +313,6 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 #endif
 	           (l4_umword_t)sp);
 
-	l4lx_thread_name_set(l4cap, name);
-
 	si = deferstart ? deferstart : &si_buf;;
 
 	si->l4cap = l4cap;
@@ -324,12 +331,13 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 
 out_free_vcpu:
 #if defined(CONFIG_L4_VCPU) || defined(CONFIG_KVM)
-	if (vcpu_state)
+	if (vcpu_state_allocated)
 		l4lx_thread_ku_alloc_free_v(*vcpu_state);
 
 out_free_utcb:
 #endif
-	l4lx_thread_ku_alloc_free_u(utcb);
+	if (!utcbp)
+		l4lx_thread_ku_alloc_free_u(utcb);
 out_rel_cap:
 	l4_task_delete_obj(L4RE_THIS_TASK_CAP, l4cap);
 out_free_cap:
@@ -364,15 +372,16 @@ void l4lx_thread_set_kernel_pager(l4_cap_idx_t thread)
 /*
  * l4lx_thread_shutdown
  */
-void l4lx_thread_shutdown(l4lx_thread_t u, void *v, int do_cap_free)
+void l4lx_thread_shutdown(l4lx_thread_t u, unsigned free_utcb,
+                          void *v, int do_cap_free)
 {
 	l4_cap_idx_t threadcap = l4lx_thread_get_cap(u);
 
 	/* free "stack memory" used for data if there's some */
 	l4lx_thread_stack_return(threadcap);
-	l4lx_thread_name_delete(threadcap);
 
-	l4lx_thread_ku_alloc_free_u(u);
+	if (free_utcb)
+		l4lx_thread_ku_alloc_free_u(u);
 	if (v)
 		l4lx_thread_ku_alloc_free_v((l4_vcpu_state_t *)v);
 

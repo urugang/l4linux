@@ -37,8 +37,12 @@
  * TASK_SIZE - the maximum size of a user space task.
  * TASK_UNMAPPED_BASE - the lower boundary of the mmap VM area
  */
-#define PAGE_OFFSET		UL(0)
+#define PAGE_OFFSET		UL(CONFIG_PAGE_OFFSET)
+#ifdef CONFIG_L4
 #define TASK_SIZE		(UL(0xbfc00000))
+#else
+#define TASK_SIZE		(UL(CONFIG_PAGE_OFFSET) - UL(SZ_16M))
+#endif /* L4 */
 #define TASK_UNMAPPED_BASE	ALIGN(TASK_SIZE / 3, SZ_16M)
 
 /*
@@ -51,7 +55,11 @@
  * and PAGE_OFFSET - it must be within 32MB of the kernel text.
  */
 #ifndef CONFIG_THUMB2_KERNEL
+#ifdef CONFIG_L4
 #define MODULES_VADDR		(MODULES_END - SZ_16M + 0x10000)
+#else
+#define MODULES_VADDR		(PAGE_OFFSET - SZ_16M)
+#endif /* L4 */
 #else
 /* smaller range for Thumb-2 symbols relocation (2^24)*/
 #define MODULES_VADDR		(PAGE_OFFSET - SZ_8M)
@@ -67,9 +75,12 @@
 #ifdef CONFIG_HIGHMEM
 #define MODULES_END		(PAGE_OFFSET - PMD_SIZE)
 #else
-/* #define MODULES_END		(PAGE_OFFSET) */
+#ifdef CONFIG_L4
 #define MODULES_END		UL(TEXT_OFFSET)
+#else
+#define MODULES_END		(PAGE_OFFSET)
 #endif
+#endif /* L4 */
 
 /*
  * The XIP kernel gets mapped at the bottom of the module vm area.
@@ -83,7 +94,11 @@
  */
 #define IOREMAP_MAX_ORDER	24
 
+#ifdef CONFIG_L4
 #define CONSISTENT_END		(0xbfe00000UL)
+#else
+#define CONSISTENT_END		(0xffe00000UL)
+#endif
 
 #else /* CONFIG_MMU */
 
@@ -239,7 +254,7 @@ static inline phys_addr_t virt_to_phys(const volatile void *x)
 	return l4x_virt_to_phys((void *)x);
 #else
 	return __virt_to_phys((unsigned long)(x));
-#endif
+#endif /* L4 */
 }
 
 static inline void *phys_to_virt(phys_addr_t x)
@@ -248,7 +263,7 @@ static inline void *phys_to_virt(phys_addr_t x)
 	return l4x_phys_to_virt(x);
 #else
 	return (void *)(__phys_to_virt((unsigned long)(x)));
-#endif
+#endif /* L4 */
 }
 
 /*

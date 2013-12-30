@@ -119,7 +119,7 @@ struct l4fb_screen {
 	/* Input event part */
 	l4_cap_idx_t ev_ds;
 	l4_cap_idx_t ev_irq;
-	long irqnum;
+	int irqnum;
 	l4re_event_buffer_consumer_t ev_buf;
 
 

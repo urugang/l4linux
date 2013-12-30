@@ -28,7 +28,10 @@ long __get_user_1(unsigned char *val, const void __user *address)
 	unsigned long page, offset, flags;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
-		*val = *(unsigned char*)address;
+		if (L4X_CHECK_IN_KERNEL_ACCESS
+		    && l4x_check_kern_region((void *)address, sizeof(*val), 0))
+			return -EFAULT;
+		*val = *(unsigned char *)address;
 		return 0;
 	}
 
@@ -48,7 +51,10 @@ long __get_user_2(unsigned short *val, const void __user *address)
 	unsigned long page, offset;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
-		*val = *(unsigned short*)address;
+		if (L4X_CHECK_IN_KERNEL_ACCESS
+		    && l4x_check_kern_region((void *)address, sizeof(*val), 0))
+			return -EFAULT;
+		*val = *(unsigned short *)address;
 		return 0;
 	}
 
@@ -79,6 +85,9 @@ long __get_user_4(unsigned int *val, const void __user *address)
 	unsigned long page, offset;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
+		if (L4X_CHECK_IN_KERNEL_ACCESS
+		    && l4x_check_kern_region((void *)address, sizeof(*val), 0))
+			return -EFAULT;
 		*val = *(unsigned long*)address;
 		return 0;
 	}
@@ -127,7 +136,10 @@ long __get_user_8(unsigned long long *val, const void __user *address)
 	unsigned long page, offset;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
-		*val = *(unsigned long*)address;
+		if (L4X_CHECK_IN_KERNEL_ACCESS
+		    && l4x_check_kern_region((void *)address, sizeof(*val), 0))
+			return -EFAULT;
+		*val = *(unsigned long *)address;
 		return 0;
 	}
 
@@ -158,7 +170,10 @@ long __put_user_1(unsigned char val, const void __user *address)
 	unsigned long page, offset, flags;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
-		*(unsigned char*)address = val;
+		if (L4X_CHECK_IN_KERNEL_ACCESS
+		    && l4x_check_kern_region((void *)address, sizeof(val), 1))
+			return -EFAULT;
+		*(unsigned char *)address = val;
 		return 0;
 	}
 
@@ -178,6 +193,9 @@ long __put_user_2(unsigned short val, const void __user *address)
 	unsigned long page, offset;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
+		if (L4X_CHECK_IN_KERNEL_ACCESS
+		    && l4x_check_kern_region((void *)address, sizeof(val), 1))
+			return -EFAULT;
 		*(unsigned short*)address = val;
 		return 0;
 	}
@@ -208,6 +226,9 @@ long __put_user_4(unsigned int val, const void __user *address)
 	unsigned long page, offset;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
+		if (L4X_CHECK_IN_KERNEL_ACCESS
+		    && l4x_check_kern_region((void *)address, sizeof(val), 1))
+			return -EFAULT;
 		*(unsigned long*)address = val;
 		return 0;
 	}
@@ -253,6 +274,9 @@ long __put_user_8(unsigned long long val, const void __user *address)
 	unsigned long page, offset;
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
+		if (L4X_CHECK_IN_KERNEL_ACCESS
+		    && l4x_check_kern_region((void *)address, sizeof(val), 1))
+			return -EFAULT;
 		*(unsigned long long*)address = val;
 		return 0;
 	}

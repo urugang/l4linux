@@ -31,6 +31,7 @@ enum {
 struct unmap_log_entry_t {
 	struct mm_struct *mm;
 	unsigned long     addr;
+	unsigned long     dbg1;
 	unsigned char     rights;
 	unsigned char     size;
 
@@ -45,30 +46,39 @@ static DEFINE_PER_CPU(struct unmap_log_t, unmap_log);
 
 void l4x_pte_check_empty(struct mm_struct *mm)
 {
-	if (this_cpu_read(unmap_log.cnt)) {
-		struct unmap_log_t *log = &__get_cpu_var(unmap_log);
-		int i;
+	struct unmap_log_t *log;
+	int i;
 
-		for (i = 0; i < log->cnt; ++i) {
-			if (mm != log->log[i].mm)
-				continue;
+	WARN_ON(!irqs_disabled()); // otherwise we need to go non-preemtible
 
-			l4x_printf("L4x: exiting with non-flushed entry: %lx:%lx[%d,%x]\n",
-				   log->log[i].mm->context.task,
-			           log->log[i].addr, log->log[i].size,
-			           log->log[i].rights);
-		}
+	log = &__get_cpu_var(unmap_log);
 
+	if (likely(this_cpu_read(unmap_log.cnt) == 0))
+		return;
+
+	for (i = 0; i < log->cnt; ++i) {
+		if (mm != log->log[i].mm)
+			continue;
+
+		l4x_printf("L4x: exiting with non-flushed entry: %lx:%lx[sz=%d,r=%x,from=%lx,cpu=%d,cnt=%d]\n",
+			   log->log[i].mm->context.task,
+		           log->log[i].addr, log->log[i].size,
+		           log->log[i].rights,
+		           log->log[i].dbg1, raw_smp_processor_id(), i);
 	}
+
+	l4x_unmap_log_flush();
 }
 
 void l4x_unmap_log_flush(void)
 {
 	unsigned i;
-	struct unmap_log_t *log = &__get_cpu_var(unmap_log);
+	struct unmap_log_t *log;
 	unsigned long flags;
 
 	local_irq_save(flags);
+
+	log = &__get_cpu_var(unmap_log);
 
 	for (i = 0; i < log->cnt; ++i) {
 		l4_msgtag_t tag;
@@ -108,12 +118,14 @@ static void unmap_log_add(struct mm_struct *mm,
                           unsigned long uaddr, unsigned long rights)
 {
 	int i, do_flush = 0;
-	struct unmap_log_t *log = &__get_cpu_var(unmap_log);
+	struct unmap_log_t *log;
 	unsigned long flags;
 
 	BUG_ON(!mm);
 
 	local_irq_save(flags);
+
+	log = &__get_cpu_var(unmap_log);
 
 	BUG_ON(log->cnt >= L4X_MM_CONTEXT_UNMAP_LOG_COUNT);
 
@@ -122,6 +134,7 @@ static void unmap_log_add(struct mm_struct *mm,
 	log->log[i].mm     = mm;
 	log->log[i].rights = rights;
 	log->log[i].size   = PAGE_SHIFT;
+	log->log[i].dbg1   = _RET_IP_;
 
 	/* _simple_ merge with previous entries */
 	while (i) {

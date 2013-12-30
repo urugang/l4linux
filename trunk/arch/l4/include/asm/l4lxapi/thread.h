@@ -52,6 +52,9 @@ void l4lx_thread_init(void);
  * \param l4cap		Capability slot to be used for new thread.
  * \param prio		Priority of the thread. If set to -1 the default
  *			priority will be choosen (i.e. no prio will be set).
+ * \param utcb          Utcb to use, if NULL, a UTCB will be allocated.
+ * \param vcpu          Pointer to vcpu-pointer, if NULL, a vCPU state will
+ *                      be allocated.
  * \param name		String describing the thread. Only used for
  *			debugging purposes.
  * \param deferstart    If non-null will store start info into deferstart
@@ -83,6 +86,7 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
                                  void *stack_pointer,
                                  void *stack_data, unsigned stack_data_size,
                                  l4_cap_idx_t l4cap, int prio,
+                                 l4_utcb_t *utcb,
                                  l4_vcpu_state_t **vcpu_state,
                                  const char *name,
                                  struct l4lx_thread_start_info_t *deferstart);
@@ -138,13 +142,15 @@ void l4lx_thread_set_kernel_pager(l4_cap_idx_t thread);
  * \ingroup thread
  *
  * \param u           Thread to kill
+ * \param free_utcb   If true, UTCB memory will be freed.
  * \param v           Optional vcpu state
  * \param do_cap_free Free the thread capability at the allocator.
  *
  * Note that the thread capability will not be freed if a thread shuts down
  * itself.
  */
-void l4lx_thread_shutdown(l4lx_thread_t u, void *v, int do_cap_free);
+void l4lx_thread_shutdown(l4lx_thread_t u, unsigned free_utcb,
+                          void *v, int do_cap_free);
 
 /**
  * \brief Check if two thread ids are equal. Do not use with different

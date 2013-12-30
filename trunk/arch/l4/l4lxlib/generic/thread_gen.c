@@ -24,17 +24,8 @@ static __STACKS_ARRAY_ELEM_TYPE l4lx_thread_stacks_used[__STACKS_ARRAY_ELEMS];
 /* If the thread is L4_INVALID_CAP the corresponding stacks isn't used */
 static l4_cap_idx_t l4lx_thread_stack_to_thread_no[L4LX_THREAD_NO_THREADS];
 
-/* Storage for thread names */
-struct l4lx_thread_name_struct l4lx_thread_names[L4LX_THREAD_NO_THREADS] __nosavedata;
-
 void l4lx_thread_init(void)
 {
-	int i;
-	for (i = 0; i < L4LX_THREAD_NO_THREADS; ++i) {
-		l4lx_thread_names[i].id = L4_INVALID_CAP;
-		l4lx_thread_stack_to_thread_no[i] = L4_INVALID_CAP;
-	}
-
 	l4lx_thread_utcb_alloc_init();
 }
 
@@ -103,9 +94,12 @@ void l4lx_thread_stack_return(l4_cap_idx_t thread)
 	int i;
 
 	if ((i = l4lx_thread_stack_get_pos(thread)) != -1) {
+		unsigned long flags;
 		/* Stack was used by the thread */
 		l4lx_thread_stack_to_thread_no[i] = L4_INVALID_CAP;
+		local_irq_save(flags);
 		clear_bit(i, l4lx_thread_stacks_used);
+		local_irq_restore(flags);
 	}
 }
 
@@ -157,37 +151,4 @@ void *l4lx_thread_stack_get_base_pointer(l4_cap_idx_t thread)
 		return NULL;
 
 	return &l4lx_thread_stacks[i];
-}
-
-/*
- * Functions for thread names.
- */
-void l4lx_thread_name_set(l4_cap_idx_t thread, const char *name)
-{
-	int i = 0;
-
-	for (; i < L4LX_THREAD_NO_THREADS; i++)
-		if (l4_is_invalid_cap(l4lx_thread_names[i].id)) {
-			l4lx_thread_names[i].id = thread;
-			strncpy(l4lx_thread_names[i].name, name,
-				L4LX_THREAD_NAME_LEN);
-			l4lx_thread_names[i].name[L4LX_THREAD_NAME_LEN-1] = 0;
-
-			return;
-		}
-
-	enter_kdebug("Thread names exhausted!");
-}
-
-void l4lx_thread_name_delete(l4_cap_idx_t thread)
-{
-	int i = 0;
-
-	for (; i < L4LX_THREAD_NO_THREADS; i++)
-		if (l4lx_thread_equal(l4lx_thread_names[i].id, thread)) {
-			l4lx_thread_names[i].id = L4_INVALID_CAP;
-			return;
-		}
-
-	enter_kdebug("Unknown TID to delete thread name!");
 }

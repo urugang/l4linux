@@ -1,6 +1,7 @@
 
 #include <linux/errno.h>
 #include <linux/slab.h>
+#include <linux/ratelimit.h>
 
 #include <asm/generic/task.h>
 #include <asm/generic/hybrid.h>
@@ -109,4 +110,61 @@ void l4x_exit_thread(void)
 #ifdef CONFIG_X86_DS
 	ds_exit_thread(current);
 #endif
+}
+
+void l4x_evict_tasks(struct task_struct *exclude)
+{
+	struct task_struct *p;
+	int cnt = 0;
+
+	rcu_read_lock();
+	for_each_process(p) {
+		l4_cap_idx_t t;
+		struct mm_struct *mm;
+
+		if (p == exclude)
+			continue;
+
+		task_lock(p);
+		mm = p->mm;
+		if (!mm) {
+			task_unlock(p);
+			continue;
+		}
+
+		t = ACCESS_ONCE(mm->context.task);
+
+		if (l4_is_invalid_cap(t)) {
+			task_unlock(p);
+			continue;
+		}
+
+		if (down_read_trylock(&mm->mmap_sem)) {
+			struct vm_area_struct *vma;
+			for (vma = mm->mmap; vma; vma = vma->vm_next)
+				if (vma->vm_flags & VM_LOCKED) {
+					t = L4_INVALID_CAP;
+					break;
+				}
+			up_read(&mm->mmap_sem);
+			if (!vma)
+				if (cmpxchg(&mm->context.task, t, L4_INVALID_CAP) != t)
+					t = L4_INVALID_CAP;
+		} else
+			t = L4_INVALID_CAP;
+
+		task_unlock(p);
+
+		if (!l4_is_invalid_cap(t)) {
+			l4lx_task_delete_task(t);
+			l4lx_task_number_free(t);
+
+			if (++cnt > 10)
+				break;
+		}
+	}
+	rcu_read_unlock();
+
+	if (cnt == 0)
+		pr_info_ratelimited("l4x-evict: Found no process to free.\n");
 }

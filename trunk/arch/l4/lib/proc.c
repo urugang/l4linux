@@ -22,54 +22,6 @@ struct proc_dir_entry *l4_proc_dir;
 
 EXPORT_SYMBOL(l4_proc_dir);
 
-int kthreads_seq_show(struct seq_file *m, void *v)
-{
-	int i = *(int *)v;
-
-	if (!l4_is_invalid_cap(l4lx_thread_names[i].id))
-		seq_printf(m, PRINTF_L4TASK_FORM ": %s\n",
-		           PRINTF_L4TASK_ARG(l4lx_thread_names[i].id),
-		           l4lx_thread_names[i].name);
-	return 0;
-}
-
-static void *kthreads_seq_start(struct seq_file *m, loff_t *pos)
-{
-	return (*pos <= L4LX_THREAD_NO_THREADS) ? pos : NULL;
-}
-
-static void *kthreads_seq_next(struct seq_file *m, void *v, loff_t *pos)
-{
-	(*pos)++;
-	if (*pos > L4LX_THREAD_NO_THREADS)
-		return NULL;
-	return pos;
-}
-
-static void kthreads_seq_stop(struct seq_file *m, void *v)
-{
-	/* Nothing to do */
-}
-
-static struct seq_operations kthreads_seq_ops = {
-	.start = kthreads_seq_start,
-	.next  = kthreads_seq_next,
-	.stop  = kthreads_seq_stop,
-	.show  = kthreads_seq_show,
-};
-
-static int l4x_kthreads_open(struct inode *inode, struct file *filp)
-{
-	return seq_open(filp, &kthreads_seq_ops);
-}
-
-static struct file_operations l4x_kthreads_fops = {
-	.open    = l4x_kthreads_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release,
-};
-
 /* ------------------------------------------- */
 
 static void *hybrid_seq_start(struct seq_file *m, loff_t *pos)
@@ -124,7 +76,6 @@ static int __init l4x_proc_init(void)
 		return -ENOMEM;
 
 	/* seq file ones */
-	l4x_create_seq_entry("kthreads", 0, &l4x_kthreads_fops);
 	l4x_create_seq_entry("hybrids",  0, &l4x_hybrid_fops);
 
 	return r;

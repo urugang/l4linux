@@ -172,7 +172,7 @@ static int l4x_net_open(struct net_device *netdev)
 	                                      0, NULL, &netdev, sizeof(netdev),
 	                                      l4x_cap_alloc(),
 	                                      CONFIG_L4_PRIO_L4ANKH,
-	                                      0, "L4AnkhRcv", NULL);
+	                                      0, 0, "L4AnkhRcv", NULL);
 
 	if (!l4lx_thread_is_valid(priv->rcv_thread))
 		goto err_out_free_irq;
@@ -202,7 +202,7 @@ static int l4x_net_close(struct net_device *netdev)
 	netif_stop_queue(netdev);
 	netif_carrier_off(netdev);
 	kfree(priv->pkt_buffer);
-	l4lx_thread_shutdown(priv->rcv_thread, NULL, 1);
+	l4lx_thread_shutdown(priv->rcv_thread, 1, NULL, 1);
 	return 0;
 }
 
@@ -276,10 +276,11 @@ static int __init l4x_net_init_device(char *oreinst, char *devname)
 	if (l4_is_invalid_cap(priv->rx_irq = l4x_cap_alloc()))
 		goto err_out_free_dev;
 
-	if ((dev->irq = l4x_register_irq(priv->rx_irq)) < 0) {
-		dev_err(&dev->dev, "l4ankh: Failed to get signal irq\n");
+	if ((err = l4x_register_irq(priv->rx_irq)) < 0) {
+		dev_err(&dev->dev, "l4ankh: Failed to get signal irq: %d\n", err);
 		goto err_out_free_dev;
 	}
+	dev->irq = err;
 
 	if ((err = register_netdev(dev))) {
 		dev_err(&dev->dev, "l4ankh: Cannot register net device, aborting.\n");

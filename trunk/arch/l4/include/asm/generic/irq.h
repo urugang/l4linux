@@ -28,8 +28,8 @@ int l4x_alloc_irq_desc_data(int irq);
 
 void l4x_init_IRQ(void);
 
-extern struct irq_chip l4x_irq_dev_chip;
-extern struct irq_chip l4x_irq_timer_chip;
+extern struct irq_chip l4x_irq_io_chip;
+extern struct irq_chip l4x_irq_plain_chip;
 
 void l4x_irq_set_type_at_icu(unsigned irq, unsigned type);
 

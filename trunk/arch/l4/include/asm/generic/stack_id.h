@@ -54,7 +54,7 @@ l4_vcpu_state_t *l4x_vcpu_state_current(void)
 {
 	l4_vcpu_state_t *v;
 	preempt_disable();
-	v = this_cpu_read(l4x_vcpu_ptr);
+	v = l4x_vcpu_ptr[smp_processor_id()];
 	preempt_enable_no_resched();
 	return v;
 }
