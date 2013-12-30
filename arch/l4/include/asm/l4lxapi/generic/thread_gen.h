@@ -167,27 +167,8 @@ void *l4lx_thread_stack_setup_thread(void *stack_pointer, void *data);
  * \param thread	Thread id of the thread the stack is returned.
  *
  * \return Pointer to the stack of the thread, NULL if there's no stack
- * 	   for this thread number.
+ *         for this thread number.
  */
 void *l4lx_thread_stack_get_base_pointer(l4_cap_idx_t thread);
-
-
-/**
- * Set/Save the name of a thread.
- * \ingroup thread_name
- *
- * \param thread	Thread id of the thread.
- * \param name		Name of the thread.
- */
-void l4lx_thread_name_set(l4_cap_idx_t thread, const char *name);
-
-/**
- * Delete the name of a thread.
- * \ingroup thread_name
- *
- * \param thread	Thread id of the thread.
- */
-void l4lx_thread_name_delete(l4_cap_idx_t thread);
-
 
 #endif /* ! __ASM_L4__L4LXAPI__GENERIC__THREAD_GEN_H__ */

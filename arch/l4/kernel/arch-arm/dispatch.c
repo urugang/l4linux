@@ -4,6 +4,7 @@
 #include <linux/interrupt.h>
 #include <linux/tick.h>
 #include <linux/slab.h>
+#include <linux/delay.h>
 
 #include <asm/processor.h>
 #include <asm/mmu_context.h>
@@ -87,8 +88,8 @@ enum {
 
 #else
 
-#define TBUF_LOG_IDLE(x) TBUF_DO_IT(x)
-#define TBUF_LOG_WAKEUP_IDLE(x) TBUF_DO_IT(x)
+#define TBUF_LOG_IDLE(x)
+#define TBUF_LOG_WAKEUP_IDLE(x)
 #define TBUF_LOG_USER_PF(x)
 #define TBUF_LOG_SWI(x)
 #define TBUF_LOG_EXCP(x)
@@ -220,7 +221,7 @@ asm(
 void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 {
 #ifdef CONFIG_L4_VCPU
-	l4_vcpu_state_t *vcpu = this_cpu_read(l4x_vcpu_ptr);
+	l4_vcpu_state_t *vcpu = l4x_vcpu_ptr[smp_processor_id()];
 #endif
 	if (0)
 		l4x_printf("%s: cpu%d: %s(%d)[%ld] -> %s(%d)[%ld]\n     :: %p -> %p\n",
@@ -375,7 +376,8 @@ static void l4x_dispatch_suspend(struct task_struct *p,
                                  struct thread_struct *t);
 #endif
 
-static inline void l4x_print_regs(struct thread_struct *t, struct pt_regs *r)
+static inline void l4x_print_regs(unsigned long error_code,
+                                  unsigned long trapno, struct pt_regs *r)
 {
 #define R(nr) r->uregs[nr]
 	printk("0: %08lx %08lx %08lx %08lx  4: %08lx %08lx %08lx %08lx\n",
@@ -383,7 +385,7 @@ static inline void l4x_print_regs(struct thread_struct *t, struct pt_regs *r)
 	printk("8: %08lx %08lx %08lx %08lx 12: %08lx [01;34m%08lx[0m "
 	       "%08lx [01;34m%08lx[0m\n",
 	       R(8), R(9), R(10), R(11), R(12), R(13), R(14), R(15));
-	printk("CPSR: %08lx Err: %08lx\n", r->ARM_cpsr, t->error_code);
+	printk("CPSR: %08lx Err: %08lx\n", r->ARM_cpsr, error_code);
 #undef R
 }
 
@@ -408,7 +410,7 @@ static inline void call_system_call_args(syscall_t *sctbl,
 		       syscall, current->pid, current->comm,
 		       (void *)regsp->ARM_pc,
 		       (void *)regsp->ARM_lr, regsp->ARM_sp,
-		       smp_processor_id(),
+		       raw_smp_processor_id(),
 		       arg1, arg2, arg3, arg4, arg5, arg6);
 
 	if (0 && show_syscalls && syscall == 11) {
@@ -653,13 +655,38 @@ static inline int sc_get_user_4(unsigned long *store, unsigned long addr)
 	return get_user(*store, (unsigned long *)addr);
 }
 
+
+#ifdef CONFIG_L4_VCPU
+static inline unsigned long vcpu_val_trapno(l4_vcpu_state_t *v)
+{
+	return 0;
+}
+
+static inline unsigned long vcpu_val_err(l4_vcpu_state_t *v)
+{
+	return v->r.err;
+}
+#endif
+
+static inline unsigned long thread_val_trapno(struct thread_struct *t)
+{
+	return 0;
+}
+
+static inline unsigned long thread_val_err(struct thread_struct *t)
+{
+	return t->error_code;
+}
+
+
 /*
  * Return values: 0 -> do send a reply
  *                1 -> don't send a reply
  */
 static inline int l4x_dispatch_exception(struct task_struct *p,
                                          struct thread_struct *t,
-                                         l4_vcpu_state_t *v,
+                                         unsigned long err,
+                                         unsigned long trapno,
                                          struct pt_regs *regs)
 {
 	int handled = 0;
@@ -700,7 +727,8 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		if (0 && unlikely(l4x_is_upage_user_addr(regs->ARM_pc))) {
 			printk("Got SWI at %08lx\n", regs->ARM_pc);
 			l4x_print_vm_area_maps(p, regs->ARM_pc);
-			l4x_print_regs(&p->thread, regs);
+			l4x_print_regs(thread_val_err(&p->thread),
+			               thread_val_trapno(&p->thread), regs);
 			goto go_away;
 		}
 #endif
@@ -767,7 +795,8 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		if (unlikely(!is_lx_syscall(scno))) {
 			printk("Hmm, rather unknown syscall nr 0x%lx/%ld\n", scno, scno);
 			l4x_print_vm_area_maps(p, ~0UL);
-			l4x_print_regs(&p->thread, regs);
+			l4x_print_regs(thread_val_err(&p->thread),
+			               thread_val_trapno(&p->thread), regs);
 		}
 #endif
 
@@ -884,7 +913,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	// still not handled, PC is on the insn now
 
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
-	l4x_print_regs(t, regs);
+	l4x_print_regs(thread_val_err(t), thread_val_trapno(t), regs);
 
 	if (   t->error_code == 0x00100000
 	    || t->error_code == 0x00110000
@@ -906,7 +935,8 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		       " %08lx with content %08lx, err %08lx\n",
 		       p->comm, p->pid, regs->ARM_pc, val, t->error_code);
 		l4x_print_vm_area_maps(p, regs->ARM_pc);
-		l4x_print_regs(&p->thread, regs);
+		l4x_print_regs(thread_val_err(&p->thread),
+		               thread_val_trapno(&p->thread), regs);
 		if (0)
 			enter_kdebug("undef insn");
 	}
@@ -921,7 +951,7 @@ go_away:
 
 	printk("Error code: %s\n", l4x_arm_decode_error_code(t->error_code));
 	printk("(Unknown) EXCEPTION\n");
-	l4x_print_regs(t, regs);
+	l4x_print_regs(thread_val_err(t), thread_val_trapno(t), regs);
 
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
 	enter_kdebug("check");
@@ -1243,11 +1273,6 @@ static inline int l4x_handle_io_page_fault(struct task_struct *p,
 #ifdef CONFIG_L4_VCPU
 static inline void l4x_vcpu_entry_user_arch(void)
 {
-}
-
-static inline bool l4x_vcpu_is_wr_pf(l4_vcpu_state_t *v)
-{
-	return v->r.err & (1 << 11);
 }
 #endif
 

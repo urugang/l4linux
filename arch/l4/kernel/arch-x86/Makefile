@@ -46,6 +46,9 @@ obj-$(CONFIG_X86_CHECK_BIOS_CORRUPTION) += check.o
 obj-$(CONFIG_SWIOTLB)			+= pci-swiotlb.o
 obj-$(CONFIG_OF)			+= devicetree.o
 obj-$(CONFIG_UPROBES)			+= uprobes.o
+obj-y					+= sysfb.o
+obj-$(CONFIG_X86_SYSFB)			+= sysfb_simplefb.o
+obj-$(CONFIG_EFI)			+= sysfb_efi.o
 
 obj-$(CONFIG_PERF_EVENTS)		+= perf_regs.o
 obj-$(CONFIG_X86_TSC)			+= trace_clock.o
@@ -96,6 +99,7 @@ vsyscall_emu_64-y += $(b)/vsyscall_emu_64.o
 nmi-y           += $(b)/nmi.o
 perf_regs-y     += $(b)/perf_regs.o
 trace_clock-y   += $(b)/trace_clock.o
+sysfb-y         += $(b)/sysfb.o
 
 # we have our own versions of destroy_context and init_new_context,
 # so rename the original one

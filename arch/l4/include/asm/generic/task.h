@@ -17,12 +17,14 @@
 #define l4x_idle_task(cpu) (&init_task)
 #endif
 
-DECLARE_PER_CPU(struct thread_info *, l4x_current_ti);
-
 void l4x_exit_thread(void);
+void l4x_evict_tasks(struct task_struct *exclude);
+
 #ifdef CONFIG_L4_VCPU
 static inline void l4x_init_thread_struct(struct task_struct *p) {}
 #else
+
+DECLARE_PER_CPU(struct thread_info *, l4x_current_ti);
 void l4x_init_thread_struct(struct task_struct *p);
 
 static inline void
@@ -47,7 +49,6 @@ l4x_delete_process_thread(struct task_struct *tsk)
 	tsk->thread.threads_up = 0;
 	tsk->thread.user_thread_id = L4_INVALID_CAP;
 }
-
-#endif
+#endif /* VCPU */
 
 #endif /* ! __ASM_L4__GENERIC__TASK_H__ */

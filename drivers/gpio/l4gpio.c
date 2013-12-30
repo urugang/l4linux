@@ -2,6 +2,7 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/interrupt.h>
 
 #include <l4/vbus/vbus_gpio.h>
 #include <l4/io/io.h>
@@ -141,11 +142,17 @@ static void l4gpio_set_value(struct gpio_chip *gc, unsigned offset, int value)
 static int l4gpio_to_irq(struct gpio_chip *gc, unsigned offset)
 {
 	struct l4gpio_gpio *chip = gc_to_l4gpio(gc);
+	int irqnum;
 
 	if (offset >= gc->ngpio)
 		return -EINVAL;
 
-	return L4XV_FN_i(l4vbus_gpio_to_irq(vbus, chip->dh, offset));
+	irqnum = L4XV_FN_i(l4vbus_gpio_to_irq(vbus, chip->dh, offset));
+	if (irqnum >= L4X_IRQS_V_DYN_BASE) {
+		WARN_ON(1);
+		return -ENODEV;
+	}
+	return irqnum;
 }
 
 static int add_chip(unsigned gpio, l4io_device_handle_t dh,

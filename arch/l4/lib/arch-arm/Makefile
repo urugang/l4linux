@@ -1,5 +1,5 @@
 
-lib-y	+= csumpartialcopyuser.o
+lib-y	+= ../csumpartialcopyuser.o
 
 lib-y	+= ../../../arm/lib/memcpy.o
 lib-y	+= ../../../arm/lib/memmove.o

@@ -42,6 +42,9 @@
 
 extern void *l4x_main_memory_start;
 
+enum { L4X_CHECK_IN_KERNEL_ACCESS = 0, };
+int l4x_check_kern_region(void *address, unsigned long size, int rw);
+
 int l4x_do_page_fault(unsigned long address, struct pt_regs *regs, unsigned long error_code);
 
 static inline pte_t *lookup_pte_lock(struct mm_struct *mm,

@@ -23,6 +23,7 @@ KBUILD_CFLAGS += -Iarch/x86/lib
 lib-y := $(b)/delay.o
 
 lib-y += ../memcpy_user.o ../uaccess.o ../pte.o
+lib-y += ../csumpartialcopyuser.o
 lib-y += $(b)/memcpy_$(BITS).o
 lib-y += $(b)/usercopy.o
 lib-$(CONFIG_SMP) += $(b)/rwlock.o

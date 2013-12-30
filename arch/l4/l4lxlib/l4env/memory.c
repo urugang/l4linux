@@ -131,13 +131,3 @@ int l4lx_memory_unmap_virtual_page(unsigned long address)
 		return -1;
 	return 0;
 }
-
-/* Returns 0 if not mapped, not-0 if mapped */
-int l4lx_memory_page_mapped(unsigned long address)
-{
-	l4re_ds_t ds;
-	unsigned flags;
-	unsigned long size = 1, off;
-
-	return !L4XV_FN_i(l4re_rm_find(&address, &size, &off, &flags, &ds));
-}

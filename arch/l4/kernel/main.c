@@ -6,6 +6,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
+#include <linux/delay.h>
 
 #ifdef CONFIG_BLK_DEV_INITRD
 #include <linux/initrd.h>
@@ -267,7 +268,7 @@ static void l4x_configuration_sanity_check(const char *cmdline)
 		if ((p = strstr(cmdline, "mem="))
 		    && (memparse(p + 4, &p) < (16 << 20))) {
 			LOG_printf("Minimal 16MB recommended.\n");
-			enter_kdebug("Increases value in mem= option.");
+			enter_kdebug("Increase value in mem= option.");
 		}
 	}
 #endif
@@ -499,7 +500,7 @@ unsigned l4x_x86_utcb_get_orig_segment(void)
 static inline void l4x_x86_utcb_save_orig_segment(void) {}
 #endif
 
-DEFINE_PER_CPU(l4_vcpu_state_t *, l4x_vcpu_ptr);
+l4_vcpu_state_t *l4x_vcpu_ptr[NR_CPUS];
 
 L4_CV l4_utcb_t *l4_utcb_wrap(void)
 {
@@ -715,6 +716,24 @@ int l4x_detach_and_free_cow_ds(l4_cap_idx_t memcap,
 	return 0;
 }
 EXPORT_SYMBOL(l4x_detach_and_free_cow_ds);
+
+static int l4x_check_kern_region_noctx(void *address, unsigned long size,
+                                       int rw)
+{
+	l4re_ds_t ds;
+	l4_addr_t off;
+	unsigned flags;
+
+	return (   l4re_rm_find((unsigned long *)&address,
+	                         &size, &off, &flags, &ds)
+	        || (flags & L4RE_RM_IN_AREA))
+	       || (rw && (flags & L4RE_RM_READ_ONLY));
+}
+
+int l4x_check_kern_region(void *address, unsigned long size, int rw)
+{
+	return L4XV_FN_i(l4x_check_kern_region_noctx(address, size, rw));
+}
 
 /* ---------------------------------------------------------------- */
 
@@ -1007,8 +1026,7 @@ static __init_refok void l4x_setup_upage(void)
 
 	upage_addr = UPAGE_USER_ADDRESS;
 	if (l4re_rm_attach((void **)&upage_addr, L4_PAGESIZE,
-	                   L4RE_RM_SEARCH_ADDR,
-	                   ds, 0, L4_PAGESHIFT)) {
+	                   0, ds, 0, L4_PAGESHIFT)) {
 		LOG_printf("Cannot attach upage properly\n");
 		l4x_linux_main_exit();
 	}
@@ -1131,7 +1149,7 @@ void __init l4x_setup_memory(char *cmdl,
 	unsigned long mem_chunk_sz[ARRAY_SIZE(l4x_ds_mainmem)];
 	unsigned num_mem_chunk = 0;
 
-	/* See if we find a mem-related options in the command line */
+	/* See if we find mem-related options in the command line */
 	for (i = 0; i < ARRAY_SIZE(l4x_ds_mainmem); ++i) {
 		l4x_ds_mainmem[i] = L4_INVALID_CAP;
 		mem_chunk_sz[i] = 0;
@@ -1656,7 +1674,7 @@ void l4x_cpu_ipi_setup(unsigned cpu)
 	char s[14];
 
 #ifdef CONFIG_L4_VCPU
-	BUG_ON(per_cpu(l4x_vcpu_ptr, cpu)->state & L4_VCPU_F_IRQ);
+	BUG_ON(l4x_vcpu_ptr[cpu]->state & L4_VCPU_F_IRQ);
 #endif
 
 	snprintf(s, sizeof(s), "ipi%d", cpu);
@@ -1670,7 +1688,7 @@ void l4x_cpu_ipi_setup(unsigned cpu)
 	                             cpu,
 	                             NULL, &cpu, sizeof(cpu),
 	                             l4x_cap_alloc(),
-	                             l4lx_irq_prio_get(0), 0, s, NULL);
+	                             l4lx_irq_prio_get(0), 0, 0, s, NULL);
 
 	if (!l4lx_thread_is_valid(l4x_cpu_ipi_threads[cpu])) {
 		LOG_printf("Failed to create thread %s\n", s);
@@ -1733,7 +1751,7 @@ void l4x_cpu_ipi_stop(unsigned cpu)
 	l4x_cpu_ipi_irqs[cpu] = L4_INVALID_CAP;
 
 #ifndef CONFIG_L4_VCPU
-	l4lx_thread_shutdown(l4x_cpu_ipi_threads[cpu], NULL, 1);
+	l4lx_thread_shutdown(l4x_cpu_ipi_threads[cpu], 1, NULL, 1);
 #endif
 }
 
@@ -1747,7 +1765,7 @@ static L4_CV void __cpu_starter(void *data)
 	l4lx_thread_pager_change(l4x_cap_current(), l4x_start_thread_id);
 
 #ifdef CONFIG_L4_VCPU
-	l4x_vcpu_init(per_cpu(l4x_vcpu_ptr, cpu));
+	l4x_vcpu_init(l4x_vcpu_ptr[cpu]);
 #else
 	l4x_global_cli();
 #endif
@@ -1765,7 +1783,11 @@ static L4_CV void __cpu_starter(void *data)
 }
 
 
-static struct l4lx_thread_start_info_t l4x_cpu_bootup_state;
+static struct l4lx_thread_start_info_t l4x_cpu_bootup_state[NR_CPUS];
+struct l4x_cpu_bootup_stack {
+	unsigned long stack[0x2000];
+};
+static struct l4x_cpu_bootup_stack l4x_cpu_bootup_stacks[NR_CPUS] __attribute__((aligned(sizeof(struct l4x_cpu_bootup_stack))));
 
 void l4x_cpu_spawn(int cpu, struct task_struct *idle)
 {
@@ -1794,21 +1816,39 @@ void l4x_cpu_spawn(int cpu, struct task_struct *idle)
 	if (!l4x_cpu_thread_caps[cpu])
 		l4x_cpu_thread_caps[cpu] = l4x_cap_alloc_noctx();
 
-	l4x_cpu_threads[cpu]
-	   = L4XV_FN(l4lx_thread_t,
-	             l4lx_thread_create(__cpu_starter, cpu,
-	                                NULL,
-	                                &cpu, sizeof(cpu),
-	                                l4x_cpu_thread_caps[cpu],
-	                                CONFIG_L4_PRIO_SERVER_PROC,
-	                                per_cpu_ptr(&l4x_vcpu_ptr, cpu),
-	                                name, &l4x_cpu_bootup_state));
-	l4x_printf("l4x_cpu_threads[%d] = %p\n", cpu, l4x_cpu_threads[cpu]);
+	/* Now wait until the CPU really disappeared,
+	 * avoiding the create/delete race */
+	while (1) {
+		l4_msgtag_t t;
+		t = L4XV_FN(l4_msgtag_t,
+		            l4_thread_switch(l4x_cpu_thread_caps[cpu]));
+		if (l4_ipc_error(t, l4_utcb()) == L4_IPC_ENOT_EXISTENT)
+			break;
+		msleep(1);
+	}
+
+	while (1) {
+		l4x_cpu_threads[cpu]
+		   = L4XV_FN(l4lx_thread_t,
+		             l4lx_thread_create(__cpu_starter, cpu,
+		                                &l4x_cpu_bootup_stacks[cpu].stack[ARRAY_SIZE(l4x_cpu_bootup_stacks[cpu].stack)],
+		                                &cpu, sizeof(cpu),
+		                                l4x_cpu_thread_caps[cpu],
+		                                CONFIG_L4_PRIO_SERVER_PROC,
+		                                l4x_cpu_threads[cpu],
+		                                &l4x_vcpu_ptr[cpu],
+		                                name, &l4x_cpu_bootup_state[cpu]));
+
+		if (l4x_cpu_threads[cpu])
+			break;
+
+		l4x_evict_tasks(NULL);
+	}
 }
 
 void l4x_cpu_release(int cpu)
 {
-	L4XV_FN_v(l4lx_thread_start(&l4x_cpu_bootup_state));
+	L4XV_FN_v(l4lx_thread_start(&l4x_cpu_bootup_state[cpu]));
 }
 
 void l4x_cpu_ipi_trigger(unsigned cpu)
@@ -1938,7 +1978,7 @@ static void l4x_repnop_init(void)
 	                                     + sizeof(l4x_repnop_stack),
 	                                   NULL, 0, l4x_cap_alloc_noctx(),
 	                                   CONFIG_L4_PRIO_SERVER_PROC - 1,
-	                                   0, "nop", NULL);
+	                                   0, 0, "nop", NULL);
 }
 // repnop end
 // ---------------
@@ -2109,7 +2149,7 @@ static L4_CV void __init cpu0_startup(void *data)
 	set_my_cpu_offset(0);
 #endif
 #ifdef CONFIG_L4_VCPU
-	l4x_vcpu_init(per_cpu(l4x_vcpu_ptr, 0));
+	l4x_vcpu_init(l4x_vcpu_ptr[0]);
 #else
 	local_irq_disable();
 #endif
@@ -2525,9 +2565,6 @@ int __init_refok L4_CV main(int argc, char **argv)
 		return 1;
 #endif
 
-	/* Set name of startup thread */
-	l4lx_thread_name_set(l4x_start_thread_id, "l4x-start");
-
 	/* fire up Linux server, will wait until start message */
 	p = (char *)init_stack + sizeof(init_stack);
 #ifdef CONFIG_X86_64
@@ -2537,7 +2574,7 @@ int __init_refok L4_CV main(int argc, char **argv)
 	                             NULL, 0,
 	                             l4re_util_cap_alloc(),
 	                             CONFIG_L4_PRIO_SERVER_PROC,
-	                             per_cpu_ptr(&l4x_vcpu_ptr, 0),
+	                             0, &l4x_vcpu_ptr[0],
 	                             "cpu0", &si);
 
 	if (!l4lx_thread_is_valid(main_id))
@@ -3211,23 +3248,9 @@ static const int l4x_exception_funcs
 	= sizeof(l4x_exception_func_list) / sizeof(l4x_exception_func_list[0]);
 
 static inline int l4x_handle_pagefault(unsigned long pfa, unsigned long ip,
-                                       int wr)
+                                       int rw)
 {
-	l4_addr_t addr;
-	unsigned long size;
-	l4re_ds_t ds;
-	l4_addr_t offset;
-	unsigned flags;
-	int r;
-
-	/* Check if the page-fault is a resolvable one */
-	addr = pfa;
-	if (unlikely(addr < L4_PAGESIZE))
-		return 0; // will trigger an Ooops
-
-	size = 1;
-	r = l4re_rm_find(&addr, &size, &offset, &flags, &ds);
-	if (unlikely(r == -L4_ENOENT)) {
+	if (l4x_check_kern_region_noctx((void *)pfa, 1, rw)) {
 		/* Not resolvable: Ooops */
 		LOG_printf("Non-resolvable page fault at %lx, ip %lx.\n", pfa, ip);
 		// will trigger an oops in caller
@@ -3235,15 +3258,10 @@ static inline int l4x_handle_pagefault(unsigned long pfa, unsigned long ip,
 	}
 
 	/* Forward PF to our pager */
-	return l4x_forward_pf(pfa, ip, wr);
+	return l4x_forward_pf(pfa, ip, rw);
 }
 
 #ifdef CONFIG_L4_VCPU
-int l4x_vcpu_handle_kernel_pf(unsigned long pfa, unsigned long ip, int wr)
-{
-	return l4x_handle_pagefault(pfa, ip, wr);
-}
-
 // return true when exception handled successfully, false if not
 int l4x_vcpu_handle_kernel_exc(l4_vcpu_regs_t *vr)
 {
@@ -3694,9 +3712,6 @@ EXPORT_SYMBOL(memcpy);
 extern void cmpxchg8b_emu(void);
 EXPORT_SYMBOL(cmpxchg8b_emu);
 #endif
-
-EXPORT_SYMBOL(l4x_fpu_set);
-
 #endif /* ARCH_x86 */
 
 /* Some exports from L4 libraries etc. */

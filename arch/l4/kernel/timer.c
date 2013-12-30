@@ -168,7 +168,7 @@ static void timer_set_mode(enum clock_event_mode mode,
 	case CLOCK_EVT_MODE_PERIODIC:
 	case CLOCK_EVT_MODE_RESUME:
 		r = L4XV_FN_i(l4_error(l4timer_start(timer_srv, 0,
-		                                     l4lx_kinfo->clock,
+		                                     l4_kip_clock(l4lx_kinfo),
 		                                     increment)));
 		if (r)
 			printk(KERN_WARNING "l4timer: start failed (%d)\n", r);
@@ -248,6 +248,7 @@ static int __init l4x_timer_init_ret(void)
                    &timer_irq_cap, sizeof(timer_irq_cap), /* data */
                    l4x_cap_alloc(),             /* cap */
                    PRIO_TIMER,                  /* prio */
+		   0,                           /* utcbp */
                    0,                           /* vcpup */
                    "timer",                     /* name */
 		   NULL);

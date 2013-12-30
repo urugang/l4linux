@@ -1,5 +1,5 @@
-#ifndef _I386_CHECKSUM_H
-#define _I386_CHECKSUM_H
+#ifndef _ASM_X86_CHECKSUM_32_H
+#define _ASM_X86_CHECKSUM_32_H
 
 #include <linux/in6.h>
 
@@ -27,7 +27,7 @@ asmlinkage __wsum csum_partial(const void *buff, int len, __wsum sum);
  * better 64-bit) boundary
  */
 
-#if 0
+#ifndef CONFIG_L4
 asmlinkage __wsum csum_partial_copy_generic(const void *src, void *dst,
 					    int len, __wsum sum,
 					    int *src_err_ptr, int *dst_err_ptr);
@@ -48,15 +48,21 @@ static inline __wsum csum_partial_copy_nocheck(const void *src, void *dst,
 	return csum_partial_copy(src, dst, len, sum);
 }
 
-#if 0
+#ifndef CONFIG_L4
 static inline __wsum csum_partial_copy_from_user(const void __user *src,
 						 void *dst,
 						 int len, __wsum sum,
 						 int *err_ptr)
 {
+	__wsum ret;
+
 	might_sleep();
-	return csum_partial_copy_generic((__force void *)src, dst,
-					 len, sum, err_ptr, NULL);
+	stac();
+	ret = csum_partial_copy_generic((__force void *)src, dst,
+					len, sum, err_ptr, NULL);
+	clac();
+
+	return ret;
 }
 #else /* L4Linux version */
 __wsum csum_partial_copy_from_user(const void *src, void *dst,
@@ -171,13 +177,14 @@ static inline __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 	    "adcl $0, %0	;\n"
 	    : "=&r" (sum)
 	    : "r" (saddr), "r" (daddr),
-	      "r" (htonl(len)), "r" (htonl(proto)), "0" (sum));
+	      "r" (htonl(len)), "r" (htonl(proto)), "0" (sum)
+	    : "memory");
 
 	return csum_fold(sum);
 }
 
-#if 0
-L4Linux: not yet implemented
+#ifndef CONFIG_L4
+/* L4Linux: not yet implemented */
 /*
  *	Copy and checksum to user
  */
@@ -187,16 +194,22 @@ static inline __wsum csum_and_copy_to_user(const void *src,
 					   int len, __wsum sum,
 					   int *err_ptr)
 {
+	__wsum ret;
+
 	might_sleep();
-	if (access_ok(VERIFY_WRITE, dst, len))
-		return csum_partial_copy_generic(src, (__force void *)dst,
-						 len, sum, NULL, err_ptr);
+	if (access_ok(VERIFY_WRITE, dst, len)) {
+		stac();
+		ret = csum_partial_copy_generic(src, (__force void *)dst,
+						len, sum, NULL, err_ptr);
+		clac();
+		return ret;
+	}
 
 	if (len)
 		*err_ptr = -EFAULT;
 
 	return (__force __wsum)-1; /* invalid checksum */
 }
-#endif
+#endif /* L4 */
 
-#endif
+#endif /* _ASM_X86_CHECKSUM_32_H */

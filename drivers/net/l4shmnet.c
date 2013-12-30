@@ -420,14 +420,14 @@ static int __init l4x_l4shmnet_init_dev(int num)
 
 	L4XV_U(f);
 
-	if ((dev->irq = l4x_register_irq(l4shmc_signal_cap(&priv->rx_sig))) < 0) {
-		pr_err("l4shmnet: Failed to get virq\n");
+	if ((err = l4x_register_irq(l4shmc_signal_cap(&priv->rx_sig))) < 0) {
+		pr_err("l4shmnet: Failed to get virq: %d\n", err);
 		goto err_out_free_dev;
 	}
+	dev->irq = err;
 
 	dev->mtu = 1500;
 
-	err = -ENODEV;
 	if ((err = register_netdev(dev))) {
 		pr_err("l4shmnet: Cannot register net device, aborting.\n");
 		goto err_out_free_dev;

@@ -131,7 +131,7 @@ static void evdev_event(struct input_handle *handle,
 {
 	struct l4x_input_event e;
 
-	e.time      = l4lx_kinfo->clock;
+	e.time      = l4_kip_clock(l4lx_kinfo);
 	e.type      = type;
 	e.code      = code;
 	e.value     = value;

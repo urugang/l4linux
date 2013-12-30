@@ -21,7 +21,7 @@ static void init_array(void)
 {
 	int i;
 
-	BUG_ON(L4X_NR_IRQS_V_DYN < 1);
+	BUILD_BUG_ON(L4X_NR_IRQS_V_DYN < 1);
 
 	for (i = 0; i < L4X_NR_IRQS_V_DYN; ++i)
 		caps[i] = L4_INVALID_CAP;
@@ -85,10 +85,30 @@ int l4lx_irq_set_wake(struct irq_data *data, unsigned int on)
 	return 0;
 }
 
-struct irq_chip l4x_irq_dev_chip = {
-	.name                   = "L4-irq",
-	.irq_startup            = l4lx_irq_dev_startup,
-	.irq_shutdown           = l4lx_irq_dev_shutdown,
+struct irq_chip l4x_irq_io_chip = {
+	.name                   = "L4-io",
+	.irq_startup            = l4lx_irq_io_startup,
+	.irq_shutdown           = l4lx_irq_io_shutdown,
+	.irq_enable             = l4lx_irq_dev_enable,
+	.irq_disable            = l4lx_irq_dev_disable,
+	.irq_ack                = l4lx_irq_dev_ack,
+	.irq_mask               = l4lx_irq_dev_mask,
+	.irq_mask_ack           = l4lx_irq_dev_mask_ack,
+	.irq_unmask             = l4lx_irq_dev_unmask,
+	.irq_eoi                = l4lx_irq_dev_eoi,
+	.irq_set_type           = l4lx_irq_set_type,
+	.irq_set_wake           = l4lx_irq_set_wake,
+#ifdef CONFIG_L4_VCPU
+#ifdef CONFIG_SMP
+	.irq_set_affinity       = l4lx_irq_dev_set_affinity,
+#endif
+#endif
+};
+
+struct irq_chip l4x_irq_plain_chip = {
+	.name                   = "L4-plain",
+	.irq_startup            = l4lx_irq_plain_startup,
+	.irq_shutdown           = l4lx_irq_plain_shutdown,
 	.irq_enable             = l4lx_irq_dev_enable,
 	.irq_disable            = l4lx_irq_dev_disable,
 	.irq_ack                = l4lx_irq_dev_ack,

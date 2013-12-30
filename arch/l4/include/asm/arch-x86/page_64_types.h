@@ -32,18 +32,11 @@
  */
 #ifdef CONFIG_L4
 #define __PAGE_OFFSET           _AC(0x0000000000000000, UL)
-#else
-#define __PAGE_OFFSET           _AC(0xffff880000000000, UL)
-#endif
 
-#define __PHYSICAL_START	((CONFIG_PHYSICAL_START +	 	\
-				  (CONFIG_PHYSICAL_ALIGN - 1)) &	\
-				 ~(CONFIG_PHYSICAL_ALIGN - 1))
-
-#define __START_KERNEL		(__START_KERNEL_map + __PHYSICAL_START)
-#ifdef CONFIG_L4
 #define __START_KERNEL_map	_AC(0x0000000000200000, UL)
 #else
+#define __PAGE_OFFSET           _AC(0xffff880000000000, UL)
+
 #define __START_KERNEL_map	_AC(0xffffffff80000000, UL)
 #endif /* L4 */
 

@@ -4,14 +4,14 @@
 
 static cycle_t l4x_clk_read(struct clocksource *cs)
 {
-	return l4re_kip()->clock;
+	return l4_kip_clock_lw(l4re_kip());
 }
 
 static struct clocksource l4x_kipclk_cs = {
 	.name           = "l4kipclk",
 	.rating         = 100,
 	.read           = l4x_clk_read,
-	.mask           = CLOCKSOURCE_MASK(64),
+	.mask           = CLOCKSOURCE_MASK(sizeof(long) * 8),
 	.mult           = 1000,
 	.flags          = CLOCK_SOURCE_IS_CONTINUOUS,
 };

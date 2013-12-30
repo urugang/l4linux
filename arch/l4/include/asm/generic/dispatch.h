@@ -19,15 +19,9 @@
 void l4x_idle(void);
 void l4x_suspend_user(struct task_struct *p, int cpu);
 void l4x_wakeup_idler(int cpu);
-asmlinkage void l4x_user_dispatcher(void);
 #else
-int l4x_vcpu_handle_kernel_pf(unsigned long pfa, unsigned long ip, int wr);
 int l4x_vcpu_handle_kernel_exc(l4_vcpu_regs_t *vr);
 #endif
-
-asmlinkage int l4_kernelinternal_execve(const char * file,
-                                        const char * const * argv,
-                                        const char * const * envp);
 
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
 void l4x_print_vm_area_maps(struct task_struct *p, unsigned long highlight);
