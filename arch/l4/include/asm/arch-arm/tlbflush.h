@@ -340,8 +340,10 @@ static inline void local_flush_tlb_all(void)
 #endif
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
 
+#if !defined(CONFIG_L4) || __LINUX_ARM_ARCH__ >= 6
 	if (tlb_flag(TLB_WB))
 		dsb(nshst);
+#endif
 
 #ifndef CONFIG_L4
 	__local_flush_tlb_all();
@@ -361,8 +363,10 @@ static inline void __flush_tlb_all(void)
 #endif
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
 
+#if !defined(CONFIG_L4) || __LINUX_ARM_ARCH__ >= 6
 	if (tlb_flag(TLB_WB))
 		dsb(ishst);
+#endif
 
 #ifndef CONFIG_L4
 	__local_flush_tlb_all();
@@ -409,8 +413,10 @@ static inline void local_flush_tlb_mm(struct mm_struct *mm)
 #endif
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
 
+#if !defined(CONFIG_L4) || __LINUX_ARM_ARCH__ >= 6
 	if (tlb_flag(TLB_WB))
 		dsb(nshst);
+#endif
 
 	__local_flush_tlb_mm(mm);
 #ifndef CONFIG_L4
@@ -425,8 +431,10 @@ static inline void __flush_tlb_mm(struct mm_struct *mm)
 {
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
 
+#if !defined(CONFIG_L4) || __LINUX_ARM_ARCH__ >= 6
 	if (tlb_flag(TLB_WB))
 		dsb(ishst);
+#endif
 
 	__local_flush_tlb_mm(mm);
 #ifndef CONFIG_L4
@@ -478,8 +486,10 @@ local_flush_tlb_page(struct vm_area_struct *vma, unsigned long uaddr)
 
 	uaddr = (uaddr & PAGE_MASK) | ASID(vma->vm_mm);
 
+#if !defined(CONFIG_L4) || __LINUX_ARM_ARCH__ >= 6
 	if (tlb_flag(TLB_WB))
 		dsb(nshst);
+#endif
 
 	__local_flush_tlb_page(vma, uaddr);
 #ifndef CONFIG_L4
@@ -497,8 +507,10 @@ __flush_tlb_page(struct vm_area_struct *vma, unsigned long uaddr)
 
 	uaddr = (uaddr & PAGE_MASK) | ASID(vma->vm_mm);
 
+#if !defined(CONFIG_L4) || __LINUX_ARM_ARCH__ >= 6
 	if (tlb_flag(TLB_WB))
 		dsb(ishst);
+#endif
 
 	__local_flush_tlb_page(vma, uaddr);
 #ifndef CONFIG_L4
