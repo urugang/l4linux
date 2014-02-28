@@ -22,7 +22,7 @@ static inline void l4x_set_user_mode(struct pt_regs *r)
 
 static inline void l4x_set_kernel_mode(struct pt_regs *r)
 {
-	l4x_set_cpu_mode(r, SYSTEM_MODE);
+	l4x_set_cpu_mode(r, SVC_MODE);
 }
 
 static inline unsigned long l4x_get_cpu_mode(struct pt_regs *r)

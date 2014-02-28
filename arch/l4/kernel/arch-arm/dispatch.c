@@ -910,6 +910,13 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	if (likely(handled))
 		return 0; /* handled */
 
+	if ((t->error_code & 0x00f00000) == 0x00100000) {
+		asmlinkage void do_undefinstr(struct pt_regs *regs);
+		do_undefinstr(regs);
+		l4x_pre_iret_work(regs, p, 0, 0);
+		return 0;
+	}
+
 	// still not handled, PC is on the insn now
 
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS

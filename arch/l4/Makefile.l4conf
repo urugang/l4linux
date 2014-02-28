@@ -19,7 +19,7 @@ export L4OBJ L4DIR
 ifneq ($(L4DIR),)
 $(objtree)/Makeconf.l4conf:
 	@echo L4 source directory: $(L4DIR)
-	PWD=$(L4DIR) $(MAKE) -C $(L4DIR) -f $(srctree)/arch/l4/Makefile.l4conf O=$(L4OBJ) L4X_LOOP_CHECK=1 OUTPUT=$@
+	$(Q)PWD=$(L4DIR) $(MAKE) -C $(L4DIR) -f $(srctree)/arch/l4/Makefile.l4conf O=$(L4OBJ) L4X_LOOP_CHECK=1 OUTPUT=$@
 else
 $(objtree)/Makeconf.l4conf:
 	@echo

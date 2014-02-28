@@ -21,7 +21,21 @@ l4linux$(VMLINUZ_SUFFIX): ldrImage FORCE
 
 objects-y := ldr.o res.o image.o
 
+# maintenance targets such as clean do not read in the config,
+# as $(dot-config) does not work from herein, we check L4OBJ
+ifneq ($(L4OBJ),)
 include $(L4OBJ)/l4defs.mk.inc
+
+override CC = $(L4_CC)
+override LD = $(L4_LD)
+endif # non-empty $(L4OBJ)
+
+ifeq ($(LD),)
+  $(error Error: L4_LD variable empty. Rebuild L4 tree)
+endif
+ifeq ($(CC),)
+  $(error Error: L4_CC variable empty. Rebuild L4 tree)
+endif
 
 KBUILD_CFLAGS   := $(filter-out -mregparm=3,$(KBUILD_CFLAGS))
 KBUILD_CFLAGS   := $(filter-out -mabi=aapcs-linux,$(KBUILD_CFLAGS))

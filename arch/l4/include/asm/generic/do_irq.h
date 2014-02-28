@@ -20,7 +20,6 @@ static inline void l4x_do_IRQ(int irq, struct thread_info *ctx)
 
 	local_irq_save(flags);
 	ctx->task = per_cpu(l4x_current_ti, cpu)->task;
-	ctx->preempt_count = per_cpu(l4x_current_ti, cpu)->preempt_count;
 	r = task_pt_regs(per_cpu(l4x_current_ti, cpu)->task);
 	old_cpu_state = l4x_get_cpu_mode(r);
 	l4x_set_cpu_mode(r, l4x_in_kernel() ? L4X_MODE_KERNEL : L4X_MODE_USER);
@@ -46,7 +45,6 @@ static inline void l4x_do_IPI(int vector, struct thread_info *ctx)
 
 	local_irq_save(flags);
 	ctx->task = per_cpu(l4x_current_ti, cpu)->task;
-	ctx->preempt_count = per_cpu(l4x_current_ti, cpu)->preempt_count;
 	r = task_pt_regs(per_cpu(l4x_current_ti, cpu)->task);
 	old_cpu_state = l4x_get_cpu_mode(r);
 	l4x_set_cpu_mode(r, l4x_in_kernel() ? L4X_MODE_KERNEL : L4X_MODE_USER);

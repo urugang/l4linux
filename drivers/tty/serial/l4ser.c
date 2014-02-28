@@ -218,6 +218,30 @@ l4ser_verify_port(struct uart_port *port, struct serial_struct *ser)
 	return 0;
 }
 
+#ifdef CONFIG_CONSOLE_POLL
+static int l4ser_poll_get_char(struct uart_port *port)
+{
+       struct l4ser_uart_port *l4port = (struct l4ser_uart_port *)port;
+       char c;
+       int r = L4XV_FN_i(l4_vcon_read(l4port->vcon_cap, &c, 1));
+       if (r < 1)
+	       return NO_POLL_CHAR;
+
+        return c;
+
+}
+
+static void l4ser_poll_put_char(struct uart_port *port, unsigned char ch)
+{
+	struct l4ser_uart_port *l4port = (struct l4ser_uart_port *)port;
+
+       if (l4_is_invalid_cap(l4port->vcon_cap))
+	       return;
+
+	L4XV_FN_v(l4_vcon_write(l4port->vcon_cap, &ch, 1));
+}
+#endif
+
 static struct uart_ops l4ser_pops = {
 	.tx_empty	= l4ser_tx_empty,
 	.set_mctrl	= l4ser_set_mctrl,
@@ -235,6 +259,10 @@ static struct uart_ops l4ser_pops = {
 	.request_port	= l4ser_request_port,
 	.config_port	= l4ser_config_port,
 	.verify_port	= l4ser_verify_port,
+#ifdef CONFIG_CONSOLE_POLL
+	.poll_get_char  = l4ser_poll_get_char,
+	.poll_put_char  = l4ser_poll_put_char,
+#endif
 };
 
 static int __init l4ser_init_port(int num, const char *name)
@@ -277,6 +305,7 @@ static int __init l4ser_init_port(int num, const char *name)
 		l4ser_port[num].vcon_irq_cap = L4_INVALID_CAP;
 		irq = 0;
 	} else if ((irq = l4x_register_irq(l4ser_port[num].vcon_irq_cap)) < 0) {
+		L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP, l4ser_port[num].vcon_irq_cap));
 		l4x_cap_free(l4ser_port[num].vcon_irq_cap);
 		return -EIO;
 	}

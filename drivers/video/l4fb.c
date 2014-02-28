@@ -43,6 +43,7 @@
 
 #include <asm/generic/setup.h>
 #include <asm/generic/l4fb.h>
+#include <asm/generic/event-input.h>
 #include <asm/generic/cap_alloc.h>
 #include <asm/generic/util.h>
 #include <asm/generic/log.h>
@@ -58,11 +59,6 @@ L4_EXTERNAL_FUNC(l4re_video_goos_get_view);
 L4_EXTERNAL_FUNC(l4re_video_view_get_info);
 L4_EXTERNAL_FUNC(l4re_video_view_set_info);
 L4_EXTERNAL_FUNC(l4re_video_goos_get_static_buffer);
-L4_EXTERNAL_FUNC(l4re_event_buffer_consumer_foreach_available_event);
-L4_EXTERNAL_FUNC(l4re_event_get_buffer);
-L4_EXTERNAL_FUNC(l4re_event_buffer_attach);
-L4_EXTERNAL_FUNC(l4re_event_get_stream_info_for_id);
-L4_EXTERNAL_FUNC(l4re_event_get_axis_info);
 L4_EXTERNAL_FUNC(l4re_video_goos_info);
 L4_EXTERNAL_FUNC(l4re_video_goos_create_buffer);
 L4_EXTERNAL_FUNC(l4re_video_goos_refresh);
@@ -70,7 +66,7 @@ L4_EXTERNAL_FUNC(l4re_video_view_set_viewport);
 L4_EXTERNAL_FUNC(l4re_video_view_stack);
 
 enum {
-	MAX_UNMAP_BITS = 32, // enough for the framebuffer
+	MAX_UNMAP_BITS = 32, /* enough for the framebuffer */
 };
 
 struct l4fb_unmap_info {
@@ -87,10 +83,8 @@ struct l4fb_view {
 };
 
 enum {
-	MAX_INPUT_DEV_NAME = 20,
 	INPUT_HASH_BITS    = 5,
-	INPUT_HASH_MASK    = ~(~0UL << INPUT_HASH_BITS),
-
+	INPUT_HASH_ENTRIES = 1UL << INPUT_HASH_BITS,
 };
 
 
@@ -117,30 +111,9 @@ struct l4fb_screen {
 	u32 pseudo_palette[17];
 
 	/* Input event part */
-	l4_cap_idx_t ev_ds;
-	l4_cap_idx_t ev_irq;
-	int irqnum;
-	l4re_event_buffer_consumer_t ev_buf;
-
-
-	/* Mouse and keyboard are split so that mouse button events are not
-	 * treated as keyboard events in the Linux console. */
-	struct hlist_head input[1 << INPUT_HASH_BITS];
-
+	struct l4x_event_source input;
 	struct platform_device platform_device;
 };
-
-struct l4fb_input_device
-{
-	unsigned long id;
-	struct hlist_node l;
-	struct input_dev *dev;
-
-	int touchscreen;
-
-	char name[MAX_INPUT_DEV_NAME];
-};
-
 
 static LIST_HEAD(l4fb_screens);
 static int disable, verbose, touchscreen, verbose_wm;
@@ -154,7 +127,6 @@ static inline struct l4fb_screen *l4fb_screen(struct fb_info *info)
 	                                 struct platform_device, dev),
 	                    struct l4fb_screen, platform_device);
 }
-
 
 #ifdef CONFIG_L4_FB_DRIVER_DBG
 static struct dentry *debugfs_dir, *debugfs_unmaps, *debugfs_updates;
@@ -196,9 +168,7 @@ static void l4fb_init_screen(struct l4fb_screen *screen)
 	screen->refresh_enabled = 1;
 
 	/* Input event part */
-	screen->ev_ds = L4_INVALID_CAP;
-	screen->ev_irq = L4_INVALID_CAP;
-	screen->irqnum = -1;
+	l4x_event_init_source(&screen->input);
 
 	atomic_set(&screen->refs, 0);
 	screen->managed = 0;
@@ -714,168 +684,6 @@ static struct fb_ops l4fb_ops = {
 
 /* ============================================ */
 
-static void init_axis(struct l4fb_screen *screen, l4_umword_t id,
-                      struct input_dev *dev, unsigned axis)
-{
-	unsigned _axis = axis;
-	l4re_event_absinfo_t ainfo;
-	int i = L4XV_FN_i(l4re_event_get_axis_info(screen->goos, id, 1,
-	                                           &_axis, &ainfo));
-	if (i < 0) {
-		dev_err(&dev->dev, "could not get axis info for device %lx, "
-		        "axis %d: result %d\n", id, axis, i);
-		clear_bit(axis, dev->absbit);
-	} else {
-		if (verbose)
-			dev_info(&dev->dev, "axis info[%lx,%d]: min=%d, max=%d,"
-			         " fuzz=%d, flat=%d\n", id, axis, ainfo.min,
-			         ainfo.max, ainfo.fuzz, ainfo.flat);
-		input_set_abs_params(dev, axis, ainfo.min, ainfo.max,
-		                     ainfo.fuzz, ainfo.flat);
-	}
-}
-
-static struct l4fb_input_device *
-l4fb_new_input_device(struct l4fb_screen *screen, l4_umword_t id)
-{
-	int err;
-	struct l4fb_input_device *input;
-	struct fb_info *info = platform_get_drvdata(&screen->platform_device);
-	struct input_dev *dev;
-	l4re_event_stream_info_t sinfo;
-
-	if (verbose)
-		dev_info(scr2dev(screen), "new input device id=%lx\n", id);
-
-	input = kzalloc(sizeof(struct input_dev), GFP_ATOMIC);
-	if (!input) {
-		dev_err(scr2dev(screen), "could not allocate input device %lx\n",
-		        id);
-		return NULL;
-	}
-	input->touchscreen = touchscreen;
-	input->id = id;
-
-	hlist_add_head(&input->l, &screen->input[id & INPUT_HASH_MASK]);
-
-	err = L4XV_FN_i(l4re_event_get_stream_info_for_id(screen->goos,
-	                                                  id, &sinfo));
-	if (err < 0) {
-		dev_err(scr2dev(screen), "could not get infos for input "
-		        "device %lx: error = %d\n", id, err);
-		return input;
-	}
-
-	dev = input_allocate_device();
-	if (!dev) {
-		dev_err(scr2dev(screen), "could not allocate input device %lx\n",
-		        id);
-		return input;
-	}
-
-	input->dev = dev;
-
-	dev->phys = "L4Re::Event";
-	snprintf(input->name, sizeof(input->name), "L4event '%d'", info->node);
-	dev->uniq = input->name;
-	dev->name = input->name;
-	dev->id.bustype = 0;
-	dev->id.vendor  = 0x50fb;
-	dev->id.product = info->node;
-	dev->id.version = 0;
-
-	bitmap_copy(dev->evbit, sinfo.evbits, min(EV_MAX, L4RE_EVENT_EV_MAX) + 1);
-#define COPY_BM(N, n) \
-	if (test_bit(EV_##N, dev->evbit)) \
-		bitmap_copy(dev->n##bit, sinfo.n##bits, min(N##_MAX, L4RE_EVENT_##N##_MAX) + 1)
-
-	COPY_BM(KEY, key);
-	COPY_BM(ABS, abs);
-	COPY_BM(REL, rel);
-#undef COPY_BM
-
-	if (input->touchscreen && test_bit(BTN_MOUSE, dev->keybit))
-		set_bit(BTN_TOUCH, dev->keybit);
-
-	bitmap_copy(dev->propbit, sinfo.propbits,
-	            min(INPUT_PROP_MAX, L4RE_EVENT_PROP_MAX) + 1);
-
-	if (test_bit(EV_ABS, dev->evbit)) {
-		unsigned a;
-		for (a = 0; a <= ABS_MAX; ++a)
-			if (test_bit(a, dev->absbit))
-				init_axis(screen, id, dev, a);
-	}
-
-	err = input_register_device(dev);
-	if (err) {
-		dev_err(scr2dev(screen), "could not register input device %s: %d\n",
-		        input->name, err);
-		input->dev = 0;
-		input_free_device(dev);
-		return input;
-	}
-
-	return input;
-}
-
-L4_CV static void input_event_put(l4re_event_t *event, void *data)
-{
-	struct l4fb_screen *screen = (struct l4fb_screen *)data;
-	struct input_event *e = (struct input_event *)event;
-	struct l4fb_input_device *input = 0;
-
-	if (system_state != SYSTEM_RUNNING)
-		return;
-
-	hlist_for_each_entry(input, &screen->input[event->stream_id & INPUT_HASH_MASK], l) {
-		if (input->id == event->stream_id)
-			break;
-	}
-
-	if (!input) {
-		input = l4fb_new_input_device(screen, event->stream_id);
-		if (!input)
-			return;
-		msleep(500); /* Ouch but injecting too fast is loosing events */
-	}
-
-	if (input->touchscreen && e->type == EV_KEY && e->code == BTN_LEFT)
-		e->code = BTN_TOUCH;
-
-	if (input->dev)
-		input_event(input->dev, e->type, e->code, e->value);
-}
-
-
-static irqreturn_t event_interrupt_th(int irq, void *data)
-{
-	struct l4fb_screen *screen = (struct l4fb_screen *)data;
-	l4re_event_buffer_consumer_foreach_available_event(&screen->ev_buf, data, input_event_put);
-	return IRQ_HANDLED;
-}
-static irqreturn_t event_interrupt_ll(int irq, void *data)
-{
-	return IRQ_WAKE_THREAD;
-}
-
-static int l4fb_input_setup(struct fb_info *info, struct l4fb_screen *screen)
-{
-	int err;
-
-	if ((screen->irqnum = l4x_register_irq(screen->ev_irq)) < 0)
-		return -ENOMEM;
-	err = request_threaded_irq(screen->irqnum, event_interrupt_ll,
-	                           event_interrupt_th,
-	                           0, "L4fbev", screen);
-	if (err) {
-		dev_err(scr2dev(screen), "%s: request_threaded_irq failed: %d\n", __func__, err);
-		return err;
-	}
-	enable_irq_wake(screen->irqnum);
-	return 0;
-}
-
 static void l4fb_update_dirty_unmap(struct l4fb_screen *screen)
 {
 	unsigned int i;
@@ -891,7 +699,8 @@ static void l4fb_update_dirty_unmap(struct l4fb_screen *screen)
 		                ? L4_UTCB_GENERIC_DATA_SIZE - 2
 		                : screen->unmap_info.weight - i;
 
-		tag = l4_task_unmap_batch(L4RE_THIS_TASK_CAP, screen->unmap_info.flexpages + i,
+		tag = l4_task_unmap_batch(L4RE_THIS_TASK_CAP,
+		                          screen->unmap_info.flexpages + i,
 		                          num_flexpages, L4_FP_ALL_SPACES);
 
 		if (l4_error(tag))
@@ -943,14 +752,19 @@ static void l4fb_update_dirty_init_flexpages(struct l4fb_screen *screen,
 
 	size = screen->unmap_info.weight * sizeof(l4_fpage_t);
 	if (verbose)
-		l4x_printf("l4fb: going to kmalloc(%d) to store flexpages\n", size);
+		l4x_printf("l4fb: going to kmalloc(%d) to store flexpages\n",
+		           size);
 	screen->unmap_info.flexpages = kmalloc(size, GFP_KERNEL);
 	log2size = screen->unmap_info.top;
 	for (i = 0; i < screen->unmap_info.weight;) {
-		for (j = 0; j < screen->unmap_info.map[log2size-L4_PAGESHIFT]; ++j) {
-			screen->unmap_info.flexpages[i] = l4_fpage(addr, log2size, 0);
+		for (j = 0;
+		     j < screen->unmap_info.map[log2size - L4_PAGESHIFT];
+		     ++j) {
+			screen->unmap_info.flexpages[i]
+			    = l4_fpage(addr, log2size, 0);
 			if (verbose)
-				l4x_printf("%d %lx - %lx \n", i, addr, addr + (1 << log2size));
+				l4x_printf("%d %lx - %lx \n",
+				           i, addr, addr + (1 << log2size));
 			addr += 1 << log2size;
 			++i;
 		}
@@ -973,7 +787,8 @@ static void l4fb_update_dirty_init_optimize(struct l4fb_screen *screen,
 			info->top -= 1;
 	}
 	if (verbose)
-		l4x_printf("l4fb: optimized on using %d flexpages, %d where requested \n",
+		l4x_printf("l4fb: optimized on using %d flexpages, "
+		           "%d where requested\n",
 		           info->weight, num_flexpages);
 }
 
@@ -1008,66 +823,18 @@ static void l4fb_refresh_func(unsigned long data)
 	struct l4fb_screen *screen = (struct l4fb_screen *)data;
 	if (screen->refresh_enabled && l4fb_update_rect) {
 		if (1)
-			l4fb_update_rect(screen, 0, 0, screen->ginfo.width, screen->ginfo.height);
+			l4fb_update_rect(screen, 0, 0, screen->ginfo.width,
+			                 screen->ginfo.height);
 		else
 			l4fb_update_dirty_unmap(screen);
 	}
 
 	if (screen->refresh_sleep)
-		mod_timer(&screen->refresh_timer, jiffies + screen->refresh_sleep);
+		mod_timer(&screen->refresh_timer,
+		          jiffies + screen->refresh_sleep);
 }
 
 /* ============================================ */
-static int l4fb_fb_init(struct fb_info *fb, struct l4fb_screen *screen)
-{
-	int ret;
-
-	if (verbose)
-		l4x_printf("Starting L4FB\n");
-
-	ret = -ENOMEM;
-
-	if (l4_is_invalid_cap(screen->ev_ds = l4x_cap_alloc()))
-		return ret;
-
-	if (l4_is_invalid_cap(screen->ev_irq = l4x_cap_alloc()))
-		goto out_free_ds;
-
-	if (L4XV_FN_i(l4re_event_get_buffer(screen->goos, screen->ev_ds))) {
-		l4x_printf("l4fb: INFO: No input available\n");
-
-		l4x_cap_free(screen->ev_ds);
-		l4x_cap_free(screen->ev_irq);
-
-		return 0;
-	}
-
-	ret = -ENOENT;
-	if (L4XV_FN_i(l4re_event_buffer_attach(&screen->ev_buf, screen->ev_ds, l4re_env()->rm)))
-		goto out_release_ds;
-
-	if (L4XV_FN_i(l4_error(l4_factory_create_irq(l4re_env()->factory, screen->ev_irq))))
-		goto out_free_irq;
-
-	if (L4XV_FN_i(l4_error(l4_icu_bind(screen->goos, 0, screen->ev_irq))))
-		goto out_delete_irq;
-
-	return l4fb_input_setup(fb, screen);
-
-out_delete_irq:
-	L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP, screen->ev_irq));
-out_free_irq:
-	l4x_cap_free(screen->ev_irq);
-out_release_ds:
-	L4XV_FN_v(l4_task_release_cap(L4RE_THIS_TASK_CAP, screen->ev_ds));
-out_free_ds:
-	l4x_cap_free(screen->ev_ds);
-
-	return ret;
-}
-
-/* ============================================ */
-
 static void l4fb_shutdown(struct l4fb_screen *screen)
 {
 	del_timer_sync(&screen->refresh_timer);
@@ -1075,21 +842,9 @@ static void l4fb_shutdown(struct l4fb_screen *screen)
 	/* Also do not update anything anymore */
 	l4fb_update_rect = NULL;
 
-	if (screen->irqnum >= 0) {
-		free_irq(screen->irqnum, NULL);
-		l4x_unregister_irq(screen->irqnum);
-	}
+	l4x_event_shutdown_source(&screen->input);
 
 	L4XV_FN_v(l4re_rm_detach((void *)screen->fb_addr));
-
-	if (l4_is_valid_cap(screen->ev_irq)) {
-		L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP, screen->ev_irq));
-		l4x_cap_free(screen->ev_irq);
-	}
-	if (l4_is_valid_cap(screen->ev_ds)) {
-		L4XV_FN_v(l4_task_release_cap(L4RE_THIS_TASK_CAP, screen->ev_ds));
-		l4x_cap_free(screen->ev_ds);
-	}
 
 	if (screen->unmap_info.flexpages)
 		kfree(screen->unmap_info.flexpages);
@@ -1100,7 +855,8 @@ static void l4fb_shutdown(struct l4fb_screen *screen)
 		L4XV_FN_v(l4re_video_goos_delete_buffer(screen->goos, 0));
 
 	if (l4_is_valid_cap(screen->goos)) {
-		L4XV_FN_v(l4_task_release_cap(L4RE_THIS_TASK_CAP, screen->goos));
+		L4XV_FN_v(l4_task_release_cap(L4RE_THIS_TASK_CAP,
+		                              screen->goos));
 		l4x_cap_free(screen->goos);
 	}
 
@@ -1128,7 +884,8 @@ static int l4fb_init_session(struct fb_info *fb, struct l4fb_screen *screen)
 	/* check for strange combinations */
 	if ((ginfo->flags & F_l4re_video_goos_dynamic_buffers) &&
 	    !(ginfo->flags & F_l4re_video_goos_dynamic_views)) {
-		dev_err(scr2dev(screen), "dynamic buffer + static view is not supported\n");
+		dev_err(scr2dev(screen),
+		        "dynamic buffer + static view is not supported\n");
 		return -EINVAL;
 	}
 
@@ -1137,7 +894,8 @@ static int l4fb_init_session(struct fb_info *fb, struct l4fb_screen *screen)
 		if (!view)
 			return ret;
 
-		ret = L4XV_FN_i(l4re_video_goos_get_view(screen->goos, 0, &view->view));
+		ret = L4XV_FN_i(l4re_video_goos_get_view(screen->goos, 0,
+		                                         &view->view));
 		if (ret) {
 			dev_err(scr2dev(screen), "cannot get static view\n");
 			kfree(view);
@@ -1164,13 +922,15 @@ static int l4fb_init_session(struct fb_info *fb, struct l4fb_screen *screen)
 		var->green.length = vinfo.pixel_info.g.size;
 		var->blue.offset = vinfo.pixel_info.b.shift;
 		var->blue.length = vinfo.pixel_info.b.size;
-		var->bits_per_pixel = screen->ginfo.pixel_info.bytes_per_pixel * 8;
+		var->bits_per_pixel = screen->ginfo.pixel_info.bytes_per_pixel
+		                      * 8;
 	} else {
 		/* in this case the user must allocate views via the ioctls */
 		/* use the goos info for the reference size */
 		var->xres = ginfo->width;
 		var->yres = ginfo->height;
-		fix->line_length = ginfo->width * ginfo->pixel_info.bytes_per_pixel;
+		fix->line_length = ginfo->width
+		                   * ginfo->pixel_info.bytes_per_pixel;
 
 		var->red.offset = ginfo->pixel_info.r.shift;
 		var->red.length = ginfo->pixel_info.r.size;
@@ -1194,32 +954,36 @@ static int l4fb_init_session(struct fb_info *fb, struct l4fb_screen *screen)
 	/* allocate the fb memory if not static */
 	if (ginfo->flags & F_l4re_video_goos_dynamic_buffers) {
 		unsigned long size = fix->line_length * ginfo->height;
-		size = l4_round_page(size + 1920*4);
+		size = l4_round_page(size);
 
-		ret = L4XV_FN_i(l4re_video_goos_create_buffer(screen->goos, size,
+		ret = L4XV_FN_i(l4re_video_goos_create_buffer(screen->goos,
+		                                              size,
 		                                              screen->fb_cap));
 		if (ret) {
-			dev_err(scr2dev(screen), "cannot allocate fb (%d)\n", ret);
+			dev_err(scr2dev(screen),
+			        "cannot allocate fb (%d)\n", ret);
 			return ret;
 		}
 		fix->smem_len = size;
 	} else {
 		long ret;
-		ret = L4XV_FN_i(l4re_video_goos_get_static_buffer(screen->goos, 0,
+		ret = L4XV_FN_i(l4re_video_goos_get_static_buffer(screen->goos,
+		                                                  0,
 		                                                  screen->fb_cap));
 		if (ret >= 0)
 			ret = L4XV_FN_i(l4re_ds_size(screen->fb_cap));
 
 		if (ret < 0) {
-			dev_err(scr2dev(screen), "cannot get static fb (%ld)\n",
-			        ret);
+			dev_err(scr2dev(screen),
+			        "cannot get static fb (%ld)\n", ret);
 			return ret;
 		}
 
 		fix->smem_len = l4_round_page(ret);
 	}
 
-	ret = L4XV_FN_i(l4re_rm_attach(&fb_addr, fix->smem_len, L4RE_RM_SEARCH_ADDR,
+	ret = L4XV_FN_i(l4re_rm_attach(&fb_addr, fix->smem_len,
+	                               L4RE_RM_SEARCH_ADDR,
 	                               screen->fb_cap, 0, 20));
 
 	if (ret < 0) {
@@ -1248,9 +1012,11 @@ static int l4fb_init_session(struct fb_info *fb, struct l4fb_screen *screen)
 
 	l4fb_update_dirty_init(screen, fix->smem_start, fix->smem_len);
 
-	setup_timer(&screen->refresh_timer, l4fb_refresh_func, (unsigned long)screen);
+	setup_timer(&screen->refresh_timer, l4fb_refresh_func,
+	            (unsigned long)screen);
 	if (screen->refresh_sleep) {
-		screen->refresh_timer.expires  = jiffies + screen->refresh_sleep;
+		screen->refresh_timer.expires = jiffies
+		                                + screen->refresh_sleep;
 		add_timer(&screen->refresh_timer);
 	}
 
@@ -1292,12 +1058,61 @@ do_refresh_sleep_write(struct device *dev, struct device_attribute *attr,
 	screen->refresh_sleep = simple_strtoul(tmp, NULL, 0);
 
 	if (screen->refresh_sleep)
-		mod_timer(&screen->refresh_timer, jiffies + screen->refresh_sleep);
+		mod_timer(&screen->refresh_timer,
+		          jiffies + screen->refresh_sleep);
 
 	return count;
 }
 static DEVICE_ATTR(refresh_sleep, 0600,
                    do_refresh_sleep_read, do_refresh_sleep_write);
+
+static int
+l4fb_setup_input_dev(struct l4x_event_source *source,
+                     struct l4x_event_input_stream *input)
+{
+	enum { NAME_LEN = 20 };
+	int err;
+	struct l4fb_screen *screen = container_of(source, struct l4fb_screen,
+	                                          input);
+	struct fb_info *info = platform_get_drvdata(&screen->platform_device);
+	char *name;
+
+	if (verbose)
+		dev_info(scr2dev(screen), "new input device id=%lx\n",
+		         input->stream.id);
+
+	input->simulate_touchscreen = touchscreen;
+
+	err = l4x_event_input_setup_stream_infos(source, input);
+	if (err < 0)
+		return err;
+
+	name = kzalloc(NAME_LEN, GFP_KERNEL);
+	snprintf(name, NAME_LEN, "L4event '%d'", info->node);
+	name[NAME_LEN - 1] = 0;
+
+	input->input->phys = "L4Re::Event";
+	input->input->uniq = name;
+	input->input->name = name;
+	input->input->id.bustype = 0;
+	input->input->id.vendor  = 0x50fb;
+	input->input->id.product = info->node;
+	input->input->id.version = 0;
+	return 0;
+}
+
+static void
+l4fb_free_input_dev(struct l4x_event_source *source,
+                    struct l4x_event_input_stream *input)
+{
+	kfree(input->input->name);
+}
+
+
+static struct l4x_event_input_source_ops l4_input_ops = {
+	.setup_input = l4fb_setup_input_dev,
+	.free_input  = l4fb_free_input_dev
+};
 
 static int l4fb_probe(struct platform_device *dev)
 {
@@ -1335,15 +1150,17 @@ static int l4fb_probe(struct platform_device *dev)
 
 	info->screen_base = (void *)info->fix.smem_start;
 	if (!info->screen_base) {
-		dev_err(&dev->dev, "abort, graphic system could not be initialized.\n");
+		dev_err(&dev->dev,
+		        "abort, graphic system could not be initialized.\n");
 		ret = -EIO;
 		goto failed_after_framebuffer_alloc;
 	}
 
 	/* some dummy values for timing to make fbset happy */
-	info->var.pixclock     = 10000000 / info->var.xres * 1000 / info->var.yres;
-	info->var.left_margin  = (info->var.xres / 8) & 0xf8;
-	info->var.hsync_len    = (info->var.xres / 8) & 0xf8;
+	info->var.pixclock    = 10000000 / info->var.xres
+	                        * 1000 / info->var.yres;
+	info->var.left_margin = (info->var.xres / 8) & 0xf8;
+	info->var.hsync_len   = (info->var.xres / 8) & 0xf8;
 
 	info->var.transp.length = 0;
 	info->var.transp.offset = 0;
@@ -1362,7 +1179,9 @@ static int l4fb_probe(struct platform_device *dev)
 	dev_info(&dev->dev, "%s L4 frame buffer device (refresh: %ujiffies)\n",
 	         info->fix.id, screen->refresh_sleep);
 
-	l4fb_fb_init(info, screen);
+	screen->input.event_cap = screen->goos;
+	l4x_event_input_setup_source(&screen->input, INPUT_HASH_ENTRIES,
+	                             &l4_input_ops);
 
 	if (register_framebuffer(info) < 0) {
 		ret = -EINVAL;
@@ -1428,7 +1247,6 @@ static int l4fb_alloc_screen(int id, char const *cap)
 
 static int l4fb_remove(struct platform_device *dev)
 {
-	int i;
 	struct fb_info *info = platform_get_drvdata(dev);
 
 	if (info) {
@@ -1439,18 +1257,6 @@ static int l4fb_remove(struct platform_device *dev)
 		unregister_framebuffer(info);
 		fb_dealloc_cmap(&info->cmap);
 		framebuffer_release(info);
-
-		for (i = 0; i < (1UL << INPUT_HASH_BITS); ++i) {
-			struct l4fb_input_device *d;
-			struct hlist_node *n;
-			hlist_for_each_entry_safe(d, n, &screen->input[i], l) {
-				struct input_dev *idev = d->dev;
-				d->dev = 0;
-				input_unregister_device(idev);
-				input_free_device(idev);
-				kfree(d);
-			}
-		}
 
 		l4fb_shutdown(screen);
 		kfree(screen);
@@ -1496,9 +1302,11 @@ static int __init l4fb_init(void)
 		debugfs_dir = debugfs_create_dir("l4fb", NULL);
 	if (!IS_ERR(debugfs_dir)) {
 		debugfs_unmaps  = debugfs_create_u32("unmaps", S_IRUGO,
-		                                     debugfs_dir, &stats_unmaps);
+		                                     debugfs_dir,
+		                                     &stats_unmaps);
 		debugfs_updates = debugfs_create_u32("updates", S_IRUGO,
-		                                     debugfs_dir, &stats_updates);
+		                                     debugfs_dir,
+		                                     &stats_updates);
 	}
 #endif
 	return ret;

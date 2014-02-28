@@ -1,6 +1,7 @@
 
 lib-$(CONFIG_L4_SERVER)       += server.o
 lib-$(CONFIG_L4_SERVER_INPUT) += input-srv.o
+lib-$(CONFIG_L4_SERVER_FB)    += fb-srv.o
 
 include $(L4OBJ)/l4defs.mk.inc
 

@@ -103,9 +103,6 @@ execute_on_irq_stack(int overflow, struct irq_desc *desc, int irq)
 	irqctx->tinfo.task = curctx->tinfo.task;
 	irqctx->tinfo.previous_esp = current_stack_pointer;
 
-	/* Copy the preempt_count so that the [soft]irq checks work. */
-	irqctx->tinfo.preempt_count = curctx->tinfo.preempt_count;
-
 	if (unlikely(overflow))
 		call_on_stack(print_stack_overflow, isp);
 
@@ -134,7 +131,6 @@ void irq_ctx_init(int cpu)
 					       THREAD_SIZE_ORDER));
 	memset(&irqctx->tinfo, 0, sizeof(struct thread_info));
 	irqctx->tinfo.cpu		= cpu;
-	irqctx->tinfo.preempt_count	= HARDIRQ_OFFSET;
 	irqctx->tinfo.addr_limit	= MAKE_MM_SEG(0);
 
 	l4x_stack_set(&irqctx->tinfo, l4x_cpu_thread_get(cpu));
@@ -156,46 +152,31 @@ void irq_ctx_init(int cpu)
 	       cpu, per_cpu(hardirq_ctx, cpu),  per_cpu(softirq_ctx, cpu));
 }
 
-asmlinkage void do_softirq(void)
+void do_softirq_own_stack(void)
 {
-	unsigned long flags;
 	struct thread_info *curctx;
 	union irq_ctx *irqctx;
 	u32 *isp;
 
-	if (in_interrupt())
-		return;
+	curctx = current_thread_info();
+	irqctx = __this_cpu_read(softirq_ctx);
+	irqctx->tinfo.task = curctx->task;
+	irqctx->tinfo.previous_esp = current_stack_pointer;
 
-	local_irq_save(flags);
-
-	if (local_softirq_pending()) {
-		curctx = current_thread_info();
-		irqctx = __this_cpu_read(softirq_ctx);
-		irqctx->tinfo.task = curctx->task;
-		irqctx->tinfo.previous_esp = current_stack_pointer;
-
-		/* build the stack frame on the softirq stack */
-		isp = (u32 *) ((char *)irqctx + sizeof(*irqctx));
+	/* build the stack frame on the softirq stack */
+	isp = (u32 *) ((char *)irqctx + sizeof(*irqctx));
 
 #ifndef CONFIG_L4_VCPU
-		l4x_stack_set(&irqctx->tinfo, l4_utcb());
-		per_cpu(l4x_current_ti, smp_processor_id()) = &irqctx->tinfo;
+	l4x_stack_set(&irqctx->tinfo, l4_utcb());
+	per_cpu(l4x_current_ti, smp_processor_id()) = &irqctx->tinfo;
 #endif
 
-		call_on_stack(__do_softirq, isp);
+	call_on_stack(__do_softirq, isp);
 
 #ifndef CONFIG_L4_VCPU
-		per_cpu(l4x_current_ti, smp_processor_id()) = curctx;
-		l4x_stack_set(curctx, l4_utcb());
+	per_cpu(l4x_current_ti, smp_processor_id()) = curctx;
+	l4x_stack_set(curctx, l4_utcb());
 #endif
-
-		/*
-		 * Shouldn't happen, we returned above if in_interrupt():
-		 */
-		WARN_ON_ONCE(softirq_count());
-	}
-
-	local_irq_restore(flags);
 }
 
 bool handle_irq(unsigned irq, struct pt_regs *regs)

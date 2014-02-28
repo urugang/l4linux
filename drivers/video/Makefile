@@ -153,6 +153,7 @@ obj-$(CONFIG_FB_HYPERV)		  += hyperv_fb.o
 
 obj-$(CONFIG_L4_FB_DRIVER)        += l4fb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 obj-$(CONFIG_L4_FB_DRIVER_XF86IF) += l4fb_xf86if.o
+obj-$(CONFIG_L4_SERVER_FB)        += l4fb-srv.o
 
 # Platform or fallback drivers go here
 obj-$(CONFIG_FB_UVESA)            += uvesafb.o

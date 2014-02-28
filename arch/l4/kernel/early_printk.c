@@ -6,14 +6,21 @@
 #include <linux/init.h>
 #include <linux/string.h>
 
-#include <l4/sys/kdebug.h>
+#include <asm/generic/vcpu.h>
+#include <l4/re/env.h>
+#include <l4/sys/vcon.h>
+
+static void vcon_outchar(char c)
+{
+	L4XV_FN_v(l4_vcon_write(l4re_env()->log, &c, 1));
+}
 
 static void early_kdb_write(struct console *con, const char *s, unsigned n)
 {
 	while (*s && n-- > 0) {
-		outchar(*s);
+		vcon_outchar(*s);
 		if (*s == '\n')
-			outchar('\r');
+			vcon_outchar('\r');
 		s++;
 	}
 }

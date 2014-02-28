@@ -38,14 +38,15 @@ PLATFORMNAME-$(CONFIG_L4_PLATFORM_GENERIC)  = generic
 PLATFORMNAME-$(CONFIG_L4_PLATFORM_REALVIEW) = realview
 PLATFORMNAME                                = $(PLATFORMNAME-y)
 
+# select defconfig based on actual architecture
 ifeq ($(ARCH),x86)
   ifeq ($(shell uname -m),x86_64)
         KBUILD_DEFCONFIG := x86_64_defconfig
   else
-	KBUILD_DEFCONFIG := x86-native_defconfig
+        KBUILD_DEFCONFIG := x86-native_defconfig
   endif
 else
-	KBUILD_DEFCONFIG := $(ARCH)_defconfig
+        KBUILD_DEFCONFIG := $(ARCH)_defconfig
 endif
 
 VMLINUZ_SUFFIX = $(patsubst "%",%,$(CONFIG_L4_VMLINUZ_SUFFIX))
@@ -88,6 +89,9 @@ ifeq ($(CONFIG_X86_32),y)
         #KBUILD_CFLAGS += -msoft-float -mregparm=3 -freg-struct-return
 	KBUILD_CFLAGS += -mregparm=3
 
+        # Don't autogenerate MMX or SSE instructions
+        KBUILD_CFLAGS += -mno-mmx -mno-sse
+
         # Never want PIC in a 32-bit kernel, prevent breakage with GCC built
         # with nonstandard options
         KBUILD_CFLAGS += -fno-pic
@@ -114,8 +118,11 @@ else
         KBUILD_AFLAGS += -m64
         KBUILD_CFLAGS += -m64
 
+        # Don't autogenerate MMX or SSE instructions
+        KBUILD_CFLAGS += -mno-mmx -mno-sse
+
 	# Use -mpreferred-stack-boundary=3 if supported.
-	KBUILD_CFLAGS += $(call cc-option,-mno-sse -mpreferred-stack-boundary=3)
+	KBUILD_CFLAGS += $(call cc-option,-mpreferred-stack-boundary=3)
 
         # FIXME - should be integrated in Makefile.cpu (Makefile_32.cpu)
         cflags-$(CONFIG_MK8) += $(call cc-option,-march=k8)
@@ -181,6 +188,7 @@ endif
 ifeq ($(BASEARCH),arm)
 ifeq ($(CONFIG_CPU_ENDIAN_BE8),y)
 LDFLAGS_vmlinux += --be8
+LDFLAGS_MODULE += --be8
 endif
 
 # This selects which instruction set is used.
@@ -298,6 +306,7 @@ libs-y				+= arch/l4/lib/arch-$(BASEARCH)/	\
 				   arch/l4/l4lxlib/generic/		\
 				   arch/l4/l4lxlib/$(BASEENV)/
 
+drivers-y			+= arch/l4/drivers/
 drivers-$(CONFIG_PCI)		+= arch/l4/pci/
 
 ifeq ($(BASEARCH),x86)

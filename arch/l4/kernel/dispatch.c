@@ -279,7 +279,6 @@ static int l4x_hybrid_return(struct thread_info *ti,
 
 	/* Wake up hybrid task h and reschedule */
 	wake_up_process(h);
-	set_need_resched();
 
 	return 1;
 
@@ -1084,6 +1083,7 @@ create_task:
 			l4_cap_idx_t c = l4x_user_task_create();
 			if (unlikely(l4_is_invalid_cap(c))) {
 				local_irq_enable();
+				fp1 = 0;
 				msleep(1);
 				l4x_evict_tasks(p);
 				goto restart;
@@ -1218,7 +1218,11 @@ l4x_vcpu_entry_kern(l4_vcpu_state_t *vcpu)
 #ifdef CONFIG_PREEMPT
 	if (!preempt_count()) {
 		extern asmlinkage void __sched preempt_schedule_irq(void);
-		while (need_resched() && (regsp->flags & X86_EFLAGS_IF))
+		while (need_resched()
+#ifdef CONFIG_X86
+				&& (regsp->flags & X86_EFLAGS_IF)
+#endif
+				)
 			preempt_schedule_irq();
 	}
 #endif

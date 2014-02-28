@@ -6,6 +6,7 @@
 #include <linux/timex.h>
 #include <linux/clockchips.h>
 #include <linux/irq.h>
+#include <linux/sched_clock.h>
 
 #include <asm/l4lxapi/thread.h>
 
@@ -284,8 +285,19 @@ out1:
 	return r;
 }
 
+#ifdef CONFIG_GENERIC_SCHED_CLOCK
+static u32 notrace kip_clock_read_32(void)
+{
+	return l4_kip_clock_lw(l4re_kip());
+}
+#endif
+
 void __init l4x_timer_init(void)
 {
 	if (l4x_timer_init_ret())
 		printk(KERN_ERR "l4timer: Failed to initialize!\n");
+
+#ifdef CONFIG_GENERIC_SCHED_CLOCK
+	setup_sched_clock(kip_clock_read_32, 32, 1000000);
+#endif
 }

@@ -94,22 +94,14 @@ int l4lx_task_create(l4_cap_idx_t task)
 	return l4_error_u(t, u);
 }
 
-static int l4lx_task_delete_obj(l4_cap_idx_t obj)
-{
-	l4_msgtag_t t;
-	l4_utcb_t *u = l4_utcb();
-
-	t = L4XV_FN(l4_msgtag_t,
-	            l4_task_unmap_u(L4RE_THIS_TASK_CAP,
-	                            l4_obj_fpage(obj, 0, L4_FPAGE_RWX),
-	                            L4_FP_DELETE_OBJ, u));
-	return l4_error_u(t, u);
-}
-
 int l4lx_task_delete_thread(l4_cap_idx_t thread)
 {
 	unsigned int r;
-	if (unlikely(r = l4lx_task_delete_obj(thread)))
+	l4_msgtag_t t;
+
+	t = L4XV_FN(l4_msgtag_t,
+	            l4_task_delete_obj(L4RE_THIS_TASK_CAP, thread));
+	if (unlikely(r = l4_error(t)))
 		printk("Failed to kill thread %lx %d\n", thread, r);
 	return r;
 }
@@ -118,7 +110,11 @@ int l4lx_task_delete_thread(l4_cap_idx_t thread)
 int l4lx_task_delete_task(l4_cap_idx_t task)
 {
 	unsigned int r;
-	if (unlikely(r = l4lx_task_delete_obj(task)))
+	l4_msgtag_t t;
+
+	t  = L4XV_FN(l4_msgtag_t,
+	             l4_task_delete_obj(L4RE_THIS_TASK_CAP, task));
+	if (unlikely(r = l4_error(t)))
 		printk("Failed to kill task %lx: %d\n", task, r);
 	return r;
 }

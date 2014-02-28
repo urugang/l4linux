@@ -25,3 +25,4 @@ init-y		:= $(b)/init.o
 early-y		:= $(b)/early.o
 amd_bus-y	:= $(b)/amd_bus.o
 bus_numa-y	:= $(b)/bus_numa.o
+intel_mid_pci-y := $(b)/intel_mid_pci.o
