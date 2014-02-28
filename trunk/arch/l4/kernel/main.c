@@ -421,8 +421,14 @@ void *l4x_phys_to_virt(unsigned long address)
 	if (v)
 		return __va(v);
 
+#ifdef CONFIG_ARM
+	/* Avoid warning for typical DMA masks (__dma_supported) */
+	if (address == ~0UL)
+		return __va(address);
+#endif
+
 	/* Whitelist: */
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 	if (address < 0x1000 ||
 	    address == 0xb8000 ||
 	    address == 0xa0000 ||
@@ -803,17 +809,6 @@ l4x_linux_main_exit(void)
 	LOG_printf("Terminating L4Linux.\n");
 	exit(0);
 }
-
-/* ---------------------------------------------------------------- */
-
-void l4x_printf(const char *fmt, ...)
-{
-	va_list list;
-	va_start(list, fmt);
-	L4XV_FN_v(LOG_vprintf(fmt, list));
-	va_end(list);
-}
-EXPORT_SYMBOL(l4x_printf);
 
 /* ---------------------------------------------------------------- */
 
@@ -2759,21 +2754,20 @@ static int l4x_handle_hlt_for_bugs_test(l4_exc_regs_t *exc)
 	return 1; // not for us
 }
 
-#ifdef CONFIG_KPROBES
-static int l4x_handle_kprobes(l4_exc_regs_t *exc)
+static int l4x_handle_hlt(l4_exc_regs_t *exc)
 {
 	extern void do_int3(struct pt_regs *regs, long err);
 	struct pt_regs regs;
 
-	// XXX need to check other thread!!
-	//if (kprobe_running())
-	//	return 1; /* Not handled */
+#ifdef CONFIG_KPROBES
+	BUILD_BUG_ON(BREAKPOINT_INSTRUCTION != 0xf4);
+#endif
 
 	if (l4_utcb_exc_pc(exc) < PAGE_SIZE)
 		return 1; /* Can not handle */
 
 	/* check for kprobes break instruction */
-	if (*(unsigned char *)l4_utcb_exc_pc(exc) != BREAKPOINT_INSTRUCTION)
+	if (*(unsigned char *)l4_utcb_exc_pc(exc) != 0xf4)
 		return 1; /* Not handled */
 
 	utcb_exc_to_ptregs(exc, &regs);
@@ -2786,7 +2780,6 @@ static int l4x_handle_kprobes(l4_exc_regs_t *exc)
 	l4x_setup_stack_for_traps(exc, &regs, do_int3);
 	return 0;
 }
-#endif
 
 static int l4x_handle_int1(l4_exc_regs_t *exc)
 {
@@ -3035,6 +3028,25 @@ static inline l4_exc_regs_t *cast_to_utcb_exc(l4_vcpu_regs_t *vcpu_regs)
 #endif /* ARCH_x86 */
 
 #ifdef ARCH_arm
+
+/* Redefinition fix */
+#undef VM_EXEC
+#include <asm/asm-offsets.h>
+
+void l4x_arm_ret_from_exc(void);
+asm(
+".global l4x_arm_ret_from_exc                        \n"
+"l4x_arm_ret_from_exc:                               \n"
+"	ldr	r0, [sp, #" __stringify(S_PSR) "]    \n"
+"	msr	cpsr_f, r0                           \n"
+"	ldr	r0, [sp, #" __stringify(S_PC) "]     \n"
+"	str	r0, [sp, #" __stringify(S_OLD_R0) "] \n"
+"	ldr	lr, [sp, #" __stringify(S_LR) "]     \n"
+"	ldmia	sp!, {r0 - r12}                      \n"
+"	add	sp, sp, #(4 * 4)                     \n"
+"	pop	{pc}                                 \n"
+);
+
 static void l4x_setup_die_utcb(l4_exc_regs_t *exc)
 {
 	struct pt_regs regs;
@@ -3059,7 +3071,25 @@ static void l4x_setup_die_utcb(l4_exc_regs_t *exc)
 
 	/* Set PC to die function */
 	exc->pc  = (unsigned long)die;
-	exc->ulr = 0;
+	exc->ulr = (unsigned long)l4x_arm_ret_from_exc;
+}
+
+static void l4x_setup_stack_for_traps(l4_exc_regs_t *exc,
+                                      void (*trap_func)(struct pt_regs *regs))
+{
+	struct pt_regs *regs;
+
+	exc->sp -= sizeof(*regs);
+
+	regs = (struct pt_regs *)exc->sp;
+
+	utcb_exc_to_ptregs(exc, regs);
+	regs->ARM_ORIG_r0 = 0;
+	l4x_set_kernel_mode(regs);
+
+	exc->r[0] = (unsigned long)regs;
+	exc->pc   = (unsigned long)trap_func;
+	exc->ulr  = (unsigned long)l4x_arm_ret_from_exc;
 }
 
 static void l4x_arm_set_reg(l4_exc_regs_t *exc, int num, unsigned long val)
@@ -3078,12 +3108,6 @@ static void l4x_arm_set_reg(l4_exc_regs_t *exc, int num, unsigned long val)
 
 #ifdef CONFIG_VFP
 #include <asm/generic/fpu.h>
-asm(
-".global l4x_return_from_do_vfp    \t\n"
-"l4x_return_from_do_vfp:           \t\n"
-"	ldmia sp!, {r0-r12,lr,pc}  \t\n"
-);
-
 #include <asm/vfp.h>
 #define  __L4X_ARM_VFP_H__USE_REAL_FUNCS
 #include "../../arm/vfp/vfpinstr.h"
@@ -3120,19 +3144,24 @@ void l4x_fmxr(unsigned long reg, unsigned long val)
 }
 #endif
 
-static int l4x_handle_arm_exception(l4_exc_regs_t *exc)
+static int l4x_handle_arm_undef(l4_exc_regs_t *exc)
 {
+	asmlinkage void do_undefinstr(struct pt_regs *regs);
+
 	unsigned long pc = exc->pc - 4;
 	unsigned long op;
 
 	if (exc->err != 0x00100000)
 		return 1;
 
+	BUG_ON(exc->cpsr & PSR_T_BIT);
+
 	if (pc < (unsigned long)&_stext || pc > (unsigned long)&_etext)
 		return 1; // not for us
 
 	op = *(unsigned long *)pc;
 
+	/* We should/could move that over to an undef-hook */
 	if ((op & 0xff000000) == 0xee000000) {
 		// always, mrc, mcr
 		unsigned int reg;
@@ -3175,7 +3204,7 @@ static int l4x_handle_arm_exception(l4_exc_regs_t *exc)
 		           "Linux built for the wrong ARM version?\n", pc);
 
 	exc->pc = pc;
-	l4x_setup_die_utcb(exc);
+	l4x_setup_stack_for_traps(exc, do_undefinstr);
 	return 0;
 }
 
@@ -3230,9 +3259,7 @@ struct l4x_exception_func_struct {
 static struct l4x_exception_func_struct l4x_exception_func_list[] = {
 #ifdef CONFIG_X86
 	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_hlt_for_bugs_test }, // before kprobes!
-#ifdef CONFIG_KPROBES
-	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_kprobes },
-#endif
+	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_hlt },
 	{ .trap_mask = 0x2000, .for_vcpu = 0, .f = l4x_handle_lxsyscall },
 	{ .trap_mask = 0x0002, .for_vcpu = 0, .f = l4x_handle_int1 },
 	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_msr },
@@ -3241,7 +3268,7 @@ static struct l4x_exception_func_struct l4x_exception_func_list[] = {
 	{ .trap_mask = 0x2000, .for_vcpu = 1, .f = l4x_handle_ioport },
 #endif
 #ifdef ARCH_arm
-	{ .trap_mask = ~0UL,   .for_vcpu = 1, .f = l4x_handle_arm_exception },
+	{ .trap_mask = ~0UL,   .for_vcpu = 1, .f = l4x_handle_arm_undef },
 #endif
 };
 static const int l4x_exception_funcs
@@ -3267,6 +3294,7 @@ int l4x_vcpu_handle_kernel_exc(l4_vcpu_regs_t *vr)
 {
 	int i;
 	l4_exc_regs_t *exc = cast_to_utcb_exc(vr);
+
 	// check handlers for this exception
 	for (i = 0; i < l4x_exception_funcs; i++) {
 		struct l4x_exception_func_struct *f
@@ -3503,7 +3531,6 @@ void l4x_prepare_irq_thread(struct thread_info *ti, unsigned _cpu)
 	ti->task          = l4x_idle_task(_cpu);
 	ti->exec_domain   = NULL;
 	ti->cpu           = _cpu;
-	ti->preempt_count = HARDIRQ_OFFSET;
 #ifdef ARCH_x86
 	ti->addr_limit    = MAKE_MM_SEG(0);
 #endif
@@ -3743,4 +3770,13 @@ EXPORT_SYMBOL(__l4sys_invoke_direct);
 /* mcount is defined in assembly */
 EXPORT_SYMBOL(mcount);
 #endif
+#endif /* IA32 */
+
+#ifdef CONFIG_X86
+#ifdef CONFIG_PREEMPT
+EXPORT_SYMBOL(___preempt_schedule);
+#ifdef CONFIG_CONTEXT_TRACKING
+EXPORT_SYMBOL(___preempt_schedule_context);
 #endif
+#endif
+#endif /* X86 */

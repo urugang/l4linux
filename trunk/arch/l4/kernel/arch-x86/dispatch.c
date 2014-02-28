@@ -259,7 +259,7 @@ static DEFINE_PER_CPU(unsigned, utcb_snd_size);
 #include <asm/generic/stack_id.h>
 
 __notrace_funcgraph struct task_struct *
-__switch_to(struct task_struct *prev, struct task_struct *next)
+__switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 {
 	int cpu = smp_processor_id();
 	fpu_switch_t fpu;
@@ -267,52 +267,60 @@ __switch_to(struct task_struct *prev, struct task_struct *next)
 	if (0)
 		LOG_printf("%s: cpu%d: %s(%d)[%ld] -> %s(%d)[%ld]\n",
 		           __func__, cpu,
-		           prev->comm, prev->pid, prev->state,
-		           next->comm, next->pid, next->state);
+		           prev_p->comm, prev_p->pid, prev_p->state,
+		           next_p->comm, next_p->pid, next_p->state);
 #ifdef CONFIG_L4_VCPU
-	TBUF_LOG_SWITCH(fiasco_tbuf_log_3val("SWITCH", (unsigned long)prev->stack, (unsigned long)next->stack, next->thread.sp0));
+	TBUF_LOG_SWITCH(fiasco_tbuf_log_3val("SWITCH", (unsigned long)prev_p->stack, (unsigned long)next_p->stack, next_p->thread.sp0));
 #else
-	TBUF_LOG_SWITCH(fiasco_tbuf_log_3val("SWITCH", (prev->pid << 16) | TBUF_TID(prev->thread.user_thread_id), (next->pid << 16) | TBUF_TID(next->thread.user_thread_id), 0));
+	TBUF_LOG_SWITCH(fiasco_tbuf_log_3val("SWITCH", (prev_p->pid << 16) | TBUF_TID(prev_p->thread.user_thread_id), (next_p->pid << 16) | TBUF_TID(next_p->thread.user_thread_id), 0));
 #endif
 
-	fpu = switch_fpu_prepare(prev, next, cpu);
+	fpu = switch_fpu_prepare(prev_p, next_p, cpu);
 
 #ifndef CONFIG_L4_VCPU
 	this_cpu_write(l4x_current_ti,
-	               (struct thread_info *)((unsigned long)next->stack & ~(THREAD_SIZE - 1)));
+	               (struct thread_info *)((unsigned long)next_p->stack & ~(THREAD_SIZE - 1)));
 #endif
 
-	if (unlikely(task_thread_info(prev)->flags & _TIF_WORK_CTXSW_PREV ||
-	             task_thread_info(next)->flags & _TIF_WORK_CTXSW_NEXT))
-		__switch_to_xtra(prev, next, NULL);
+	/*
+	 * If it were not for PREEMPT_ACTIVE we could guarantee that the
+	 * preempt_count of all tasks was equal here and this would not be
+	 * needed.
+	 */
+	task_thread_info(prev_p)->saved_preempt_count = this_cpu_read(__preempt_count);
+	this_cpu_write(__preempt_count, task_thread_info(next_p)->saved_preempt_count);
 
-	arch_end_context_switch(next);
+	if (unlikely(task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV ||
+	             task_thread_info(next_p)->flags & _TIF_WORK_CTXSW_NEXT))
+		__switch_to_xtra(prev_p, next_p, NULL);
 
-	switch_fpu_finish(next, fpu);
+	arch_end_context_switch(next_p);
 
-	this_cpu_write(current_task, next);
+	switch_fpu_finish(next_p, fpu);
+
+	this_cpu_write(current_task, next_p);
 
 #if defined(CONFIG_SMP) && !defined(CONFIG_L4_VCPU)
-	next->thread.user_thread_id = next->thread.user_thread_ids[cpu];
-	l4x_stack_struct_get(next->stack)->utcb
-		= l4x_stack_struct_get(prev->stack)->utcb;
+	next_p->thread.user_thread_id = next_p->thread.user_thread_ids[cpu];
+	l4x_stack_struct_get(next_p->stack)->utcb
+		= l4x_stack_struct_get(prev_p->stack)->utcb;
 #endif
 
 #ifdef CONFIG_L4_VCPU
-	l4x_vcpu_ptr[cpu]->entry_sp = (unsigned long)task_pt_regs(next);
+	l4x_vcpu_ptr[cpu]->entry_sp = (unsigned long)task_pt_regs(next_p);
 #endif
 
 #ifdef CONFIG_X86_32
-	if (next->mm
+	if (next_p->mm
 #ifndef CONFIG_L4_VCPU
-	    && !l4_is_invalid_cap(next->thread.user_thread_id)
-	    && next->thread.user_thread_id
+	    && !l4_is_invalid_cap(next_p->thread.user_thread_id)
+	    && next_p->thread.user_thread_id
 #endif
 	    )
-		load_TLS(&next->thread, 0);
+		load_TLS(&next_p->thread, 0);
 #endif
 
-	return prev;
+	return prev_p;
 }
 
 static inline void l4x_pte_add_access_flag(pte_t *ptep)
@@ -534,7 +542,7 @@ restore_all:
 resume_kernel:
 	local_irq_disable();
 
-	if (current_thread_info()->preempt_count == 0)
+	if (preempt_count() == 0)
 		goto restore_all;
 
 need_resched:

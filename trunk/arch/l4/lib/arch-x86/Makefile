@@ -20,7 +20,7 @@ obj-$(CONFIG_SMP) += msr-smp.o cache-smp.o
 
 KBUILD_CFLAGS += -Iarch/x86/lib
 
-lib-y := $(b)/delay.o
+lib-y := $(b)/delay.o $(b)/misc.o
 
 lib-y += ../memcpy_user.o ../uaccess.o ../pte.o
 lib-y += ../csumpartialcopyuser.o
@@ -63,6 +63,7 @@ atomic64_32-y          := $(b)/atomic64_32.o
 cache-smp-y            := $(b)/cache-smp.o
 iomap_copy_64-y        := $(b)/iomap_copy_64.o
 cmpxchg16b_emu-y       := $(b)/cmpxchg16b_emu.o
+misc-y                 := $(b)/misc.o
 
 CFLAGS_usercopy.o      += -Dstrncpy_from_user=strncpy_from_user_orig
 

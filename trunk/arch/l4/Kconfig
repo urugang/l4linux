@@ -170,18 +170,36 @@ config L4_SERVER_INPUT
 	  This makes Linux be an L4Re::Event server that forwards input
 	  events.
 
+config L4_SERVER_FB
+	bool "Framebuffer server"
+	depends on L4_SERVER
+	help
+	  This driver makes Linux a framebuffer provider via L4Re::Goos
+	  interface. Disable fbcon by adding the parameter 'fbcon=map:1' to
+	  L4Linux command line.
+
 comment "Enable Linux framebuffer support for framebuffer driver!"
 	depends on !FB
 
+config L4_EVENTS
+	bool
+
+config L4_INPUT_DRIVER
+	bool "L4Re Input driver"
+	select L4_EVENTS
+	help
+	  Input driver for getting input from L4Re.
+
 config L4_FB_DRIVER
-	bool "L4Re Framebuffer and Input driver"
+	bool "L4Re Framebuffer driver"
 	default y
 	select FB_CFB_FILLRECT
 	select FB_CFB_COPYAREA
 	select FB_CFB_IMAGEBLIT
+	select L4_INPUT_DRIVER
 	depends on FB
 	help
-	  Framebuffer and input driver for L4Re.
+	  Framebuffer driver for L4Re.
 
 config L4_FB_DRIVER_DBG
 	bool "Include tuning and statistics for l4fb driver"

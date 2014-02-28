@@ -40,12 +40,20 @@ L4_CV l4_utcb_t *l4_utcb_wrap(void)
 void *mmap(void *addr, size_t length, int prot, int flags,
            int fd, off_t offset)
 {
+	(void)addr;
+	(void)length;
+	(void)prot;
+	(void)flags;
+	(void)fd;
+	(void)offset;
 	LOG_printf("mmap called, should only happen for exceptions\n");
 	return MAP_FAILED;
 }
 
 int munmap(void *addr, size_t length)
 {
+	(void)addr;
+	(void)length;
 	LOG_printf("munmap called, should only happen for exceptions\n");
 	return -1;
 }

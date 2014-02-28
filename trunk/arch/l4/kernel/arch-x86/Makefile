@@ -29,10 +29,13 @@ obj-$(CONFIG_X86_64)	+= vsyscall_emu_64.o
 obj-$(CONFIG_X86_64)            += sys_x86_64.o #x8664_ksyms_64.o
 obj-y				+= quirks.o
 
+obj-$(CONFIG_PREEMPT)	+= preempt.o
+
 obj-$(CONFIG_STACKTRACE)	+= stacktrace.o
 obj-y				+= cpu/
 obj-$(CONFIG_ACPI)		+= acpi.o
 obj-$(CONFIG_MODULES)		+= module.o
+obj-$(CONFIG_KGDB)		+= kgdb.o
 obj-y				+= kprobes/
 obj-$(CONFIG_AMD_NB)		+= amd_nb.o
 obj-$(CONFIG_PCI)               += early-quirks.o
@@ -100,6 +103,7 @@ nmi-y           += $(b)/nmi.o
 perf_regs-y     += $(b)/perf_regs.o
 trace_clock-y   += $(b)/trace_clock.o
 sysfb-y         += $(b)/sysfb.o
+preempt-y       += $(b)/preempt.o
 
 # we have our own versions of destroy_context and init_new_context,
 # so rename the original one

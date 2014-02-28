@@ -12,6 +12,7 @@
 #include <asm/api/api.h>
 #include <asm/generic/memory.h>
 #include <asm/generic/vcpu.h>
+#include <asm/generic/log.h>
 
 #include <l4/re/c/rm.h>
 #include <l4/sys/err.h>
@@ -54,8 +55,8 @@ int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte)
 			size = 1;
 			if (L4XV_FN_i(l4re_rm_find(&a, &size, &offset,
 			                           &flags, &ds2))) {
-				pr_err("%s: Failed to query address %lx\n",
-				       __func__, a);
+				l4x_early_pr_err("%s: Failed to query address %lx\n",
+				                 __func__, a);
 				return -1;
 			}
 
@@ -67,12 +68,13 @@ int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte)
 			    && (ds & L4_CAP_MASK) == (ds2 & L4_CAP_MASK))
 				return 0;
 
-			pr_err("%s: Already used, existing is %lx\n",
-			       __func__, q);
+			l4x_early_pr_err("%s: Already used, existing is %lx\n",
+			                 __func__, q);
 		}
 
-		pr_err("%s: cannot attach vpage (%lx, %"PTE_VAL_FMTTYPE"x): %d\n",
-		       __func__, address, pte_val(pte), r);
+		l4x_early_pr_err("%s: cannot attach vpage "
+				 "(%lx, %"PTE_VAL_FMTTYPE"x): %d\n",
+		                 __func__, address, pte_val(pte), r);
 		return -1;
 	}
 	return 0;

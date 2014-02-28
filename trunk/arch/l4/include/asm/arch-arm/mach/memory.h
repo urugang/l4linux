@@ -5,10 +5,7 @@
 #ifndef __ASM_L4__ARCH_ARM__ARCH__MEMORY_H__
 #define __ASM_L4__ARCH_ARM__ARCH__MEMORY_H__
 
-/*
- * Physical DRAM offset.
- */
-#define PHYS_OFFSET	(0x0UL)
+#define PLAT_PHYS_OFFSET	UL(0x0)
 
 #ifdef CONFIG_DISCONTIGMEM
 /*

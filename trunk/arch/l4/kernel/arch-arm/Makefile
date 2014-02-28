@@ -5,7 +5,7 @@
 obj-y		:= process.o sys_arm.o time.o traps.o stacktrace.o \
 		   switch_to.o setup.o l4.o signal.o irq.o \
 		   ptrace.o entry.o dispatch.o mach_setup.o io.o elf.o \
-		   return_address.o head.o opcodes.o
+		   return_address.o head.o opcodes.o sigreturn_codes.o
 
 obj-$(CONFIG_ATAGS)		+= atags_parse.o
 obj-$(CONFIG_ATAGS_PROC)	+= atags_proc.o
@@ -25,6 +25,7 @@ obj-$(CONFIG_CRASH_DUMP)			+= crash_dump.o
 obj-$(CONFIG_OF)				+= devtree.o
 obj-$(CONFIG_SWP_EMULATE)			+= swp_emulate.o
 obj-$(CONFIG_ARM_ARCH_TIMER)			+= arch_timer.o
+obj-$(CONFIG_KGDB)				+= kgdb.o
 CFLAGS_swp_emulate.o				:= -Wa,-march=armv7-a
 
 obj-$(CONFIG_DEBUG_LL)				+= debug.o
@@ -54,6 +55,8 @@ atags_parse-y   := ../../../arm/kernel/atags_parse.o
 atags_proc-y    := ../../../arm/kernel/atags_proc.o
 swp_emulate-y	:= ../../../arm/kernel/swp_emulate.o
 hyp-stub-y      := ../../../arm/kernel/hyp-stub.o
+kgdb-y		:= ../../../arm/kernel/kgdb.o
+sigreturn_codes-y := ../../../arm/kernel/sigreturn_codes.o
 
 KBUILD_CPPFLAGS	+= -I$(srctree)/arch/arm/kernel
 

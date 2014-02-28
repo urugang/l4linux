@@ -184,8 +184,7 @@ static struct amba_device aacidev = {
 		.end   = 0x10004fff,
 		.flags  = IORESOURCE_MEM,
 	},
-	.dma_mask       = ~0,
-	.irq            = {32, NO_IRQ },
+	.irq            = { 32, NO_IRQ },
 };
 
 static L4X_DEVICE_CB(aaci_cb)

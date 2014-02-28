@@ -27,7 +27,6 @@ static void l4x_init_softirq_stack(void)
 	softirq_ctx->tinfo.task			= NULL;
 	softirq_ctx->tinfo.exec_domain		= NULL;
 	softirq_ctx->tinfo.cpu			= 0;
-	softirq_ctx->tinfo.preempt_count	= SOFTIRQ_OFFSET;
 	softirq_ctx->tinfo.addr_limit		= MAKE_MM_SEG(0);
 }
 

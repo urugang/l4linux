@@ -7,7 +7,7 @@
 
 enum l4x_cpu_modes {
 	L4X_MODE_KERNEL = 0,
-	L4X_MODE_USER   = 3,
+	L4X_MODE_USER   = USER_RPL,
 };
 
 static inline void l4x_set_cpu_mode(struct pt_regs *r, enum l4x_cpu_modes mode)
@@ -27,7 +27,7 @@ static inline void l4x_set_kernel_mode(struct pt_regs *r)
 
 static inline unsigned long l4x_get_cpu_mode(struct pt_regs *r)
 {
-	return r->cs & 3;
+	return r->cs & SEGMENT_RPL_MASK;
 }
 
 #ifdef CONFIG_L4_VCPU
@@ -62,7 +62,7 @@ static inline void vcpu_to_ptregs(l4_vcpu_state_t *v,
 	        regs->flags |= X86_EFLAGS_IF;
 	else
 	        regs->flags &= ~X86_EFLAGS_IF;
-	regs->cs = (regs->cs & ~3) | ((v->saved_state & L4_VCPU_F_USER_MODE) ? 3 : 0);
+	regs->cs = (regs->cs & ~SEGMENT_RPL_MASK) | ((v->saved_state & L4_VCPU_F_USER_MODE) ? USER_RPL : 0);
 }
 #undef V2P
 
@@ -120,10 +120,10 @@ static inline void utcb_exc_to_ptregs(l4_exc_regs_t *exc, struct pt_regs *ptregs
 	UE2P(ptregs, bp,    exc, RN(bp));
 	UE2P(ptregs, ip,    exc, ip);
 	ptregs->flags = exc->flags | X86_EFLAGS_IF;
-	ptregs->cs    = (ptregs->cs & ~3) | 3;
 	UE2P(ptregs, sp,    exc, sp);
 #ifdef CONFIG_X86_32
 	ptregs->fs = exc->fs;
+	ptregs->gs = exc->gs;
 #else
 	UE2P(ptregs, r8,    exc, r8);
 	UE2P(ptregs, r9,    exc, r9);

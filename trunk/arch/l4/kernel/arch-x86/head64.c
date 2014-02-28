@@ -167,7 +167,7 @@ asmlinkage void __init x86_64_start_kernel(char * real_mode_data)
 
 #ifndef CONFIG_L4
 	for (i = 0; i < NUM_EXCEPTION_VECTORS; i++)
-		set_intr_gate(i, &early_idt_handlers[i]);
+		set_intr_gate(i, early_idt_handlers[i]);
 	load_idt((const struct desc_ptr *)&idt_descr);
 #endif /* L4 */
 
