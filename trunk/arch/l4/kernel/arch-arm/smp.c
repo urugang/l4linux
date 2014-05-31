@@ -113,9 +113,8 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 	secondary_data.pgdir = get_arch_pgd(idmap_pgd);
 	secondary_data.swapper_pg_dir = get_arch_pgd(swapper_pg_dir);
 #endif
-	__cpuc_flush_dcache_area(&secondary_data, sizeof(secondary_data));
 #ifndef CONFIG_L4
-	outer_clean_range(__pa(&secondary_data), __pa(&secondary_data + 1));
+	sync_cache_w(&secondary_data);
 #endif
 
 	/*
@@ -304,6 +303,9 @@ void __ref cpu_die(void)
 	 */
 	if (smp_ops.cpu_die)
 		smp_ops.cpu_die(cpu);
+
+	pr_warn("CPU%u: smp_ops.cpu_die() returned, trying to resuscitate\n",
+		cpu);
 
 	/*
 	 * Do not return to the idle loop - jump back to the secondary
@@ -571,15 +573,6 @@ int register_ipi_completion(struct completion *completion, int cpu)
 static void ipi_complete(unsigned int cpu)
 {
 	complete(per_cpu(cpu_completion, cpu));
-}
-
-#include <asm/generic/log.h>
-
-void l4x_smp_broadcast_timer(void)
-{
-	struct cpumask mask = *cpu_online_mask;
-	cpumask_clear_cpu(smp_processor_id(), &mask);
-	smp_cross_call(&mask, IPI_TIMER);
 }
 
 /*

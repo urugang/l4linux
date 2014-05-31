@@ -74,7 +74,7 @@ static inline int attach_to_irq(struct irq_desc *desc)
 	long ret;
 	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
 
-	if ((ret  = l4_error(l4_irq_attach(p->irq_cap, irq_desc_get_irq_data(desc)->irq << 2,
+	if ((ret  = l4_error(l4_irq_attach(p->c.irq_cap, irq_desc_get_irq_data(desc)->irq << 2,
 	                                   l4x_cap_current()))))
 		dd_printk("%s: can't attach to irq %u: %ld\n",
 		          __func__, desc->irq, ret);
@@ -100,12 +100,12 @@ static void attach_to_interrupt(unsigned irq)
 static void detach_from_interrupt(struct irq_desc *desc, int irq)
 {
 	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
-	if (l4_error(l4_irq_detach(p->irq_cap)))
+	if (l4_error(l4_irq_detach(p->c.irq_cap)))
 		dd_printk("%02d: Unable to detach from IRQ\n",
 		          irq_desc_get_irq_data(desc)->irq);
 
 	dd_printk("detaching from irq %d (cap: %lx)\n",
-	          irq_desc_get_irq_data(desc)->irq, p->irq_cap);
+	          irq_desc_get_irq_data(desc)->irq, p->c.irq_cap);
 
 	p->enabled = 0;
 	irq_disable_cmd_state[irq_desc_get_irq_data(desc)->irq] = 0;
@@ -128,14 +128,14 @@ static inline void wait_for_irq_message(unsigned irq)
 		if (unlikely(p->enabled && irq_disable_cmd_state[irq]))
 			detach_from_interrupt(desc, irq);
 
-		tag = l4_irq_wait_u(p->irq_cap, &src_id, L4_IPC_NEVER, utcb);
+		tag = l4_irq_wait_u(p->c.irq_cap, &src_id, L4_IPC_NEVER, utcb);
 		err = l4_ipc_error(tag, utcb);
 
 		if (unlikely(err)) {
 			/* IPC error */
 			LOG_printf("%s: IRQ %u (" PRINTF_L4TASK_FORM ") "
 			           "receive failed, error = 0x%d\n",
-			           __func__, irq, PRINTF_L4TASK_ARG(p->irq_cap), err);
+			           __func__, irq, PRINTF_L4TASK_ARG(p->c.irq_cap), err);
 			enter_kdebug("receive from intr failed");
 		} else if (likely(src_id)) {
 			/* Interrupt coming! */
@@ -266,8 +266,11 @@ static void create_irq_thread(unsigned irq, struct l4x_irq_desc_private *p)
 		return;
 	}
 
+	p->c.irq_cap = l4x_have_irqcap(irq, 0);
+	BUG_ON(l4_is_invalid_cap(p->c.irq_cap));
+
 	pr_info("%s: creating IRQ thread for %d (IRQ-cap %lx)\n",
-	        __func__, irq, p->irq_cap);
+	        __func__, irq, p->c.irq_cap);
 
 	set_irq_cpu(irq, smp_processor_id());
 
@@ -310,9 +313,10 @@ unsigned int l4lx_irq_io_startup(struct irq_data *data)
 	if (!p)
 		return 0;
 
-	BUG_ON(!l4_is_invalid_cap(p->irq_cap));
+	BUG_ON(p->is_percpu);
+	BUG_ON(!l4_is_invalid_cap(p->c.irq_cap));
 
-	if (l4_is_invalid_cap(p->irq_cap = l4x_cap_alloc())) {
+	if (l4_is_invalid_cap(p->c.irq_cap = l4x_cap_alloc())) {
 		pr_err("l4x-irq: failed to get IRQ cap\n");
 		return 0;
 	}
@@ -324,7 +328,7 @@ unsigned int l4lx_irq_io_startup(struct irq_data *data)
 		goto err;
 	}
 
-	if (l4io_request_irq(irq, p->irq_cap)) {
+	if (l4io_request_irq(irq, p->c.irq_cap)) {
 			pr_err("l4x-irq: Did not get IRQ %d from IO service\n", irq);
 			goto err;
 	}
@@ -336,16 +340,14 @@ unsigned int l4lx_irq_io_startup(struct irq_data *data)
 
 	return 0;
 err:
-	l4x_cap_free(p->irq_cap);
-	p->irq_cap = L4_INVALID_CAP;
+	l4x_cap_free(p->c.irq_cap);
+	p->c.irq_cap = L4_INVALID_CAP;
 	return 0;
 }
 
 unsigned int l4lx_irq_plain_startup(struct irq_data *data)
 {
 	struct l4x_irq_desc_private *p = irq_get_chip_data(data->irq);
-	p->irq_cap = l4x_have_irqcap(data->irq);
-	BUG_ON(l4_is_invalid_cap(p->irq_cap));
 	create_irq_thread(data->irq, p);
 	l4lx_irq_dev_enable(data);
 	return 0;
@@ -376,9 +378,9 @@ void l4lx_irq_io_shutdown(struct irq_data *data)
 	dd_printk("%s: %u\n", __func__, data->irq);
 	l4lx_irq_dev_disable(data);
 
-	l4io_release_irq(data->irq, p->irq_cap);
-	l4x_cap_free(p->irq_cap);
-	p->irq_cap = L4_INVALID_CAP;
+	l4io_release_irq(data->irq, p->c.irq_cap);
+	l4x_cap_free(p->c.irq_cap);
+	p->c.irq_cap = L4_INVALID_CAP;
 }
 
 void l4lx_irq_plain_shutdown(struct irq_data *data)
@@ -389,6 +391,7 @@ void l4lx_irq_dev_enable(struct irq_data *data)
 {
 	dd_printk("%s: %u\n", __func__, data->irq);
 
+	create_irq_thread(data->irq, irq_get_chip_data(data->irq));
 	/* Only switch if IRQ thread already exists, not if we're running
 	 * in the Linux server. */
 	//if (test_bit(data->irq, irq_threads_started))
@@ -421,5 +424,5 @@ void l4lx_irq_dev_unmask(struct irq_data *data)
 void l4lx_irq_dev_eoi(struct irq_data *data)
 {
 	dd_printk("%s: %u\n", __func__, data->irq);
-	//l4_irq_unmask(p->irq_cap);
+	//l4_irq_unmask(p->c.irq_cap);
 }

@@ -10,12 +10,18 @@
 #include <l4/re/c/mem_alloc.h>
 #include <l4/re/c/rm.h>
 #include <l4/re/c/util/cap_alloc.h>
+#include <l4/re/elf_aux.h>
 
 #include <l4/sys/compiler.h>
 #include <l4/sys/kdebug.h>
 #ifdef CONFIG_L4_VCPU
 #include <l4/sys/vcpu.h>
 #endif
+
+L4RE_ELF_AUX_ELEM_T(l4re_elf_aux_mword_t, _stack_size,
+                    L4RE_ELF_AUX_T_STACK_SIZE, 0x1000);
+L4RE_ELF_AUX_ELEM_T(l4re_elf_aux_mword_t, _stack_addr,
+                    L4RE_ELF_AUX_T_STACK_ADDR, 0xafff4000);
 
 extern const char image_vmlinux_start[];
 

@@ -36,6 +36,7 @@ lib-y	+= ../../../arm/lib/backtrace.o
 lib-y	+= ../../../arm/lib/io-readsw-armv4.o
 lib-y	+= ../../../arm/lib/io-writesw-armv4.o
 lib-y   += ../../../arm/lib/call_with_stack.o
+lib-y   += ../../../arm/lib/bswapsdi2.o
 
 lib-y	+= ../pte.o
 lib-y	+= ../memcpy_user.o

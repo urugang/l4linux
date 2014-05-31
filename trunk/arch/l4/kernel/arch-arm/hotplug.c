@@ -22,10 +22,9 @@
 
 static inline void cpu_enter_lowpower(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned int v;
 
-	flush_cache_all();
 	asm volatile(
 	"	mcr	p15, 0, %1, c7, c5, 0\n"
 	"	mcr	p15, 0, %1, c7, c10, 4\n"
@@ -46,7 +45,7 @@ static inline void cpu_enter_lowpower(void)
 
 static inline void cpu_leave_lowpower(void)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned int v;
 
 	asm volatile(	"mrc	p15, 0, %0, c1, c0, 0\n"
@@ -103,6 +102,7 @@ static inline void platform_do_lowpower(unsigned int cpu, int *spurious)
 void __ref l4x_cpu_die(unsigned int cpu)
 {
 	int spurious = 0;
+#ifdef CONFIG_L4
 
 #ifndef CONFIG_L4_VCPU
 	l4x_tamed_shutdown(cpu);
@@ -110,6 +110,7 @@ void __ref l4x_cpu_die(unsigned int cpu)
 	l4x_shutdown_cpu(cpu);
 	printk("CPU%d still alive...\n", raw_smp_processor_id());
 	l4_sleep_forever();
+#endif
 
 	/*
 	 * we're ready for shutdown now, so do it

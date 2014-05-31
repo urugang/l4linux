@@ -23,7 +23,7 @@
 #define __pgd_alloc()	kmalloc(PTRS_PER_PGD * sizeof(pgd_t), GFP_KERNEL)
 #define __pgd_free(pgd)	kfree(pgd)
 #else
-#define __pgd_alloc()	(pgd_t *)__get_free_pages(GFP_KERNEL, 2)
+#define __pgd_alloc()	(pgd_t *)__get_free_pages(GFP_KERNEL | __GFP_REPEAT, 2)
 #define __pgd_free(pgd)	free_pages((unsigned long)pgd, 2)
 #endif
 
@@ -33,7 +33,7 @@
 pgd_t *pgd_alloc(struct mm_struct *mm)
 {
 	pgd_t *new_pgd, *init_pgd;
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	pud_t *new_pud, *init_pud;
 	pmd_t *new_pmd, *init_pmd;
 	pte_t *new_pte, *init_pte;
@@ -68,7 +68,7 @@ pgd_t *pgd_alloc(struct mm_struct *mm)
 		goto no_pmd;
 #endif
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	if (!vectors_high()) {
 		/*
 		 * On ARM, first page must always be allocated since it

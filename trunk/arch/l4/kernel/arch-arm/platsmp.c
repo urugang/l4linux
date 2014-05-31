@@ -21,8 +21,6 @@
 
 #include <l4/util/util.h>
 
-extern void realview_secondary_startup(void);
-
 /*
  * Write pen_release in a way that is guaranteed to be visible to all
  * observers, irrespective of whether they're taking part in coherency
@@ -62,7 +60,9 @@ static void l4x_smp_secondary_init(unsigned int cpu)
 	 * core (e.g. timer irq), then they will not have been enabled
 	 * for us: do so
 	 */
-	//l4/gic_secondary_init(0);
+#ifndef CONFIG_L4
+	gic_secondary_init(0);
+#endif
 
 	/*
 	 * let the primary processor know we're out of the
@@ -102,8 +102,11 @@ static int l4x_smp_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	 * the boot monitor to read the system wide flags register,
 	 * and branch to the address found there.
 	 */
-	//l4/smp_cross_call(cpumask_of(cpu), 1);
+#ifdef CONFIG_L4
 	l4x_cpu_release(cpu);
+#else
+	arch_send_wakeup_ipi_mask(cpumask_of(cpu));
+#endif
 
 	timeout = jiffies + (1 * HZ);
 	while (time_before(jiffies, timeout)) {
@@ -111,8 +114,11 @@ static int l4x_smp_boot_secondary(unsigned int cpu, struct task_struct *idle)
 		if (pen_release == -1)
 			break;
 
-		//udelay(10);
-		{ L4XV_V(f); L4XV_L(f); l4_sleep(10); L4XV_U(f); }
+#ifdef CONFIG_L4
+		L4XV_FN_v(l4_sleep(10));
+#else
+		udelay(10);
+#endif
 	}
 
 	/*
@@ -121,10 +127,12 @@ static int l4x_smp_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	 */
 	spin_unlock(&boot_lock);
 
-	return 0; //pen_release != -1 ? -ENOSYS : 0;
+#ifdef CONFIG_L4
+	return 0;
+#else
+	pen_release != -1 ? -ENOSYS : 0;
+#endif
 }
-
-#include <asm/generic/log.h>
 
 /*
  * Initialise the CPU possible map early - this describes the CPUs

@@ -1,0 +1,15 @@
+/*
+ * Basic DT for L4Linux.
+ */
+
+/dts-v1/;
+
+/ {
+	model = "L4Linux (DT)";
+	compatible = "L4Linux";
+
+	#address-cells = <1>;
+	#size-cells = <1>;
+	chosen { };
+	aliases { };
+};

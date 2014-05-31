@@ -168,11 +168,6 @@ void default_send_IPI_self(int vector)
 	__default_send_IPI_shortcut(APIC_DEST_SELF, vector, apic->dest_logical);
 }
 
-void l4x_smp_broadcast_timer(void)
-{
-	default_send_IPI_allbutself(L4X_TIMER_VECTOR);
-}
-
 /* must come after the send_IPI functions above for inlining */
 static int convert_apicid_to_cpu(int apic_id)
 {
@@ -199,12 +194,5 @@ int safe_smp_processor_id(void)
 	cpuid = convert_apicid_to_cpu(apicid);
 
 	return cpuid >= 0 ? cpuid : 0;
-}
-#endif
-
-#ifdef CONFIG_X86_64_SMP
-void l4x_smp_broadcast_timer(void)
-{
-	printk("%s\n", __func__);
 }
 #endif

@@ -1,3 +1,4 @@
+#pragma once
 
 #include "../../arm/vfp/vfpinstr.h"
 

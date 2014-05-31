@@ -7,7 +7,7 @@ extra-y		:= head.o vmlinux.lds
 AFLAGS_head.o   := -DARCH_$(L4_MK_ARCH)
 
 obj-y		:= main.o process_gen.o hybrid.o syscall_guard.o irq.o \
-		   signal.o clocksource.o timer.o log.o
+		   signal.o timer.o log.o
 
 obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
 obj-$(CONFIG_PM)		+= pm.o

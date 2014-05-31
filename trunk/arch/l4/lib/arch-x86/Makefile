@@ -30,7 +30,7 @@ lib-$(CONFIG_SMP) += $(b)/rwlock.o
 lib-$(CONFIG_RWSEM_XCHGADD_ALGORITHM) += $(b)/rwsem.o
 lib-$(CONFIG_INSTRUCTION_DECODER) += $(b)/insn.o $(b)/inat.o
 
-obj-y += msr.o msr-reg.o msr-reg-export.o
+obj-y += msr.o msr-reg.o msr-reg-export.o hash.o
 
 ifeq ($(CONFIG_X86_32),y)
         obj-y += atomic64_32.o
@@ -64,6 +64,7 @@ cache-smp-y            := $(b)/cache-smp.o
 iomap_copy_64-y        := $(b)/iomap_copy_64.o
 cmpxchg16b_emu-y       := $(b)/cmpxchg16b_emu.o
 misc-y                 := $(b)/misc.o
+hash-y                 := $(b)/hash.o
 
 CFLAGS_usercopy.o      += -Dstrncpy_from_user=strncpy_from_user_orig
 

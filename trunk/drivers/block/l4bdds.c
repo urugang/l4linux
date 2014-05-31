@@ -74,7 +74,7 @@ static void request(struct request_queue *q)
 
 	while ((req = blk_peek_request(q)) != NULL) {
 		struct req_iterator iter;
-		struct bio_vec *bvec;
+		struct bio_vec bvec;
 		struct l4bdds_device *dev =
 			(struct l4bdds_device *)req->rq_disk->private_data;
 		char *ds_addr = dev->addr;
@@ -91,11 +91,11 @@ static void request(struct request_queue *q)
 
 		rq_for_each_segment(bvec, req, iter) {
 			transfer(req->rq_disk->private_data, ds_addr,
-			         bvec->bv_len,
-			         page_address(bvec->bv_page)
-			           + bvec->bv_offset,
+			         bvec.bv_len,
+			         page_address(bvec.bv_page)
+			           + bvec.bv_offset,
 			         rq_data_dir(req) == WRITE);
-			ds_addr += bvec->bv_len;
+			ds_addr += bvec.bv_len;
 		}
 		__blk_end_request_all(req, 0);
 	}
@@ -179,6 +179,10 @@ static int __init l4bdds_init_one(int nr)
 
 	device[nr].gd->queue = device[nr].queue;
 	add_disk(device[nr].gd);
+
+	pr_info("l4bdds: Disk '%s' size = %lu KB (%lu MB) flags=%lx addr=%p major=%d\n",
+	        device[nr].name, device[nr].size, device[nr].size >> 10,
+	        stat.flags, device[nr].addr, device[nr].gd->major);
 
 	return 0;
 

@@ -434,7 +434,7 @@ static u32 svm_msrpm_offset(u32 msr)
 
 #define MAX_INST_SIZE 15
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 static inline void clgi(void)
 {
 	asm volatile (__ex(SVM_CLGI));
@@ -1699,6 +1699,19 @@ static void new_asid(struct vcpu_svm *svm, struct svm_cpu_data *sd)
 	// current VM, the actual ASID will be ignored by the kernel
 	svm->vmcb->control.tlb_ctl = TLB_CONTROL_FLUSH_ALL_ASID;
 #endif /* L4 */
+}
+
+static u64 svm_get_dr6(struct kvm_vcpu *vcpu)
+{
+	return to_svm(vcpu)->vmcb->save.dr6;
+}
+
+static void svm_set_dr6(struct kvm_vcpu *vcpu, unsigned long value)
+{
+	struct vcpu_svm *svm = to_svm(vcpu);
+
+	svm->vmcb->save.dr6 = value;
+	mark_dirty(svm->vmcb, VMCB_DR);
 }
 
 static void svm_set_dr7(struct kvm_vcpu *vcpu, unsigned long value)
@@ -3019,10 +3032,8 @@ static int cr8_write_interception(struct vcpu_svm *svm)
 	u8 cr8_prev = kvm_get_cr8(&svm->vcpu);
 	/* instruction emulation calls kvm_set_cr8() */
 	r = cr_interception(svm);
-	if (irqchip_in_kernel(svm->vcpu.kvm)) {
-		clr_cr_intercept(svm, INTERCEPT_CR8_WRITE);
+	if (irqchip_in_kernel(svm->vcpu.kvm))
 		return r;
-	}
 	if (cr8_prev <= kvm_get_cr8(&svm->vcpu))
 		return r;
 	kvm_run->exit_reason = KVM_EXIT_SET_TPR;
@@ -3593,6 +3604,8 @@ static void update_cr8_intercept(struct kvm_vcpu *vcpu, int tpr, int irr)
 
 	if (is_guest_mode(vcpu) && (vcpu->arch.hflags & HF_VINTR_MASK))
 		return;
+
+	clr_cr_intercept(svm, INTERCEPT_CR8_WRITE);
 
 	if (irr == -1)
 		return;
@@ -4346,6 +4359,8 @@ static struct kvm_x86_ops svm_x86_ops = {
 	.set_idt = svm_set_idt,
 	.get_gdt = svm_get_gdt,
 	.set_gdt = svm_set_gdt,
+	.get_dr6 = svm_get_dr6,
+	.set_dr6 = svm_set_dr6,
 	.set_dr7 = svm_set_dr7,
 	.cache_reg = svm_cache_reg,
 	.get_rflags = svm_get_rflags,
