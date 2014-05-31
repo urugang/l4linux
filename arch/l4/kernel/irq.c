@@ -12,10 +12,16 @@
 #include <l4/sys/icu.h>
 #include <l4/io/io.h>
 
+union irqcap_elem_t {
+	l4_cap_idx_t cap;
+	l4_cap_idx_t __percpu *caps;
+};
 
-static l4_cap_idx_t caps[L4X_NR_IRQS_V_DYN];
+static union irqcap_elem_t caps[L4X_NR_IRQS_V_DYN];
 static int init_done;
 static DEFINE_SPINLOCK(lock);
+
+enum { PERCPU_IRQ_FLAG = 1 };
 
 static void init_array(void)
 {
@@ -24,11 +30,10 @@ static void init_array(void)
 	BUILD_BUG_ON(L4X_NR_IRQS_V_DYN < 1);
 
 	for (i = 0; i < L4X_NR_IRQS_V_DYN; ++i)
-		caps[i] = L4_INVALID_CAP;
+		caps[i].cap = L4_INVALID_CAP;
 
 	init_done = 1;
 }
-
 
 int l4x_register_irq(l4_cap_idx_t irqcap)
 {
@@ -41,8 +46,9 @@ int l4x_register_irq(l4_cap_idx_t irqcap)
 	spin_lock_irqsave(&lock, flags);
 
 	for (i = 0; i < L4X_NR_IRQS_V_DYN; ++i) {
-		if (l4_is_invalid_cap(caps[i])) {
-			caps[i] = irqcap;
+		if (!(caps[i].cap & PERCPU_IRQ_FLAG)
+		    && l4_is_invalid_cap(caps[i].cap)) {
+			caps[i].cap = irqcap & L4_CAP_MASK;
 			ret = i + L4X_IRQS_V_DYN_BASE;
 			break;
 		}
@@ -52,21 +58,82 @@ int l4x_register_irq(l4_cap_idx_t irqcap)
 	return ret;
 }
 
-void l4x_unregister_irq(int irqnum)
+static inline l4_cap_idx_t __percpu *ppcaps(int idx)
 {
-	if (irqnum >= L4X_IRQS_V_DYN_BASE
-	    && (irqnum - L4X_IRQS_V_DYN_BASE) < L4X_NR_IRQS_V_DYN)
-		caps[irqnum - L4X_IRQS_V_DYN_BASE] = L4_INVALID_CAP;
+	return (l4_cap_idx_t __percpu *)((unsigned long)caps[idx].caps & ~PERCPU_IRQ_FLAG);
 }
 
-l4_cap_idx_t l4x_have_irqcap(int irqnum)
+int l4x_alloc_percpu_irq(l4_cap_idx_t __percpu **percpu_caps)
 {
+	int irq = l4x_register_irq(L4_INVALID_CAP);
+
+	if (irq != -1) {
+		int i = irq - L4X_IRQS_V_DYN_BASE;
+		struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
+
+		caps[i].caps = alloc_percpu(l4_cap_idx_t);
+		caps[i].cap |= PERCPU_IRQ_FLAG;
+		irq_set_percpu_devid(irq);
+		irq_set_chip_and_handler(irq, &l4x_irq_plain_chip, handle_percpu_devid_irq);
+		p->is_percpu = 1;
+		p->c.irq_caps = ppcaps(i);
+		*percpu_caps = p->c.irq_caps;
+	}
+
+	return irq;
+}
+
+void l4x_free_percpu_irq(int irq)
+{
+	int i = irq - L4X_IRQS_V_DYN_BASE;
+
+	BUG_ON(irq < L4X_IRQS_V_DYN_BASE);
+	BUG_ON(i >= L4X_NR_IRQS_V_DYN);
+
+	free_percpu(ppcaps(i));
+	caps[i].cap = L4_INVALID_CAP;
+	l4x_unregister_irq(irq);
+}
+
+int l4x_register_percpu_irqcap(int irqnum, unsigned cpu, l4_cap_idx_t cap)
+{
+	int i = irqnum - L4X_IRQS_V_DYN_BASE;
+
+	if (irqnum >= L4X_IRQS_V_DYN_BASE && i < L4X_NR_IRQS_V_DYN) {
+		*per_cpu_ptr(ppcaps(i), cpu) = cap;
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
+void l4x_unregister_irq(int irqnum)
+{
+	int i = irqnum - L4X_IRQS_V_DYN_BASE;
+	if (irqnum >= L4X_IRQS_V_DYN_BASE && i < L4X_NR_IRQS_V_DYN) {
+		if (caps[i].cap & PERCPU_IRQ_FLAG) {
+			caps[i].cap &= ~PERCPU_IRQ_FLAG;
+			free_percpu(caps[i].caps);
+		} else
+			caps[i].cap = L4_INVALID_CAP;
+	}
+}
+
+l4_cap_idx_t l4x_have_irqcap(int irqnum, unsigned cpu)
+{
+	int i = irqnum - L4X_IRQS_V_DYN_BASE;
+
 	if (!init_done)
 		init_array();
 
-	if (irqnum >= L4X_IRQS_V_DYN_BASE
-	    && (irqnum - L4X_IRQS_V_DYN_BASE) < L4X_NR_IRQS_V_DYN)
-		return caps[irqnum - L4X_IRQS_V_DYN_BASE];
+	if (cpu >= NR_CPUS)
+		return L4_INVALID_CAP;
+
+	if (irqnum >= L4X_IRQS_V_DYN_BASE && i < L4X_NR_IRQS_V_DYN) {
+		if (caps[i].cap & PERCPU_IRQ_FLAG)
+			return *per_cpu_ptr(ppcaps(i), cpu);
+		return caps[i].cap;
+	}
 
 	return L4_INVALID_CAP;
 }
@@ -124,23 +191,3 @@ struct irq_chip l4x_irq_plain_chip = {
 #endif
 #endif
 };
-
-#if defined(CONFIG_X86) && defined(CONFIG_SMP)
-#include <linux/interrupt.h>
-#include <linux/sched.h>
-
-void l4x_smp_timer_interrupt(struct pt_regs *regs)
-{
-	struct pt_regs *oldregs;
-	unsigned long flags;
-	oldregs = set_irq_regs(regs);
-
-	local_irq_save(flags);
-	irq_enter();
-	profile_tick(CPU_PROFILING);
-	update_process_times(user_mode_vm(get_irq_regs()));
-	irq_exit();
-	local_irq_restore(flags);
-	set_irq_regs(oldregs);
-}
-#endif

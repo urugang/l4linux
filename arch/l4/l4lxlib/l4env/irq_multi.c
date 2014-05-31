@@ -242,8 +242,6 @@ err:
 
 unsigned int l4lx_irq_plain_startup(struct irq_data *data)
 {
-	irq_caps[data->irq] = l4x_have_irqcap(data->irq);
-	BUG_ON(l4_is_invalid_cap(irq_caps[data->irq]));
 	l4lx_irq_dev_enable(data);
 	return 0;
 }
@@ -266,6 +264,8 @@ void l4lx_irq_dev_enable(struct irq_data *data)
 	if (!irq_state[data->irq]) {
 		// actually we would also need to wake-up the IRQ thread...
 		// but the timer will do it sometimes...
+		irq_caps[data->irq] = l4x_have_irqcap(data->irq, 0);
+		BUG_ON(l4_is_invalid_cap(irq_caps[data->irq]));
 		attach_to_IRQ(data->irq);
 		//send_msg_to_irq_thread(irq, smp_processor_id(), CMD_IRQ_ENABLE);
 	}

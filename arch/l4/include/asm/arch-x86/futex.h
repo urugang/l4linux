@@ -126,39 +126,24 @@ static inline int futex_atomic_op_inuser(int encoded_op, u32 __user *uaddr)
 static inline int futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 						u32 oldval, u32 newval)
 {
-	int ret = 0;
-
 #ifdef CONFIG_L4
+	int ret;
 	unsigned long flags;
+
 	if (!current->mm) /* Cheat in-kernel test */
 		return -EFAULT;
 
 	if ((uaddr = l4x_futex_translate_uaddr_nocheck(uaddr, &flags)) == ERR_PTR(-EFAULT))
 		return -EFAULT;
-#else
-	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
-		return -EFAULT;
-#endif
 
-	asm volatile("\t" ASM_STAC "\n"
-		     "1:\t" LOCK_PREFIX "cmpxchgl %4, %2\n"
-		     "2:\t" ASM_CLAC "\n"
-		     "\t.section .fixup, \"ax\"\n"
-		     "3:\tmov     %3, %0\n"
-		     "\tjmp     2b\n"
-		     "\t.previous\n"
-		     _ASM_EXTABLE(1b, 3b)
-		     : "+r" (ret), "=a" (oldval), "+m" (*uaddr)
-		     : "i" (-EFAULT), "r" (newval), "1" (oldval)
-		     : "memory"
-	);
+	ret = user_atomic_cmpxchg_inatomic(uval, uaddr, oldval, newval);
 
-#ifdef CONFIG_L4
 	l4x_futex_translate_uaddr_end(flags);
-#endif
 
-	*uval = oldval;
 	return ret;
+#else
+	return user_atomic_cmpxchg_inatomic(uval, uaddr, oldval, newval);
+#endif
 }
 
 #endif

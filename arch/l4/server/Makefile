@@ -20,7 +20,7 @@ endef
 
 L4RE_CXX_CALL = $(L4_CXX) -Wp,-MD,$(depfile) -c -DL4SYS_USE_UTCB_WRAP=1 \
                 -D__KERNEL__ -I$(srctree)/arch/l4/include \
-		$(L4_CPPFLAGS) $(L4_CXXFLAGS) -fno-exceptions
+                $(L4_CPPFLAGS) $(L4_CXXFLAGS) -fno-exceptions
 
 quiet_cmd_l4re_cxx_o_cc = C++     $@
 

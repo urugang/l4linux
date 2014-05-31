@@ -11,11 +11,18 @@
 #endif
 
 int l4x_register_irq(l4_cap_idx_t irqcap);
+int l4x_alloc_percpu_irq(l4_cap_idx_t __percpu **percpucaps);
+void l4x_free_percpu_irq(int irq);
+int l4x_register_percpu_irqcap(int irq, unsigned cpu, l4_cap_idx_t cap);
 void l4x_unregister_irq(int irqnum);
-l4_cap_idx_t l4x_have_irqcap(int irqnum);
+l4_cap_idx_t l4x_have_irqcap(int irqnum, unsigned cpu);
 
 struct l4x_irq_desc_private {
-	l4_cap_idx_t irq_cap;
+	unsigned is_percpu;
+	union {
+		l4_cap_idx_t irq_cap;
+		l4_cap_idx_t __percpu *irq_caps;
+	} c;
 #ifndef CONFIG_L4_VCPU
 	l4lx_thread_t irq_thread;
 #endif

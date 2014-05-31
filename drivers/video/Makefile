@@ -150,6 +150,7 @@ obj-$(CONFIG_FB_NUC900)           += nuc900fb.o
 obj-$(CONFIG_FB_JZ4740)		  += jz4740_fb.o
 obj-$(CONFIG_FB_PUV3_UNIGFX)      += fb-puv3.o
 obj-$(CONFIG_FB_HYPERV)		  += hyperv_fb.o
+obj-$(CONFIG_FB_OPENCORES)	  += ocfb.o
 
 obj-$(CONFIG_L4_FB_DRIVER)        += l4fb.o cfbfillrect.o cfbcopyarea.o cfbimgblt.o
 obj-$(CONFIG_L4_FB_DRIVER_XF86IF) += l4fb_xf86if.o

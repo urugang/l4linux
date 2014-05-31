@@ -263,6 +263,7 @@ static struct cpu_user_fns l4_cpu_user_fns = {
 static struct cpu_cache_fns l4_cpu_cache_fns = {
 	.flush_icache_all       = __glue(_CACHE, _flush_icache_all),
 	.flush_kern_all         = __glue(_CACHE, _flush_kern_cache_all),
+	.flush_kern_louis       = __glue(_CACHE, _flush_kern_cache_louis),
 	.flush_user_all         = __glue(_CACHE, _flush_user_cache_all),
 	.flush_user_range       = __glue(_CACHE, _flush_user_cache_range),
 	.coherent_kern_range    = __glue(_CACHE, _coherent_kern_range),
@@ -304,5 +305,8 @@ static struct proc_info_list l4_proc_info __attribute__((__section__(".proc.info
 struct proc_info_list *lookup_processor_type(void);
 struct proc_info_list *lookup_processor_type(void)
 {
+	BUILD_BUG_ON(sizeof(l4_cpu_cache_fns) != 44);
+	BUILD_BUG_ON(sizeof(l4_tlb_fns) != 12);
+	BUILD_BUG_ON(sizeof(l4_cpu_user_fns) != 8);
 	return &l4_proc_info;
 }

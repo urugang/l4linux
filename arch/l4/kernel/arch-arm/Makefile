@@ -48,7 +48,6 @@ return_address-y := ../../../arm/kernel/return_address.o
 sys_oabi-compat-y := ../../../arm/kernel/sys_oabi-compat.o
 compat-y        := ../../../arm/kernel/compat.o
 crash_dump-y    := ../../../arm/kernel/crash_dump.o
-devtree-y       := ../../../arm/kernel/devtree.o
 topology-y      := ../../../arm/kernel/topology.o
 opcodes-y       := ../../../arm/kernel/opcodes.o
 atags_parse-y   := ../../../arm/kernel/atags_parse.o

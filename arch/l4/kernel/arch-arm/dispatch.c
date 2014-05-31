@@ -194,7 +194,7 @@ static inline int l4x_ispf(struct thread_struct *t)
 }
 
 void l4x_finish_task_switch(struct task_struct *prev);
-int  l4x_deliver_signal(int exception_nr, int error_code);
+int  l4x_deliver_signal(int exception_nr);
 
 DEFINE_PER_CPU(struct thread_info *, l4x_current_ti) = &init_thread_info;
 DEFINE_PER_CPU(struct thread_info *, l4x_current_proc_run);
@@ -563,11 +563,16 @@ static inline void dispatch_system_call(syscall_t *sctbl,
 	}
 }
 
-static inline void
+static unsigned
 l4x_pre_iret_work(struct pt_regs *regsp, struct task_struct *p,
-                  unsigned long syscall, syscall_t *sctbl)
+                  unsigned long syscall, syscall_t *sctbl,
+                  unsigned kernel_context)
 {
 	unsigned long tifl;
+	unsigned was_interruptible = 0;
+
+	if (kernel_context)
+		return 0;
 
 check_work_pending:
 	tifl = current_thread_info()->flags;
@@ -577,18 +582,18 @@ check_work_pending:
 	goto no_work_pending;
 
 work_pending:
+	was_interruptible = 1;
 	if (!do_work_pending(regsp, tifl, syscall))
 		goto no_work_pending;
-
-	syscall = __NR_restart_syscall - __NR_SYSCALL_BASE;
 
 	goto local_restart;
 
 no_work_pending:
-	return;
+	return was_interruptible;
 
 local_restart:
-	dispatch_system_call(sctbl, p, syscall, regsp);
+	dispatch_system_call(sctbl, p,
+	                     __NR_restart_syscall - __NR_SYSCALL_BASE, regsp);
 
 	goto check_work_pending;
 }
@@ -802,11 +807,11 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 
 		dispatch_system_call(tbl, p, scno, regs);
 
-		l4x_pre_iret_work(regs, p, scno, tbl);
+		l4x_pre_iret_work(regs, p, scno, tbl, 0);
 
 		BUG_ON(p != current);
 
-		return 0;
+		return 1;
 
 #ifndef CONFIG_L4_VCPU
 	} else if (t->error_code == 0x00300000) {
@@ -913,7 +918,6 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	if ((t->error_code & 0x00f00000) == 0x00100000) {
 		asmlinkage void do_undefinstr(struct pt_regs *regs);
 		do_undefinstr(regs);
-		l4x_pre_iret_work(regs, p, 0, 0);
 		return 0;
 	}
 
@@ -949,7 +953,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	}
 #endif
 
-	if (l4x_deliver_signal(0, t->error_code))
+	if (l4x_deliver_signal(0))
 		return 0; /* handled signal, reply */
 
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
@@ -967,7 +971,7 @@ go_away:
 	/* The task somehow misbehaved, so it has to die */
 	do_exit(SIGKILL);
 
-	return 1; /* no reply -- no come back */
+	return 0;
 }
 
 static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,

@@ -16,7 +16,7 @@ int l4x_alloc_irq_desc_data(int irq)
 	if (!p)
 		return -ENOMEM;
 
-	p->irq_cap = L4_INVALID_CAP;
+	p->c.irq_cap = L4_INVALID_CAP;
 
 	return irq_set_chip_data(irq, p);
 }
@@ -73,7 +73,7 @@ int l4lx_irq_set_type(struct irq_data *data, unsigned int type)
 			break;
 	};
 
-	if (!l4_is_invalid_cap(p->irq_cap))
+	if (!l4_is_invalid_cap(p->c.irq_cap))
 		l4x_irq_set_type_at_icu(irq, p->trigger);
 
 	return 0;

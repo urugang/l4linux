@@ -347,7 +347,7 @@ static void __init cacheid_init(void)
 		cacheid = CACHEID_VIVT;
 	}
 
-	printk("CPU: %s data cache, %s instruction cache\n",
+	pr_info("CPU: %s data cache, %s instruction cache\n",
 		cache_is_vivt() ? "VIVT" :
 		cache_is_vipt_aliasing() ? "VIPT aliasing" :
 		cache_is_vipt_nonaliasing() ? "PIPT / VIPT nonaliasing" : "unknown",
@@ -441,7 +441,7 @@ void notrace cpu_init(void)
 #endif /* L4 */
 
 	if (cpu >= NR_CPUS) {
-		printk(KERN_CRIT "CPU%u: bad primary CPU number\n", cpu);
+		pr_crit("CPU%u: bad primary CPU number\n", cpu);
 		BUG();
 	}
 
@@ -511,7 +511,7 @@ void __init smp_setup_processor_id(void)
 	 */
 	set_my_cpu_offset(0);
 
-	printk(KERN_INFO "Booting Linux on physical CPU 0x%x\n", mpidr);
+	pr_info("Booting Linux on physical CPU 0x%x\n", mpidr);
 }
 
 struct mpidr_hash mpidr_hash;
@@ -591,8 +591,8 @@ static void __init setup_processor(void)
 	 */
 	list = lookup_processor_type(read_cpuid_id());
 	if (!list) {
-		printk("CPU configuration botched (ID %08x), unable "
-		       "to continue.\n", read_cpuid_id());
+		pr_err("CPU configuration botched (ID %08x), unable to continue.\n",
+		       read_cpuid_id());
 		while (1);
 	}
 
@@ -612,9 +612,9 @@ static void __init setup_processor(void)
 	cpu_cache = *list->cache;
 #endif
 
-	printk("CPU: %s [%08x] revision %d (ARMv%s), cr=%08lx\n",
-	       cpu_name, read_cpuid_id(), read_cpuid_id() & 15,
-	       proc_arch[cpu_architecture()], cr_alignment);
+	pr_info("CPU: %s [%08x] revision %d (ARMv%s), cr=%08lx\n",
+		cpu_name, read_cpuid_id(), read_cpuid_id() & 15,
+		proc_arch[cpu_architecture()], cr_alignment);
 
 	snprintf(init_utsname()->machine, __NEW_UTS_LEN + 1, "%s%c",
 		 list->arch_name, ENDIANNESS);
@@ -656,8 +656,8 @@ int __init arm_add_memory(u64 start, u64 size)
 	u64 aligned_start;
 
 	if (meminfo.nr_banks >= NR_BANKS) {
-		printk(KERN_CRIT "NR_BANKS too low, "
-			"ignoring memory at 0x%08llx\n", (long long)start);
+		pr_crit("NR_BANKS too low, ignoring memory at 0x%08llx\n",
+			(long long)start);
 		return -EINVAL;
 	}
 
@@ -670,14 +670,14 @@ int __init arm_add_memory(u64 start, u64 size)
 
 #ifndef CONFIG_ARCH_PHYS_ADDR_T_64BIT
 	if (aligned_start > ULONG_MAX) {
-		printk(KERN_CRIT "Ignoring memory at 0x%08llx outside "
-		       "32-bit physical address space\n", (long long)start);
+		pr_crit("Ignoring memory at 0x%08llx outside 32-bit physical address space\n",
+			(long long)start);
 		return -EINVAL;
 	}
 
 	if (aligned_start + size > ULONG_MAX) {
-		printk(KERN_CRIT "Truncating memory at 0x%08llx to fit in "
-			"32-bit physical address space\n", (long long)start);
+		pr_crit("Truncating memory at 0x%08llx to fit in 32-bit physical address space\n",
+			(long long)start);
 		/*
 		 * To ensure bank->start + bank->size is representable in
 		 * 32 bits, we use ULONG_MAX as the upper limit rather than 4GB.
@@ -686,6 +686,20 @@ int __init arm_add_memory(u64 start, u64 size)
 		size = ULONG_MAX - aligned_start;
 	}
 #endif
+
+	if (aligned_start < PHYS_OFFSET) {
+		if (aligned_start + size <= PHYS_OFFSET) {
+			pr_info("Ignoring memory below PHYS_OFFSET: 0x%08llx-0x%08llx\n",
+				aligned_start, aligned_start + size);
+			return -EINVAL;
+		}
+
+		pr_info("Ignoring memory below PHYS_OFFSET: 0x%08llx-0x%08llx\n",
+			aligned_start, (u64)PHYS_OFFSET);
+
+		size -= PHYS_OFFSET - aligned_start;
+		aligned_start = PHYS_OFFSET;
+	}
 
 	bank->start = aligned_start;
 	bank->size = size & ~(phys_addr_t)(PAGE_SIZE - 1);
@@ -751,7 +765,7 @@ static void __init request_standard_resources(const struct machine_desc *mdesc)
 #endif
 
 	for_each_memblock(memory, region) {
-		res = alloc_bootmem_low(sizeof(*res));
+		res = memblock_virt_alloc(sizeof(*res), 0);
 		res->name  = "System RAM";
 #ifdef CONFIG_L4
 		res->start = virt_to_phys(pfn_to_kaddr(memblock_region_memory_base_pfn(region)));
@@ -856,18 +870,17 @@ static void __init reserve_crashkernel(void)
 	if (ret)
 		return;
 
-	ret = reserve_bootmem(crash_base, crash_size, BOOTMEM_EXCLUSIVE);
+	ret = memblock_reserve(crash_base, crash_size);
 	if (ret < 0) {
-		printk(KERN_WARNING "crashkernel reservation failed - "
-		       "memory is in use (0x%lx)\n", (unsigned long)crash_base);
+		pr_warn("crashkernel reservation failed - memory is in use (0x%lx)\n",
+			(unsigned long)crash_base);
 		return;
 	}
 
-	printk(KERN_INFO "Reserving %ldMB of memory at %ldMB "
-	       "for crashkernel (System RAM: %ldMB)\n",
-	       (unsigned long)(crash_size >> 20),
-	       (unsigned long)(crash_base >> 20),
-	       (unsigned long)(total_mem >> 20));
+	pr_info("Reserving %ldMB of memory at %ldMB for crashkernel (System RAM: %ldMB)\n",
+		(unsigned long)(crash_size >> 20),
+		(unsigned long)(crash_base >> 20),
+		(unsigned long)(total_mem >> 20));
 
 	crashk_res.start = crash_base;
 	crashk_res.end = crash_base + crash_size - 1;
@@ -901,18 +914,51 @@ void __init hyp_mode_check(void)
 #endif
 }
 
+#ifdef CONFIG_L4
+static void __init setup_arch_l4x_mem(void)
+{
+	unsigned long mem_start, mem_size;
+	l4x_setup_memory(boot_command_line, &mem_start, &mem_size);
+
+	if (((unsigned long)_stext & ((1UL << 20) - 1))
+	    || (((unsigned long)_end - (unsigned long)_stext)
+		& ((1UL << 20) - 1)))
+		BUG();
+	/*
+	 * We need to have a start aligned to (1 << MAX_ORDER), so
+	 * we need a have something at 0 if we have our .text at
+	 * 0x100000 (see mm/page_alloc.c:alloc_node_mem_map()).
+	 * Other approach: put .text to (1 << (MAX_ORDER +
+	 * PAGE_SHIFT)) and memory behind that, but that would
+	 * require that we fill out everything before.
+	 * Maybe we should set PHYS_OFFSET > 0...
+	 */
+	arm_add_memory(0, PAGE_SIZE);
+	arm_add_memory((unsigned long)_stext,
+		       (unsigned long)_end - (unsigned long)_stext);
+	arm_add_memory(mem_start, mem_size);
+}
+#endif
+
 void __init setup_arch(char **cmdline_p)
 {
 	const struct machine_desc *mdesc;
 
+#ifdef CONFIG_L4
+	setup_arch_l4x_mem();
+
+	__machine_arch_type = machine_arch_type;
+#ifdef CONFIG_OF
+	if (!__atags_pointer)
+		__atags_pointer = (unsigned)l4x_load_dtb(boot_command_line,
+		                                         0x100);
+#endif
+#endif
+
 	setup_processor();
 	mdesc = setup_machine_fdt(__atags_pointer);
 	if (!mdesc)
-#ifdef CONFIG_L4
-		mdesc = setup_machine_tags(__atags_pointer, machine_arch_type);
-#else
 		mdesc = setup_machine_tags(__atags_pointer, __machine_arch_type);
-#endif
 	machine_desc = mdesc;
 	machine_name = mdesc->name;
 
@@ -923,29 +969,6 @@ void __init setup_arch(char **cmdline_p)
 	init_mm.end_code   = (unsigned long) _etext;
 	init_mm.end_data   = (unsigned long) _edata;
 	init_mm.brk	   = (unsigned long) _end;
-
-	{
-		unsigned long mem_start, mem_size;
-		l4x_setup_memory(boot_command_line, &mem_start, &mem_size);
-
-		if (((unsigned long)_stext & ((1UL << 20) - 1))
-		    || (((unsigned long)_end - (unsigned long)_stext)
-		        & ((1UL << 20) - 1)))
-			BUG();
-		/*
-		 * We need to have a start aligned to (1 << MAX_ORDER), so
-		 * we need a have something at 0 if we have our .text at
-		 * 0x100000 (see mm/page_alloc.c:alloc_node_mem_map()).
-		 * Other approach: put .text to (1 << (MAX_ORDER +
-		 * PAGE_SHIFT)) and memory behind that, but that would
-		 * require that we fill out everything before.
-		 * Maybe we should set PHYS_OFFSET > 0...
-		 */
-		arm_add_memory(0, PAGE_SIZE);
-		arm_add_memory((unsigned long)_stext,
-		               (unsigned long)_end - (unsigned long)_stext);
-		arm_add_memory(mem_start, mem_size);
-	}
 
 	/* populate cmd_line too for later use, preserving boot_command_line */
 	strlcpy(cmd_line, boot_command_line, COMMAND_LINE_SIZE);
@@ -967,7 +990,7 @@ void __init setup_arch(char **cmdline_p)
 		arm_pm_restart = mdesc->restart;
 
 #ifdef CONFIG_L4
-	reserve_bootmem(0, PAGE_SIZE, BOOTMEM_DEFAULT);
+	memblock_reserve(0, PAGE_SIZE);
 #endif
 
 	unflatten_device_tree();

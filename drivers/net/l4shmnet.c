@@ -90,6 +90,28 @@ static inline int chunk_size(l4shmc_area_t *s)
 	       l4shmc_chunk_overhead();
 }
 
+enum { Min_mtu_size = 100, Max_mtu_size = 65535, };
+
+static inline int default_mtu_value(void)
+{
+	enum { Default_mtu_pages = 2 };
+	return Default_mtu_pages * PAGE_SIZE -
+	       (SMP_CACHE_BYTES + NET_SKB_PAD
+	        + NET_IP_ALIGN + 2 * sizeof(struct sk_buff));
+}
+
+static int max_mtu(struct net_device *netdev)
+{
+	struct l4x_l4shmc_priv *priv = netdev_priv(netdev);
+	int max_chunk = min(l4shmc_chunk_capacity(&priv->rx_chunk),
+	                    l4shmc_chunk_capacity(&priv->tx_chunk));
+
+	if (max_chunk < Min_mtu_size)
+		return Min_mtu_size;
+
+	return max_chunk > Max_mtu_size ? Max_mtu_size : max_chunk;
+}
+
 static int init_dev_self(struct net_device *dev)
 {
 	struct l4x_l4shmc_priv *priv = netdev_priv(dev);
@@ -98,10 +120,10 @@ static int init_dev_self(struct net_device *dev)
 
 	snprintf(myname, sizeof(myname), "%pm", dev->dev_addr);
 
-	if ((ret = l4shmc_add_chunk(&priv->shmcarea, myname,
-	                            chunk_size(&priv->shmcarea),
-	                            &priv->rx_chunk))) {
-		if (ret != -L4_EEXIST) {
+	if ((ret = L4XV_FN_i(l4shmc_add_chunk(&priv->shmcarea, myname,
+	                                      chunk_size(&priv->shmcarea),
+	                                      &priv->rx_chunk)))) {
+		if (ret != -EEXIST) {
 			dev_warn(&dev->dev, "l4shmnet: Can't create chunk: %d", ret);
 			return ret;
 		}
@@ -120,10 +142,12 @@ static int init_dev_self(struct net_device *dev)
 	 */
 	l4shmc_chunk_consumed(&priv->rx_chunk);
 
-	if ((ret = l4shmc_add_signal(&priv->shmcarea, myname, &priv->rx_sig)))
+	if ((ret = L4XV_FN_i(l4shmc_add_signal(&priv->shmcarea, myname,
+	                                       &priv->rx_sig))))
 		return ret;
 
-	if ((ret = l4shmc_connect_chunk_signal(&priv->rx_chunk, &priv->rx_sig)))
+	if ((ret = L4XV_FN_i(l4shmc_connect_chunk_signal(&priv->rx_chunk,
+	                                                 &priv->rx_sig))))
 		return ret;
 
 	return 0;
@@ -137,52 +161,48 @@ static int init_dev_other(struct net_device *dev)
 	const char *ptr;
 	long offs = 0;
 	int ret;
-	L4XV_V(f);
 
 	othername[0] = '\0';
 	snprintf(myname, sizeof(myname), "%pm", dev->dev_addr);
-	L4XV_L(f);
-	while ((offs = l4shmc_iterate_chunk(&priv->shmcarea, &ptr, offs)) > 0) {
+	while ((offs = L4XV_FN_l(l4shmc_iterate_chunk(&priv->shmcarea, &ptr, offs))) > 0) {
 		if (strncmp(ptr, myname, sizeof(myname)) != 0) {
 			strncpy(othername, ptr, sizeof(othername));
-			if (othername[sizeof(othername)-1] != '\0') {
+			if (othername[sizeof(othername)-1] != '\0')
 				/* name too long or invalid */
-				L4XV_U(f);
-				return -L4_EIO;
-			}
+				return -EIO;
 		}
 	}
-	if (offs < 0) {
-		L4XV_U(f);
+	if (offs < 0)
 		return offs;
-	}
-	if (!othername[0]) {
-		L4XV_U(f);
-		return -L4_EAGAIN;
-	}
 
-	if ((ret = l4shmc_get_chunk(&priv->shmcarea, othername,
-				    &priv->tx_chunk))) {
-		L4XV_U(f);
-		return ret;
-	}
+	if (!othername[0])
+		return -EAGAIN;
 
-	if ((ret = l4shmc_get_signal_to(&priv->shmcarea, othername,
-					WAIT_TIMEOUT, &priv->tx_sig))) {
-		L4XV_U(f);
+	if ((ret = L4XV_FN_i(l4shmc_get_chunk(&priv->shmcarea, othername,
+				              &priv->tx_chunk))))
 		return ret;
-	}
+
+	if ((ret = L4XV_FN_i(l4shmc_get_signal_to(&priv->shmcarea,
+	                                          othername,
+	                                          WAIT_TIMEOUT,
+	                                          &priv->tx_sig))))
+		return ret;
 
 	l4shm_buf_init(&priv->sb, l4shmc_chunk_ptr(&priv->rx_chunk),
-				l4shmc_chunk_capacity(&priv->rx_chunk),
-				l4shmc_chunk_ptr(&priv->tx_chunk),
-				l4shmc_chunk_capacity(&priv->tx_chunk));
+	                          l4shmc_chunk_capacity(&priv->rx_chunk),
+	                          l4shmc_chunk_ptr(&priv->tx_chunk),
+	                          l4shmc_chunk_capacity(&priv->tx_chunk));
+
+	if (netif_device_present(dev)
+	    && (ret = dev_set_mtu(dev, min(max_mtu(dev), default_mtu_value()))))
+		pr_warn("l4shmnet: Failed to adapt MTU: %d\n", ret);
 
 	priv->remote_attached = 1;
-	l4shmc_trigger(&priv->tx_sig);
-	L4XV_U(f);
-	dev_info(&dev->dev, "%s: L4ShmNet established, with %pM, IRQ %d\n",
-	         dev->name, dev->dev_addr, dev->irq);
+	L4XV_FN_v(l4shmc_trigger(&priv->tx_sig));
+
+	dev_info(&dev->dev, "L4ShmNet established, with %pM, IRQ %d\n",
+	         dev->dev_addr, dev->irq);
+
 	return 0;
 }
 
@@ -212,10 +232,9 @@ static int l4x_l4shmc_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 {
 	struct l4x_l4shmc_priv *priv = netdev_priv(netdev);
 	int ret;
-	L4XV_V(f);
 
 	ret = l4shm_buf_tx(&priv->sb, skb->data, skb->len);
-	if (ret == -L4_EAGAIN) {
+	if (ret == -EAGAIN) {
 		netif_stop_queue(netdev);
 		return 1;
 	}
@@ -223,10 +242,7 @@ static int l4x_l4shmc_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 
 	wmb();
 
-	L4XV_L(f);
-	l4shmc_trigger(&priv->tx_sig);
-	L4XV_U(f);
-
+	L4XV_FN_v(l4shmc_trigger(&priv->tx_sig));
 
 	netdev->trans_start = jiffies;
 	priv->net_stats.tx_packets++;
@@ -289,6 +305,7 @@ static irqreturn_t l4x_l4shmc_interrupt(int irq, void *dev_id)
 		ret = l4shm_buf_rx(&priv->sb, p, len);
 		/* XXX: check errors */
 		skb->protocol = eth_type_trans(skb, netdev);
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
 		netif_rx(skb);
 
 		netdev->last_rx = jiffies;
@@ -296,12 +313,9 @@ static irqreturn_t l4x_l4shmc_interrupt(int irq, void *dev_id)
 		priv->net_stats.rx_packets++;
 	}
 
-	if (len == -L4_EAGAIN) {
-		L4XV_V(f);
-		L4XV_L(f);
-		l4shmc_trigger(&priv->tx_sig);
-		L4XV_U(f);
-	}
+	if (len == -EAGAIN)
+		L4XV_FN_v(l4shmc_trigger(&priv->tx_sig));
+
 	/* XXX: handle other errors */
 
 	return IRQ_HANDLED;
@@ -311,7 +325,6 @@ static int l4x_l4shmc_open(struct net_device *netdev)
 {
 	struct l4x_l4shmc_priv *priv = netdev_priv(netdev);
 	int err;
-	L4XV_V(f);
 
 	netif_carrier_off(netdev);
 
@@ -324,9 +337,7 @@ static int l4x_l4shmc_open(struct net_device *netdev)
 	}
 
 	l4shmc_chunk_ready(&priv->rx_chunk, 0);
-	L4XV_L(f);
-	l4shmc_trigger(&priv->tx_sig);
-	L4XV_U(f);
+	L4XV_FN_v(l4shmc_trigger(&priv->tx_sig));
 	if (!priv->remote_attached)
 		init_dev_other(netdev);
 	update_carrier(netdev);
@@ -337,13 +348,10 @@ static int l4x_l4shmc_open(struct net_device *netdev)
 static int l4x_l4shmc_close(struct net_device *netdev)
 {
 	struct l4x_l4shmc_priv *priv = netdev_priv(netdev);
-	L4XV_V(f);
 
 	free_irq(netdev->irq, netdev);
 	l4shmc_chunk_consumed(&priv->rx_chunk);
-	L4XV_L(f);
-	l4shmc_trigger(&priv->tx_sig);
-	L4XV_U(f);
+	L4XV_FN_v(l4shmc_trigger(&priv->tx_sig));
 	update_carrier(netdev);
 
 	return 0;
@@ -351,11 +359,7 @@ static int l4x_l4shmc_close(struct net_device *netdev)
 
 static int l4x_l4shmc_change_mtu(struct net_device *netdev, int new_mtu)
 {
-	struct l4x_l4shmc_priv *priv = netdev_priv(netdev);
-	int max_mtu = min(l4shmc_chunk_capacity(&priv->rx_chunk),
-			  l4shmc_chunk_capacity(&priv->tx_chunk)) - 100;
-
-	if (new_mtu > max_mtu)
+	if (new_mtu < Min_mtu_size || new_mtu > max_mtu(netdev))
 		return -EINVAL;
 
 	netdev->mtu = new_mtu;
@@ -368,7 +372,6 @@ static const struct net_device_ops l4shmnet_netdev_ops = {
 	.ndo_stop       = l4x_l4shmc_close,
 	.ndo_change_mtu = l4x_l4shmc_change_mtu,
 	.ndo_get_stats  = l4x_l4shmc_get_stats,
-
 };
 
 static int __init l4x_l4shmnet_init_dev(int num)
@@ -378,7 +381,6 @@ static int __init l4x_l4shmnet_init_dev(int num)
 	struct l4x_l4shmc_netdev *nd = NULL;
 	const char *name = devs_to_add_name[num];
 	int err, ret;
-	L4XV_V(f);
 
 	if (shmsize < PAGE_SIZE)
 		shmsize = PAGE_SIZE;
@@ -394,6 +396,9 @@ static int __init l4x_l4shmnet_init_dev(int num)
 	dev->dev_addr[4] = 0xcf;
 	dev->dev_addr[5] = devs_to_add_macpart[num];
 
+	dev->hw_features |= NETIF_F_HW_CSUM | NETIF_F_RXCSUM;
+	dev->features    |= NETIF_F_HW_CSUM | NETIF_F_RXCSUM;
+
 	priv = netdev_priv(dev);
 	priv->num = num;
 	priv->link_up = 0;
@@ -401,24 +406,20 @@ static int __init l4x_l4shmnet_init_dev(int num)
 
 	pr_info("%s: Requesting, Shmsize %d Kbytes\n", name, shmsize >> 10);
 
-	L4XV_L(f);
 	err = -ENOMEM;
-	if ((ret = l4shmc_create(name, shmsize)) < 0) {
-		if (ret != -L4_EEXIST)
-			goto err_out_free_dev_unlock;
+	if ((ret = L4XV_FN_i(l4shmc_create(name, shmsize))) < 0) {
+		if (ret != -EEXIST)
+			goto err_out_free_dev;
 	}
 
 	// we block very long here, don't do that
-	if (l4shmc_attach_to(name, WAIT_TIMEOUT, &priv->shmcarea))
-		goto err_out_free_dev_unlock;
+	if (L4XV_FN_i(l4shmc_attach_to(name, WAIT_TIMEOUT, &priv->shmcarea)))
+		goto err_out_free_dev;
 
 	ret = init_dev_self(dev);
 	if (ret < 0) {
-		/* XXX: convert error code */
-		goto err_out_free_dev_unlock;
+		goto err_out_free_dev;
 	}
-
-	L4XV_U(f);
 
 	if ((err = l4x_register_irq(l4shmc_signal_cap(&priv->rx_sig))) < 0) {
 		pr_err("l4shmnet: Failed to get virq: %d\n", err);
@@ -426,31 +427,32 @@ static int __init l4x_l4shmnet_init_dev(int num)
 	}
 	dev->irq = err;
 
-	dev->mtu = 1500;
-
 	if ((err = register_netdev(dev))) {
 		pr_err("l4shmnet: Cannot register net device, aborting.\n");
-		goto err_out_free_dev;
+		goto err_out_irq;
 	}
+
+	dev->mtu = default_mtu_value();
+	ret = init_dev_other(dev);
+	if (ret < 0 && ret != -EAGAIN)
+		goto err_out_netdev;
 
 	nd = kmalloc(sizeof(struct l4x_l4shmc_netdev), GFP_KERNEL);
 	if (!nd) {
 		pr_err("l4shmnet: Out of memory.\n");
-		goto err_out_free_dev;
+		goto err_out_netdev;
 	}
 	nd->dev = dev;
 	list_add(&nd->list, &l4x_l4shmnet_netdevices);
 
-	ret = init_dev_other(dev);
-	if (ret < 0 && ret != -L4_EAGAIN) {
-		/* XXX: convert error code */
-		goto err_out_free_dev;
-	}
-
 	return 0;
 
-err_out_free_dev_unlock:
-	L4XV_U(f);
+err_out_netdev:
+	unregister_netdev(dev);
+
+err_out_irq:
+	l4x_unregister_irq(dev->irq);
+
 err_out_free_dev:
 	pr_info("%s: Failed to establish communication\n", name);
 	free_netdev(dev);

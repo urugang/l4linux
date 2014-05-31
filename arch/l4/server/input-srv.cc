@@ -8,8 +8,10 @@
 #include <asm/server/server.h>
 #include <asm/server/input-srv.h>
 
+#include <asm/server/util.h>
+
 class Input : public L4Re::Util::Event_svr<Input>,
-              public l4x_srv_object
+              public l4x_srv_object_tmpl<Input>
 {
 public:
 	l4x_input_srv_ops *ops;
@@ -35,24 +37,7 @@ private:
 int
 Input::init()
 {
-	L4Re::Util::Auto_cap<L4Re::Dataspace>::Cap b
-		= L4Re::Util::cap_alloc.alloc<L4Re::Dataspace>();
-	if (!b.is_valid())
-		return -L4_ENOMEM;
-
-	int r;
-	if ((r = L4Re::Env::env()->mem_alloc()->alloc(L4_PAGESIZE, b.get())) < 0)
-		return r;
-
-	if ((r = _evbuf.attach(b.get(), L4Re::Env::env()->rm())) < 0)
-		return r;
-
-	memset(_evbuf.buf(), 0, b.get()->size());
-
-	_ds  = b.release();
-
-	l4x_srv_object::dispatch = &l4x_srv_generic_dispatch<Input>;
-	return 0;
+	return L4x_server_util::get_event_buffer(L4_PAGESIZE, &_evbuf, &_ds);
 }
 
 void

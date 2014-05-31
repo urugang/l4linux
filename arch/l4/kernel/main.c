@@ -180,11 +180,6 @@ void ia32_sysenter_target(void) {}
 l4_utcb_t *l4x_utcb_pointer[L4X_UTCB_POINTERS];
 #endif /* x86 */
 
-#ifdef ARCH_arm
-unsigned long cr_alignment;
-unsigned long cr_no_alignment;
-#endif
-
 unsigned int  l4x_nr_cpus = 1;
 struct l4x_cpu_physmap_struct
 {
@@ -689,7 +684,8 @@ int l4x_detach_and_free_ds(l4_cap_idx_t dscap, void *addr)
 		return r;
 	}
 
-	if ((r = L4XV_FN_i(l4_error(l4_task_delete_obj(L4RE_THIS_TASK_CAP, dscap))))) {
+	if ((r = L4XV_FN_i(l4_error(l4_task_delete_obj(L4RE_THIS_TASK_CAP,
+	                                               dscap))))) {
 		LOG_printf("Failed to release/unmap cap: %d\n", r);
 	}
 
@@ -1194,33 +1190,22 @@ void __init l4x_setup_memory(char *cmdl,
 
 	if ((str = strstr(cmdl, "mem="))) {
 		str += 4;
-		i = 0;
-		while (1) {
+		while (num_mem_chunk < ARRAY_SIZE(mem_chunk_sz)) {
 			res = memparse(str, &str);
-			if (res) {
-				if (mem_chunk_sz[i] == 0)
-					mem_chunk_sz[i] = res;
-				i++;
-			}
-
-			if (i == ARRAY_SIZE(mem_chunk_sz))
-				break;
+			if (res)
+				mem_chunk_sz[num_mem_chunk++] = res;
 
 			if (*str == ',' || *str == '+')
 				str++;
 			else
 				break;
 		}
-
-		if (i > num_mem_chunk)
-			num_mem_chunk = i;
 	}
 
-	if (num_mem_chunk == 0)
-		num_mem_chunk = 1;
-
-	if (mem_chunk_sz[0] == 0)
+	if (num_mem_chunk == 0) {
 		mem_chunk_sz[0] = CONFIG_L4_MEMSIZE << 20;
+		num_mem_chunk = 1;
+	}
 
 	l4x_mainmem_size = 0;
 	for (i = 0; i < num_mem_chunk; ++i)
@@ -1903,12 +1888,6 @@ void l4x_smp_process_IPI(int vector, struct pt_regs *regs)
 		return;
 	}
 
-	if (vector == L4X_TIMER_VECTOR) {
-		extern void l4x_smp_timer_interrupt(struct pt_regs *regs);
-		l4x_smp_timer_interrupt(regs);
-		return;
-	}
-
 	LOG_printf("Spurious IPI on CPU%d: %x\n", smp_processor_id(), vector);
 	return;
 }
@@ -2172,6 +2151,9 @@ static L4_CV void __init cpu0_startup(void *data)
 #endif
 }
 
+enum { L4X_PATH_BUF_SIZE = 200 };
+static char l4x_path_buf[L4X_PATH_BUF_SIZE];
+
 #ifdef CONFIG_BLK_DEV_INITRD
 static l4re_ds_t l4x_initrd_ds;
 static unsigned long l4x_initrd_mem_start;
@@ -2228,18 +2210,26 @@ void l4x_free_initrd_mem(void)
 		return;
 
 	printk("INITRD: Freeing memory.\n");
-	/* detach memory */
-	if ((r = L4XV_FN_i(l4re_rm_detach((void *)l4x_initrd_mem_start))))
+
+	if ((r = L4XV_FN_i(l4re_rm_detach((void *)l4x_initrd_mem_start)))) {
 		pr_err("l4x: Error detaching from initrd mem (%d)!", r);
+		return;
+	}
+
+	r = L4XV_FN_i(l4_error(l4_task_release_cap(L4_BASE_TASK_CAP,
+	                                           l4x_initrd_ds)));
+	if (r) {
+		pr_err("l4x: Error releasing initrd dataspace\n");
+		return;
+	}
+
+	l4x_cap_free(l4x_initrd_ds);
 }
 
 
-#define L4X_MAX_RD_PATH 200
-static char l4x_rd_path[L4X_MAX_RD_PATH];
-
-void l4x_load_initrd(char *command_line)
+void __init l4x_load_initrd(const char *command_line)
 {
-	char *sa, *se;
+	const char *sa, *se;
 	char param_str[] = "l4x_rd=";
 	int i, b;
 
@@ -2257,18 +2247,18 @@ void l4x_load_initrd(char *command_line)
 
 		while (*se && *se != ' ')
 			se++;
-		if (se - sa > L4X_MAX_RD_PATH) {
-			enter_kdebug("l4x_rd_path > L4X_MAX_RD_PATH");
+		if (se - sa > L4X_PATH_BUF_SIZE - 1) {
+			enter_kdebug("l4x_rd too big to store");
 			return;
 		}
-		strncpy(l4x_rd_path, sa, se - sa);
-		LOG_printf("l4x_rd_path: %s\n", l4x_rd_path);
+		strncpy(l4x_path_buf, sa, se - sa);
+		l4x_path_buf[se - sa] = 0;
 	}
 
-	if (*l4x_rd_path) {
-		LOG_printf("Loading: %s\n", l4x_rd_path);
+	if (*l4x_path_buf) {
+		LOG_printf("Loading: %s\n", l4x_path_buf);
 
-		if (fprov_load_initrd(l4x_rd_path,
+		if (fprov_load_initrd(l4x_path_buf,
 		                      &initrd_start,
 		                      &initrd_end)) {
 			LOG_flush();
@@ -2278,14 +2268,66 @@ void l4x_load_initrd(char *command_line)
 
 		initrd_below_start_ok = 1;
 
-		//reserve_bootmem(initrd_start, initrd_end - initrd_start);
-
 		LOG_printf("RAMdisk from %08lx to %08lx [%ldKiB]\n",
 		           initrd_start, initrd_end,
 		           (initrd_end - initrd_start) >> 10);
 	}
 }
 #endif /* CONFIG_BLK_DEV_INITRD */
+
+#ifdef CONFIG_OF
+unsigned long __init l4x_load_dtb(const char *cmdline,
+                                  unsigned long mainmem_offset)
+{
+	char *p, *e;
+	int ret;
+	l4re_ds_t ds;
+	void *dtb;
+	l4re_ds_stats_t dsstat;
+	unsigned long phys;
+	char *virt;
+
+	if (!(p = strstr(cmdline, "l4x_dtb=")))
+		return 0;
+
+	p += 8;
+	e = p;
+	while (*e && !isspace(*e))
+		++e;
+
+	if (e - p > L4X_PATH_BUF_SIZE - 1) {
+		pr_err("L4x: DTB path too long\n");
+		return 0;
+	}
+
+	strncpy(l4x_path_buf, p, e - p);
+	l4x_path_buf[e - p] = 0;
+
+	if ((ret = l4x_query_and_get_ds(l4x_path_buf, "dtb", &ds,
+	                                &dtb, &dsstat))) {
+		pr_err("L4x: Failed to get '%s': %d\n", l4x_path_buf, ret);
+		return 0;
+	}
+
+	if (mainmem_offset + dsstat.size >= l4x_mainmem_size) {
+		pr_err("DTB: size mismatch\n");
+		return 0;
+	}
+
+	virt = (char *)l4x_main_memory_start + mainmem_offset;
+
+	memcpy(virt, dtb, dsstat.size);
+
+	l4x_detach_and_free_ds(ds, dtb);
+
+	phys = virt_to_phys((char *)l4x_main_memory_start + mainmem_offset);
+
+	pr_info("DTB: virt=%p phys=%lx\n", virt, phys);
+
+	return phys;
+}
+#endif
+
 
 static void get_initial_cpu_capabilities(void)
 {
@@ -2372,7 +2414,7 @@ static void l4x_scan_hw_resources(void)
 
 		while (!l4io_lookup_resource(dh, L4IO_RESOURCE_ANY,
 					     &reshandle, &res)) {
-			char *t = "undef";
+			const char *t = "undef";
 
 			switch (res.type) {
 				case L4IO_RESOURCE_IRQ:  t = "IRQ";  break;
@@ -3477,18 +3519,6 @@ void exit(int code)
 	LOG_printf("Still alive, going zombie???\n");
 	l4_sleep_forever();
 }
-
-/* -------------------------------------------------- */
-/*   Maybe for l4util                                 */
-
-/**
- * Set the PC of a thread, leaving the SP where it is.
- */
-void l4x_thread_set_pc(l4_cap_idx_t thread, void *pc)
-{
-	l4_thread_ex_regs(thread, (l4_umword_t)pc, ~0UL, 0);
-}
-
 
 /* -------------------------------------------------- */
 

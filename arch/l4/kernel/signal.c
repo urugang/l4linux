@@ -7,7 +7,7 @@
 #include <l4/sys/kdebug.h>
 
 #if defined(CONFIG_X86)
-int l4x_deliver_signal(int exception_nr, int errcode)
+int l4x_deliver_signal(int exception_nr)
 {
 	siginfo_t info;
 
@@ -26,7 +26,7 @@ int l4x_deliver_signal(int exception_nr, int errcode)
 	return 0;
 }
 #elif defined(ARCH_arm)
-int l4x_deliver_signal(int exception_nr, int errcode)
+int l4x_deliver_signal(int exception_nr)
 {
 	siginfo_t info;
 

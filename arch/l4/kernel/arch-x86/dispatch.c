@@ -248,7 +248,7 @@ asm(
 void l4x_idle(void);
 #endif
 
-int  l4x_deliver_signal(int exception_nr, int error_code);
+int  l4x_deliver_signal(int exception_nr);
 
 DEFINE_PER_CPU(struct thread_info *, l4x_current_ti) = &init_thread_info;
 DEFINE_PER_CPU(struct thread_info *, l4x_current_proc_run);
@@ -382,6 +382,7 @@ static inline void utcb_to_thread_struct(l4_utcb_t *utcb,
 {
 	l4_exc_regs_t *exc = l4_utcb_exc_u(utcb);
 	utcb_exc_to_ptregs(exc, task_pt_regs(p));
+	task_pt_regs(p)->cs = USER_RPL;
 	t->gs         = exc->gs;
 	t->trap_nr    = exc->trapno;
 	t->error_code = exc->err;
@@ -491,11 +492,16 @@ static inline void dispatch_system_call(struct task_struct *p,
 #endif
 }
 
-static void
+static unsigned
 l4x_pre_iret_work(struct pt_regs *regs, struct task_struct *p,
-                  unsigned long scno, void *dummy)
+                  unsigned long scno, void *dummy,
+                  unsigned kernel_context)
 {
 	unsigned long tifl;
+	unsigned was_interruptible = 0;
+
+	if (kernel_context)
+		goto from_kernel_context;
 
 resume_userspace:
 	local_irq_disable();
@@ -512,6 +518,7 @@ work_pending:
 
 work_resched:
 	schedule();
+	was_interruptible = 1;
 
 	local_irq_disable();
 
@@ -523,8 +530,10 @@ work_resched:
 
 work_notifysig:
 	local_irq_enable();
+	was_interruptible = 1;
 
 	if ((regs->cs & SEGMENT_RPL_MASK) < USER_RPL)
+from_kernel_context:
 #ifdef CONFIG_PREEMPT
 		goto resume_kernel;
 #else
@@ -536,7 +545,7 @@ work_notifysig:
 
 restore_all:
 
-	return;
+	return was_interruptible;
 
 #ifdef CONFIG_PREEMPT
 resume_kernel:
@@ -554,6 +563,7 @@ need_resched:
 		goto restore_all;
 
 	preempt_schedule_irq();
+	was_interruptible = 1;
 
 	goto need_resched;
 #endif
@@ -740,18 +750,15 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		regs->ip += 2;
 
 		dispatch_system_call(p, regs);
-		l4x_pre_iret_work(regs, p, 0, 0);
 
 		BUG_ON(p != current);
 
 		return 0;
 	} else if (trapno == 7) {
 		do_device_not_available(regs, -1);
-		l4x_pre_iret_work(regs, p, 0, 0);
 		return 0;
 	} else if (unlikely(trapno == 1)) {
 		do_debug(regs, 0);
-		l4x_pre_iret_work(regs, p, 0, 0);
 		return 0;
 	} else if (trapno == 0xd) {
 #ifndef CONFIG_L4_VCPU
@@ -765,7 +772,6 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		if (l4x_kdebug_emulation(regs))
 			return 0; /* known and handled */
 		do_int3(regs, err);
-		l4x_pre_iret_work(regs, p, 0, 0);
 		return 0;
 	}
 
@@ -774,7 +780,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 
 	TBUF_LOG_EXCP(fiasco_tbuf_log_3val("except ", TBUF_TID(t->user_thread_id), t->trap_nr, t->error_code));
 
-	if (l4x_deliver_signal(trapno, err))
+	if (l4x_deliver_signal(trapno))
 		return 0; /* handled signal, reply */
 
 	/* This path should never be reached... */
@@ -787,7 +793,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	/* The task somehow misbehaved, so it has to die */
 	do_exit(SIGKILL);
 
-	return 1; /* no reply -- no come back */
+	return 0;
 }
 
 static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,

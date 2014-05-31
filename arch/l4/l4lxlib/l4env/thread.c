@@ -157,8 +157,20 @@ static void l4lx_thread_ku_alloc_free_v(void *k)
 
 int l4lx_thread_start(struct l4lx_thread_start_info_t *s)
 {
-	l4_msgtag_t res = l4_thread_ex_regs(s->l4cap, s->ip, s->sp, 0);
-	return l4_error(res);
+	l4_sched_param_t schedp = l4_sched_param(s->prio, 0);
+	l4_msgtag_t res;
+
+	schedp.affinity = l4_sched_cpu_set(s->pcpu, 0, 1);
+
+	res = l4_scheduler_run_thread(l4re_env()->scheduler,
+	                              s->l4cap, &schedp);
+	if (l4_error(res)) {
+		LOG_printf("l4lx: Failed to set pcpu%d of thread (%lx): %ld\n",
+		           s->pcpu, s->l4cap >> L4_CAP_SHIFT, l4_error(res));
+		return l4_error(res);
+	}
+
+	return l4_error(l4_thread_ex_regs(s->l4cap, s->ip, s->sp, 0));
 }
 EXPORT_SYMBOL(l4lx_thread_start);
 
@@ -193,7 +205,6 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
                                  const char *name,
                                  struct l4lx_thread_start_info_t *deferstart)
 {
-	l4_sched_param_t schedp;
 	l4_msgtag_t res;
 	struct l4lx_thread_start_info_t si_buf, *si;
 #ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
@@ -290,16 +301,6 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 	}
 #endif
 
-	schedp = l4_sched_param(prio, 0);
-	schedp.affinity = l4_sched_cpu_set(l4x_cpu_physmap_get_id(vcpu), 0, 1);
-
-	res = l4_scheduler_run_thread(l4re_env()->scheduler, l4cap, &schedp);
-	if (l4_error(res)) {
-		LOG_printf("%s: Failed to set cpu%d of thread '%s': %ld.\n",
-		           __func__, vcpu, name, l4_error(res));
-		goto out_free_vcpu;
-	}
-
 	LOG_printf("%s: Created thread " PRINTF_L4TASK_FORM " (%s) "
 	           "(u:%08lx, "
 #if defined(CONFIG_L4_VCPU) || defined(CONFIG_KVM)
@@ -317,6 +318,8 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 
 	si->l4cap = l4cap;
 	si->sp    = (l4_umword_t)sp;
+	si->prio  = prio;
+	si->pcpu  = l4x_cpu_physmap_get_id(vcpu);
 #if defined(ARCH_arm) || defined(ARCH_amd64)
 	si->ip    = (l4_umword_t)__thread_launch;
 #else

@@ -16,14 +16,15 @@ void l4x_v2p_add_item(l4_addr_t phys, void *virt, l4_size_t size);
 unsigned long l4x_v2p_del_item(void *virt);
 
 void l4x_free_initrd_mem(void);
-void l4x_load_initrd(char *command_line);
-void l4x_l4io_init(void);
+void __init l4x_load_initrd(const char *command_line);
+#ifdef CONFIG_OF
+unsigned long __init l4x_load_dtb(const char *command_line,
+                                  unsigned long offset);
+#endif
 
 void l4x_prepare_irq_thread(struct thread_info *ti, unsigned _cpu);
 
 void __attribute__((noreturn)) l4x_exit_l4linux(void);
-
-void l4x_thread_set_pc(l4_cap_idx_t thread, void *pc);
 
 int atexit(void (*f)(void));
 

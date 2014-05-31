@@ -22,6 +22,8 @@
 struct l4lx_thread_start_info_t {
 	l4_cap_idx_t l4cap;
 	l4_umword_t ip, sp;
+	u16 pcpu;
+	u16 prio;
 };
 
 /**

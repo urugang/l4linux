@@ -5,7 +5,7 @@
 obj-y		:= dispatch.o entry.o ioport.o \
 		   ldt.o pci-dma.o pci-nommu.o process.o process_$(BITS).o ptrace.o reboot.o \
 		   setup.o signal.o time.o traps.o e820.o \
-		   unimpl.o topology.o alternative.o tsc.o \
+		   unimpl.o topology.o alternative.o tsc.o tsc_msr.o \
 		   tls.o step.o rtc.o io_delay.o memory.o \
 		   kdebugfs.o x86_init.o i8259.o
 
@@ -26,6 +26,7 @@ obj-y				+= probe_roms.o
 obj-y			+= syscall_$(BITS).o
 obj-$(CONFIG_X86_64)	+= vsyscall_64.o
 obj-$(CONFIG_X86_64)	+= vsyscall_emu_64.o
+obj-$(CONFIG_SYSFS)	+= ksysfs.o
 obj-$(CONFIG_X86_64)            += sys_x86_64.o #x8664_ksyms_64.o
 obj-y				+= quirks.o
 
@@ -104,6 +105,8 @@ perf_regs-y     += $(b)/perf_regs.o
 trace_clock-y   += $(b)/trace_clock.o
 sysfb-y         += $(b)/sysfb.o
 preempt-y       += $(b)/preempt.o
+ksysfs-y	+= $(b)/ksysfs.o
+tsc_msr-y	+= $(b)/tsc_msr.o
 
 # we have our own versions of destroy_context and init_new_context,
 # so rename the original one

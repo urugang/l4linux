@@ -59,11 +59,11 @@ static l4_cap_idx_t get_int_cap(int irq)
 {
 	if (irq < NR_IRQS_HW) {
 		struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
-		return p->irq_cap;
+		return p->c.irq_cap;
 	}
 
 	if (irq < NR_IRQS)
-		return l4x_have_irqcap(irq);
+		return l4x_have_irqcap(irq, 0);
 
 	return L4_INVALID_CAP;
 }

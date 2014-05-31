@@ -49,6 +49,15 @@ long l4x_srv_generic_dispatch(l4x_srv_object *_this, l4_umword_t obj,
 	return r;
 }
 
+template<typename CRT>
+class l4x_srv_object_tmpl : public l4x_srv_object
+{
+public:
+	l4x_srv_object_tmpl()
+	{
+		l4x_srv_object::dispatch = &l4x_srv_generic_dispatch<CRT>;
+	}
+};
 
 #else
 #define C_FUNC L4_CV

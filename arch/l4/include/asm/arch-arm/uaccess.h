@@ -70,7 +70,9 @@ extern int __put_user_bad(void);
 static inline void set_fs(mm_segment_t fs)
 {
 	current_thread_info()->addr_limit = fs;
-	//modify_domain(DOMAIN_KERNEL, fs ? DOMAIN_CLIENT : DOMAIN_MANAGER);
+#ifndef CONFIG_L4
+	modify_domain(DOMAIN_KERNEL, fs ? DOMAIN_CLIENT : DOMAIN_MANAGER);
+#endif
 }
 
 #define segment_eq(a,b)	((a) == (b))
@@ -130,7 +132,7 @@ extern long __get_user_8(unsigned long long *val, const void *address);
 	(void) 0;							\
 })
 
-#if 0
+#ifndef CONFIG_L4
 extern int __get_user_1(void *);
 extern int __get_user_2(void *);
 extern int __get_user_4(void *);
@@ -226,7 +228,7 @@ extern int __put_user_8(void *, unsigned long long);
 		__put_user_check(x,p);					\
 	 })
 
-#endif
+#endif /* L4 */
 #else /* CONFIG_MMU */
 
 /*
@@ -262,7 +264,7 @@ static inline void set_fs(mm_segment_t fs)
  * error occurs, and leave it unchanged on success.  Note that these
  * versions are void (ie, don't return a value as such).
  */
-#if 0
+#ifndef CONFIG_L4
 #define __get_user(x,ptr)						\
 ({									\
 	long __gu_err = 0;						\
@@ -344,7 +346,7 @@ do {									\
 	: "+r" (err), "=&r" (x)					\
 	: "r" (addr), "i" (-EFAULT)				\
 	: "cc")
-#endif
+#endif /* L4 */
 
 //extern int __put_user_1(void *, unsigned int);
 //extern int __put_user_2(void *, unsigned int);
@@ -434,7 +436,7 @@ extern int __put_user_bad(void);
 	(void) 0;							\
 })
 
-#if 0
+#ifndef CONFIG_L4
 #define __put_user(x,ptr)						\
 ({									\
 	long __pu_err = 0;						\
@@ -541,7 +543,7 @@ do {									\
 	: "+r" (err), "+r" (__pu_addr)				\
 	: "r" (x), "i" (-EFAULT)				\
 	: "cc")
-#endif
+#endif /* L4 */
 
 #ifdef CONFIG_MMU
 extern unsigned long __must_check __copy_from_user(void *to, const void __user *from, unsigned long n);

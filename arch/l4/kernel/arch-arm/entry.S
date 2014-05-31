@@ -138,7 +138,19 @@ ENTRY(sys_oabi_call_table)
 
 #endif
 
+	__INIT
 
+/*
+ * User helpers.
+ *
+ * Each segment is 32-byte aligned and will be moved to the top of the high
+ * vector page.  New segments (if ever needed) must be added in front of
+ * existing ones.  This mechanism should be used only for things that are
+ * really small and justified, and not be abused freely.
+ *
+ * See Documentation/arm/kernel_user_helpers.txt for formal definitions.
+ */
+ THUMB(	.arm	)
 
 	.macro	usr_ret, reg
 #ifdef CONFIG_ARM_THUMB
@@ -161,7 +173,6 @@ ENTRY(sys_oabi_call_table)
 
 #ifdef CONFIG_KUSER_HELPERS
 	.align	5
-	.section .upage,"ax",%progbits
 	.globl	__kuser_helper_start
 __kuser_helper_start:
 
@@ -170,7 +181,7 @@ __kuser_helper_start:
  * kuser "slots", therefore 0xffff0f80 is not used as a valid entry point.
  */
 
-__kuser_cmpxchg64:				@ 0x0f60
+__kuser_cmpxchg64:				@ 0xffff0f60
 
 #if defined(CONFIG_NEEDS_SYSCALL_FOR_CMPXCHG)
 
@@ -253,13 +264,13 @@ kuser_cmpxchg64_fixup:
 
 	kuser_pad __kuser_cmpxchg64, 64
 
-__kuser_memory_barrier:				@ 0x0fa0
+__kuser_memory_barrier:				@ 0xffff0fa0
 	smp_dmb	arm
 	usr_ret	lr
 
 	kuser_pad __kuser_memory_barrier, 32
 
-__kuser_cmpxchg:				@ 0x0fc0
+__kuser_cmpxchg:				@ 0xffff0fc0
 
 #if defined(CONFIG_NEEDS_SYSCALL_FOR_CMPXCHG)
 
@@ -345,7 +356,7 @@ kuser_cmpxchg32_fixup:
 
 	kuser_pad __kuser_cmpxchg, 32
 
-__kuser_get_tls:				@ 0x0fe0
+__kuser_get_tls:				@ 0xffff0fe0
 	ldr	r0, [pc, #(16 - 8)]	@ read TLS, set in kuser_get_tls_init
 	usr_ret	lr
 	mrc	p15, 0, r0, c13, c0, 3	@ 0xffff0fe8 hardware TLS code
@@ -362,3 +373,214 @@ __kuser_helper_end:
 
 #endif
 
+#ifndef CONFIG_L4
+ THUMB(	.thumb	)
+
+/*
+ * Vector stubs.
+ *
+ * This code is copied to 0xffff1000 so we can use branches in the
+ * vectors, rather than ldr's.  Note that this code must not exceed
+ * a page size.
+ *
+ * Common stub entry macro:
+ *   Enter in IRQ mode, spsr = SVC/USR CPSR, lr = SVC/USR PC
+ *
+ * SP points to a minimal amount of processor-private memory, the address
+ * of which is copied into r0 for the mode specific abort handler.
+ */
+	.macro	vector_stub, name, mode, correction=0
+	.align	5
+
+vector_\name:
+	.if \correction
+	sub	lr, lr, #\correction
+	.endif
+
+	@
+	@ Save r0, lr_<exception> (parent PC) and spsr_<exception>
+	@ (parent CPSR)
+	@
+	stmia	sp, {r0, lr}		@ save r0, lr
+	mrs	lr, spsr
+	str	lr, [sp, #8]		@ save spsr
+
+	@
+	@ Prepare for SVC32 mode.  IRQs remain disabled.
+	@
+	mrs	r0, cpsr
+	eor	r0, r0, #(\mode ^ SVC_MODE | PSR_ISETSTATE)
+	msr	spsr_cxsf, r0
+
+	@
+	@ the branch table must immediately follow this code
+	@
+	and	lr, lr, #0x0f
+ THUMB(	adr	r0, 1f			)
+ THUMB(	ldr	lr, [r0, lr, lsl #2]	)
+	mov	r0, sp
+ ARM(	ldr	lr, [pc, lr, lsl #2]	)
+	movs	pc, lr			@ branch to handler in SVC mode
+ENDPROC(vector_\name)
+
+	.align	2
+	@ handler addresses follow this label
+1:
+	.endm
+
+	.section .stubs, "ax", %progbits
+__stubs_start:
+	@ This must be the first word
+	.word	vector_swi
+
+vector_rst:
+ ARM(	swi	SYS_ERROR0	)
+ THUMB(	svc	#0		)
+ THUMB(	nop			)
+	b	vector_und
+
+/*
+ * Interrupt dispatcher
+ */
+	vector_stub	irq, IRQ_MODE, 4
+
+	.long	__irq_usr			@  0  (USR_26 / USR_32)
+	.long	__irq_invalid			@  1  (FIQ_26 / FIQ_32)
+	.long	__irq_invalid			@  2  (IRQ_26 / IRQ_32)
+	.long	__irq_svc			@  3  (SVC_26 / SVC_32)
+	.long	__irq_invalid			@  4
+	.long	__irq_invalid			@  5
+	.long	__irq_invalid			@  6
+	.long	__irq_invalid			@  7
+	.long	__irq_invalid			@  8
+	.long	__irq_invalid			@  9
+	.long	__irq_invalid			@  a
+	.long	__irq_invalid			@  b
+	.long	__irq_invalid			@  c
+	.long	__irq_invalid			@  d
+	.long	__irq_invalid			@  e
+	.long	__irq_invalid			@  f
+
+/*
+ * Data abort dispatcher
+ * Enter in ABT mode, spsr = USR CPSR, lr = USR PC
+ */
+	vector_stub	dabt, ABT_MODE, 8
+
+	.long	__dabt_usr			@  0  (USR_26 / USR_32)
+	.long	__dabt_invalid			@  1  (FIQ_26 / FIQ_32)
+	.long	__dabt_invalid			@  2  (IRQ_26 / IRQ_32)
+	.long	__dabt_svc			@  3  (SVC_26 / SVC_32)
+	.long	__dabt_invalid			@  4
+	.long	__dabt_invalid			@  5
+	.long	__dabt_invalid			@  6
+	.long	__dabt_invalid			@  7
+	.long	__dabt_invalid			@  8
+	.long	__dabt_invalid			@  9
+	.long	__dabt_invalid			@  a
+	.long	__dabt_invalid			@  b
+	.long	__dabt_invalid			@  c
+	.long	__dabt_invalid			@  d
+	.long	__dabt_invalid			@  e
+	.long	__dabt_invalid			@  f
+
+/*
+ * Prefetch abort dispatcher
+ * Enter in ABT mode, spsr = USR CPSR, lr = USR PC
+ */
+	vector_stub	pabt, ABT_MODE, 4
+
+	.long	__pabt_usr			@  0 (USR_26 / USR_32)
+	.long	__pabt_invalid			@  1 (FIQ_26 / FIQ_32)
+	.long	__pabt_invalid			@  2 (IRQ_26 / IRQ_32)
+	.long	__pabt_svc			@  3 (SVC_26 / SVC_32)
+	.long	__pabt_invalid			@  4
+	.long	__pabt_invalid			@  5
+	.long	__pabt_invalid			@  6
+	.long	__pabt_invalid			@  7
+	.long	__pabt_invalid			@  8
+	.long	__pabt_invalid			@  9
+	.long	__pabt_invalid			@  a
+	.long	__pabt_invalid			@  b
+	.long	__pabt_invalid			@  c
+	.long	__pabt_invalid			@  d
+	.long	__pabt_invalid			@  e
+	.long	__pabt_invalid			@  f
+
+/*
+ * Undef instr entry dispatcher
+ * Enter in UND mode, spsr = SVC/USR CPSR, lr = SVC/USR PC
+ */
+	vector_stub	und, UND_MODE
+
+	.long	__und_usr			@  0 (USR_26 / USR_32)
+	.long	__und_invalid			@  1 (FIQ_26 / FIQ_32)
+	.long	__und_invalid			@  2 (IRQ_26 / IRQ_32)
+	.long	__und_svc			@  3 (SVC_26 / SVC_32)
+	.long	__und_invalid			@  4
+	.long	__und_invalid			@  5
+	.long	__und_invalid			@  6
+	.long	__und_invalid			@  7
+	.long	__und_invalid			@  8
+	.long	__und_invalid			@  9
+	.long	__und_invalid			@  a
+	.long	__und_invalid			@  b
+	.long	__und_invalid			@  c
+	.long	__und_invalid			@  d
+	.long	__und_invalid			@  e
+	.long	__und_invalid			@  f
+
+	.align	5
+
+/*=============================================================================
+ * Address exception handler
+ *-----------------------------------------------------------------------------
+ * These aren't too critical.
+ * (they're not supposed to happen, and won't happen in 32-bit data mode).
+ */
+
+vector_addrexcptn:
+	b	vector_addrexcptn
+
+/*=============================================================================
+ * Undefined FIQs
+ *-----------------------------------------------------------------------------
+ * Enter in FIQ mode, spsr = ANY CPSR, lr = ANY PC
+ * MUST PRESERVE SVC SPSR, but need to switch to SVC mode to show our msg.
+ * Basically to switch modes, we *HAVE* to clobber one register...  brain
+ * damage alert!  I don't think that we can execute any code in here in any
+ * other mode than FIQ...  Ok you can switch to another mode, but you can't
+ * get out of that mode without clobbering one register.
+ */
+vector_fiq:
+	subs	pc, lr, #4
+
+	.globl	vector_fiq_offset
+	.equ	vector_fiq_offset, vector_fiq
+
+	.section .vectors, "ax", %progbits
+__vectors_start:
+	W(b)	vector_rst
+	W(b)	vector_und
+	W(ldr)	pc, __vectors_start + 0x1000
+	W(b)	vector_pabt
+	W(b)	vector_dabt
+	W(b)	vector_addrexcptn
+	W(b)	vector_irq
+	W(b)	vector_fiq
+#endif /* L4 */
+
+	.data
+
+	.globl	cr_alignment
+	.globl	cr_no_alignment
+cr_alignment:
+	.space	4
+cr_no_alignment:
+	.space	4
+
+#ifdef CONFIG_MULTI_IRQ_HANDLER
+	.globl	handle_arch_irq
+handle_arch_irq:
+	.space	4
+#endif

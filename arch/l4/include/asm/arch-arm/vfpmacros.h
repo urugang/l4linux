@@ -9,7 +9,9 @@
 
 @ Macros to allow building with old toolkits (with no VFP support)
 	.macro	VFPFMRX, rd, sysreg, cond
-//	MRC\cond	p10, 7, \rd, \sysreg, cr0, 0	@ FMRX	\rd, \sysreg
+#ifndef CONFIG_L4
+	MRC\cond	p10, 7, \rd, \sysreg, cr0, 0	@ FMRX	\rd, \sysreg
+#else
 	// XXX: do scr and sid right here
 	.ifc \rd,r0
 	stmfd   sp!, {r1-r3, ip, lr}
@@ -24,15 +26,19 @@
 	mov	\rd, r0
 	ldmfd   sp!, {r0}
 	.endif
+#endif
 	.endm
 
 	.macro	VFPFMXR, sysreg, rd, cond
-//	MCR\cond	p10, 7, \rd, \sysreg, cr0, 0	@ FMXR	\sysreg, \rd
+#ifndef CONFIG_L4
+	MCR\cond	p10, 7, \rd, \sysreg, cr0, 0	@ FMXR	\sysreg, \rd
+#else
 	stmfd   sp!, {r0-r3, ip, lr}
 	mov	r0, #\sysreg
 	mov	r1, \rd
 	bl	l4x_fmxr
 	ldmfd   sp!, {r0-r3, ip, lr}
+#endif
 	.endm
 
 	@ read all the working registers back into the VFP
