@@ -11,7 +11,9 @@
 static inline void l4x_tamed_sem_down(void)
 {
 	unsigned dummy1, dummy2, dummy3;
-	unsigned cpu = current_thread_info()->cpu;
+	struct thread_info *ti = current_thread_info_stack();
+	unsigned cpu = ti->cpu;
+	l4_utcb_t *utcb = l4x_utcb_current(ti);
 
 	asm volatile
 	  (
@@ -43,18 +45,20 @@ static inline void l4x_tamed_sem_down(void)
 
 	   "2:                         \n\t"
 	   : "=c" (dummy1), "=D" (dummy2), "=S" (dummy3)
-	   : "a"  ((l4x_prio_current() << 20) | (1 << 16)),
+	   : "a"  ((l4x_prio_current_utcb(utcb) << 20) | (1 << 16)),
 	     "b"  (&tamed_per_nr(cli_lock, get_tamer_nr(cpu)).sem),
-	     "D"  (l4_utcb()),
+	     "D"  (utcb),
 	     "d"  (tamed_per_nr(cli_sem_thread_id, get_tamer_nr(cpu)) | L4_SYSF_CALL),
-             "S"  (l4x_cap_current())
+             "S"  (l4x_cap_current_utcb(utcb))
 	   : "memory", "cc");
 }
 
 static inline void l4x_tamed_sem_up(void)
 {
 	unsigned dummy1, dummy2, dummy3, dummy4;
-	unsigned cpu = current_thread_info()->cpu;
+	struct thread_info *ti = current_thread_info_stack();
+	unsigned cpu = ti->cpu;
+	l4_utcb_t *utcb = l4x_utcb_current(ti);
 	l4_msgtag_t rtag;
 
 	asm volatile
@@ -66,12 +70,12 @@ static inline void l4x_tamed_sem_up(void)
 
 	   "2:                         \n\t"
 	   : "=a" (rtag), "=c" (dummy1), "=D" (dummy2), "=S" (dummy3), "=d" (dummy4)
-	   : "a"  ((l4x_prio_current() << 20) | (2 << 16)),
+	   : "a"  ((l4x_prio_current_utcb(utcb) << 20) | (2 << 16)),
 	     "b"  (&tamed_per_nr(cli_lock, get_tamer_nr(cpu)).sem),
-	     "D"  (l4_utcb()),
+	     "D"  (utcb),
 	     "d"  (tamed_per_nr(cli_sem_thread_id, get_tamer_nr(cpu)) | L4_SYSF_CALL),
              "c"  (0),
-	     "S"  (l4x_cap_current())
+	     "S"  (l4x_cap_current_utcb(utcb))
 	   : "memory");
 
 	if (unlikely(l4_ipc_error(rtag, l4_utcb())))

@@ -114,20 +114,23 @@ void flush_cache_page(struct vm_area_struct *vma, unsigned long user_addr, unsig
 #define flush_icache_alias(pfn,vaddr,len)	do { } while (0)
 #endif
 
-#ifdef NOT_FOR_L4
-#ifdef CONFIG_SMP
+#define FLAG_PA_IS_EXEC 1
+#define FLAG_PA_CORE_IN_MM 2
+
+#ifndef CONFIG_L4
 static void flush_ptrace_access_other(void *args)
 {
 	__flush_icache_all();
 }
-#endif
+#endif /* L4 */
 
-static
-void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
-			 unsigned long uaddr, void *kaddr, unsigned long len)
+static inline
+void __flush_ptrace_access(struct page *page, unsigned long uaddr, void *kaddr,
+			   unsigned long len, unsigned int flags)
 {
+#ifndef CONFIG_L4
 	if (cache_is_vivt()) {
-		if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm))) {
+		if (flags & FLAG_PA_CORE_IN_MM) {
 			unsigned long addr = (unsigned long)kaddr;
 			__cpuc_coherent_kern_range(addr, addr + len);
 		}
@@ -141,7 +144,7 @@ void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
 	}
 
 	/* VIPT non-aliasing D-cache */
-	if (vma->vm_flags & VM_EXEC) {
+	if (flags & FLAG_PA_IS_EXEC) {
 		unsigned long addr = (unsigned long)kaddr;
 		if (icache_is_vipt_aliasing())
 			flush_icache_alias(page_to_pfn(page), uaddr, len);
@@ -151,8 +154,30 @@ void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
 			smp_call_function(flush_ptrace_access_other,
 					  NULL, 1);
 	}
+#endif /* L4 */
 }
-#endif
+
+#ifndef CONFIG_L4
+static
+void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
+			 unsigned long uaddr, void *kaddr, unsigned long len)
+{
+	unsigned int flags = 0;
+	if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm)))
+		flags |= FLAG_PA_CORE_IN_MM;
+	if (vma->vm_flags & VM_EXEC)
+		flags |= FLAG_PA_IS_EXEC;
+	__flush_ptrace_access(page, uaddr, kaddr, len, flags);
+}
+#endif /* L4 */
+
+void flush_uprobe_xol_access(struct page *page, unsigned long uaddr,
+			     void *kaddr, unsigned long len)
+{
+	unsigned int flags = FLAG_PA_CORE_IN_MM|FLAG_PA_IS_EXEC;
+
+	__flush_ptrace_access(page, uaddr, kaddr, len, flags);
+}
 
 /*
  * Copy user data from/to a page which is mapped into a different
@@ -169,7 +194,7 @@ void copy_to_user_page(struct vm_area_struct *vma, struct page *page,
 	preempt_disable();
 #endif
 	memcpy(dst, src, len);
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	flush_ptrace_access(vma, page, uaddr, dst, len);
 #endif
 #ifdef CONFIG_SMP
@@ -179,7 +204,7 @@ void copy_to_user_page(struct vm_area_struct *vma, struct page *page,
 
 void __flush_dcache_page(struct address_space *mapping, struct page *page)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	/*
 	 * Writeback any data associated with the kernel mapping of this
 	 * page.  This ensures that data in the physical page is mutually
@@ -218,7 +243,7 @@ void __flush_dcache_page(struct address_space *mapping, struct page *page)
 #endif
 }
 
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 static void __flush_dcache_aliases(struct address_space *mapping, struct page *page)
 {
 	struct mm_struct *mm = current->active_mm;
@@ -302,7 +327,7 @@ void __sync_icache_dcache(pte_t pteval)
  */
 void flush_dcache_page(struct page *page)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	struct address_space *mapping;
 
 	/*
@@ -373,7 +398,7 @@ EXPORT_SYMBOL(flush_kernel_dcache_page);
  */
 void __flush_anon_page(struct vm_area_struct *vma, struct page *page, unsigned long vmaddr)
 {
-#ifdef NOT_FOR_L4
+#ifndef CONFIG_L4
 	unsigned long pfn;
 
 	/* VIPT non-aliasing caches need do nothing */

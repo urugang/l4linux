@@ -24,8 +24,10 @@
 #include <asm/generic/vcpu.h>
 #include <asm/generic/stats.h>
 #include <asm/generic/log.h>
+#include <asm/generic/jdb.h>
 #include <asm/server/server.h>
 #include <asm/l4x/utcb.h>
+#include <asm/l4x/cachetypes.h>
 
 #ifndef CONFIG_L4_VCPU
 DEFINE_PER_CPU(int, l4x_idle_running);
@@ -71,10 +73,10 @@ retry:
 	if (unlikely(!pte_present(*ptep)))
 		goto not_present_locked;
 
-	if (!(address & 2)) {
+	if (!l4x_iswrpf(p->thread.error_code)) {
 		/* read access */
 		l4x_pte_add_access_flag(ptep);
-		phy = pte_val(*ptep) & PAGE_MASK;
+		phy = pte_val(*ptep) & L4X_PHYSICAL_PAGE_MASK;
 
 		/* handle zero page specially */
 		if (phy == 0)
@@ -83,13 +85,13 @@ retry:
 		*fp   = l4_fpage(phy, fpage_size,
 		                 pte_exec(*ptep)
 		                  ? L4_FPAGE_RX : L4_FPAGE_RO);
-		*attr = l4x_map_page_attr_to_l4(*ptep);
+		*attr = l4x_map_page_attr_to_l4(*ptep) << 4;
 	} else {
 		/* write access */
 		if (pte_write(*ptep)) {
 			/* page present and writable */
 			l4x_pte_add_access_and_dirty_flags(ptep);
-			phy = pte_val(*ptep) & PAGE_MASK;
+			phy = pte_val(*ptep) & L4X_PHYSICAL_PAGE_MASK;
 
 			/* handle the zero page specially */
 			if (phy == 0)
@@ -98,7 +100,7 @@ retry:
 			*fp = l4_fpage(phy, fpage_size,
 			               pte_exec(*ptep)
 			                ? L4_FPAGE_RWX: L4_FPAGE_RW);
-			*attr = l4x_map_page_attr_to_l4(*ptep);
+			*attr = l4x_map_page_attr_to_l4(*ptep) << 4;
 		} else {
 			/* page present, but not writable
 			 * --> return error */
@@ -115,7 +117,7 @@ not_present_locked:
 	spin_unlock(ptl);
 not_present:
 	/* page and/or pgdir not present --> return error */
-	if ((address & 2))
+	if (l4x_iswrpf(p->thread.error_code))
 		*pferror = PF_EUSER + PF_EWRITE +
 			   PF_ENOTPRESENT;
 	else
@@ -178,7 +180,7 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 
 		} else {
 			l4x_debug_stats_pagefault_but_in_PTs_hit();
-			if (pfa & 2)
+			if (l4x_iswrpf(err))
 				l4x_debug_stats_pagefault_write_hit();
 		}
 
@@ -187,7 +189,7 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
 		/* Handled */
 #endif
 	/* page fault in upage ? */
-	} else if ((pfa & PAGE_MASK) == UPAGE_USER_ADDRESS && !(pfa & 2)) {
+	} else if ((pfa & PAGE_MASK) == UPAGE_USER_ADDRESS && !l4x_iswrpf(err)) {
 		/* */
 	} else {
 		printk("WARN: %s: Page-fault above task size: pfa=%lx pc=%lx\n",
@@ -237,7 +239,8 @@ l4x_pf_pfa_to_fp(struct task_struct *p, unsigned long pfa,
 		/* Handled */
 #endif
 	/* page fault in upage ? */
-	} else if ((pfa & PAGE_MASK) == UPAGE_USER_ADDRESS && !(pfa & 2)) {
+	} else if ((pfa & PAGE_MASK) == UPAGE_USER_ADDRESS
+	           && !l4x_iswrpf(p->thread.error_code)) {
 		*d1 = l4_fpage(upage_addr, L4_LOG2_PAGESIZE,
 		               L4_FPAGE_RX).fpage;
 		*d0 = (*d0 & PAGE_MASK) | L4_ITEM_MAP;
@@ -338,14 +341,7 @@ static int l4x_hybrid_begin(struct task_struct *p,
 		l4_cap_idx_t hybgate;
 		struct l4x_hybrid_object *ho;
 
-#ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
-		char s[20] = "*";
-
-		strncpy(s + 1, p->comm, sizeof(s) - 1);
-		s[sizeof(s) - 1] = 0;
-
-		l4_debugger_set_object_name(t->user_thread_id, s);
-#endif
+		l4x_dbg_set_object_name_user(t->user_thread_id, "*%s", p->comm);
 
 		t->is_hybrid = 1;
 
@@ -738,26 +734,14 @@ static inline void
 l4x_set_task_name(struct task_struct *p, struct thread_struct *t,
                   int cpu, int start_task)
 {
-#ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
-	char s[15];
-
 #ifdef CONFIG_SMP
-	snprintf(s, sizeof(s), "%s:%d", p->comm, cpu);
+	l4x_dbg_set_object_name_user(t->user_thread_id, "%s:%d", p->comm, cpu);
 #else
-	snprintf(s, sizeof(s), "%s", p->comm);
+	l4x_dbg_set_object_name_user(t->user_thread_id, p->comm);
 #endif
-	s[sizeof(s) - 1] = 0;
-	l4_debugger_set_object_name(t->user_thread_id, s);
 
-	if (start_task) {
-#ifdef CONFIG_SMP
-		snprintf(s, sizeof(s), "%s", p->comm);
-		s[sizeof(s) - 1] = 0;
-#endif
-		l4_debugger_set_object_name(p->mm->context.task, s);
-	}
-
-#endif
+	if (start_task)
+		l4x_dbg_set_object_name_user(p->mm->context.task, p->comm);
 }
 
 static inline void l4x_spawn_cpu_thread(struct task_struct *p,
@@ -1094,9 +1078,7 @@ create_task:
 			task_lock(p);
 			if (likely(l4_is_invalid_cap(p->mm->context.task))) {
 				p->mm->context.task = c;
-#ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
-				l4_debugger_set_object_name(c, p->comm);
-#endif
+				l4x_dbg_set_object_name_user(c, p->comm);
 				l4x_arch_task_setup(&p->thread);
 
 				vcpu->user_task = c;

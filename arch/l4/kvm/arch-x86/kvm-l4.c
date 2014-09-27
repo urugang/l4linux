@@ -5,6 +5,7 @@
 
 #include <asm/l4lxapi/task.h>
 #include <asm/generic/vcpu.h>
+#include <asm/generic/jdb.h>
 
 #include <l4/sys/factory.h>
 #include <l4/sys/debugger.h>
@@ -16,10 +17,8 @@
 
 int l4x_kvm_create_vm(struct kvm *kvm)
 {
-	l4_msgtag_t t;
 	l4_utcb_t *u = l4_utcb();
 	int r;
-	L4XV_V(f);
 
 	kvm->arch.l4vmcap = L4_INVALID_CAP;
 
@@ -28,23 +27,17 @@ int l4x_kvm_create_vm(struct kvm *kvm)
 		return -ENOENT;
 	}
 
-	L4XV_L(f);
-	t = l4_factory_create_vm_u(l4re_env()->factory, kvm->arch.l4vmcap, u);
-	if (unlikely((r = l4_error_u(t, u)))) {
+	r = L4XV_FN_i(l4_error(l4_factory_create_vm_u(l4re_env()->factory,
+	                                              kvm->arch.l4vmcap, u)));
+	if (unlikely(r)) {
 		printk("%s: kvm task creation failed cap=%08lx: %d\n",
 		       __func__, kvm->arch.l4vmcap, r);
 		l4lx_task_number_free(kvm->arch.l4vmcap);
-		L4XV_U(f);
 		return -ENOENT;
 	}
-	L4XV_U(f);
 
-	printk("%s: cap = %08lx\n", __func__, kvm->arch.l4vmcap);
-#ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
-	L4XV_L(f);
-	l4_debugger_set_object_name(kvm->arch.l4vmcap, "kvmVM");
-	L4XV_U(f);
-#endif
+	L4XV_FN_v(l4x_dbg_set_object_name(kvm->arch.l4vmcap, "kvmVM"));
+
 	return 0;
 }
 EXPORT_SYMBOL(l4x_kvm_create_vm);

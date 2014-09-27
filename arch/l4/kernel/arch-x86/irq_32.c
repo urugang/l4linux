@@ -58,16 +58,8 @@ static inline int check_stack_overflow(void) { return 0; }
 static inline void print_stack_overflow(void) { }
 #endif
 
-/*
- * per-CPU IRQ handling contexts (thread information and stack)
- */
-union irq_ctx {
-	struct thread_info      tinfo;
-	u32                     stack[THREAD_SIZE/sizeof(u32)];
-} __attribute__((aligned(THREAD_SIZE)));
-
-static DEFINE_PER_CPU(union irq_ctx *, hardirq_ctx);
-static DEFINE_PER_CPU(union irq_ctx *, softirq_ctx);
+DEFINE_PER_CPU(struct irq_stack *, hardirq_stack);
+DEFINE_PER_CPU(struct irq_stack *, softirq_stack);
 
 static void call_on_stack(void *func, void *stack)
 {
@@ -80,14 +72,26 @@ static void call_on_stack(void *func, void *stack)
 		     : "memory", "cc", "edx", "ecx", "eax");
 }
 
+/* how to get the current stack pointer from C */
+#define current_stack_pointer ({		\
+	unsigned long sp;			\
+	asm("mov %%esp,%0" : "=g" (sp));	\
+	sp;					\
+})
+
+static inline void *current_stack(void)
+{
+	return (void *)(current_stack_pointer & ~(THREAD_SIZE - 1));
+}
+
 static inline int
 execute_on_irq_stack(int overflow, struct irq_desc *desc, int irq)
 {
-	union irq_ctx *curctx, *irqctx;
-	u32 *isp, arg1, arg2;
+	struct irq_stack *curstk, *irqstk;
+	u32 *isp, *prev_esp, arg1, arg2;
 
-	curctx = (union irq_ctx *) current_thread_info();
-	irqctx = __this_cpu_read(hardirq_ctx);
+	curstk = (struct irq_stack *) current_stack();
+	irqstk = __this_cpu_read(hardirq_stack);
 
 	/*
 	 * this is where we switch to the IRQ stack. However, if we are
@@ -95,13 +99,14 @@ execute_on_irq_stack(int overflow, struct irq_desc *desc, int irq)
 	 * handler) we can't do that and just have to keep using the
 	 * current stack (which is the irq stack already after all)
 	 */
-	if (unlikely(curctx == irqctx))
+	if (unlikely(curstk == irqstk))
 		return 0;
 
-	/* build the stack frame on the IRQ stack */
-	isp = (u32 *) ((char *)irqctx + sizeof(*irqctx));
-	irqctx->tinfo.task = curctx->tinfo.task;
-	irqctx->tinfo.previous_esp = current_stack_pointer;
+	isp = (u32 *) ((char *)irqstk + sizeof(*irqstk));
+
+	/* Save the next esp at the bottom of the stack */
+	prev_esp = (u32 *)irqstk;
+	*prev_esp = current_stack_pointer;
 
 	if (unlikely(overflow))
 		call_on_stack(print_stack_overflow, isp);
@@ -121,61 +126,59 @@ execute_on_irq_stack(int overflow, struct irq_desc *desc, int irq)
  */
 void irq_ctx_init(int cpu)
 {
-	union irq_ctx *irqctx;
+	struct irq_stack *irqstk;
 
-	if (per_cpu(hardirq_ctx, cpu))
+	if (per_cpu(hardirq_stack, cpu))
 		return;
 
-	irqctx = page_address(alloc_pages_node(cpu_to_node(cpu),
+	irqstk = page_address(alloc_pages_node(cpu_to_node(cpu),
 					       THREADINFO_GFP,
 					       THREAD_SIZE_ORDER));
-	memset(&irqctx->tinfo, 0, sizeof(struct thread_info));
-	irqctx->tinfo.cpu		= cpu;
-	irqctx->tinfo.addr_limit	= MAKE_MM_SEG(0);
+	per_cpu(hardirq_stack, cpu) = irqstk;
 
-	l4x_stack_set(&irqctx->tinfo, l4x_cpu_thread_get(cpu));
+#ifdef CONFIG_L4
+	((struct thread_info *)irqstk)->cpu = cpu;
+	l4x_stack_set((struct thread_info *)irqstk, l4x_cpu_thread_get(cpu));
+#endif
 
-	per_cpu(hardirq_ctx, cpu) = irqctx;
-
-	irqctx = page_address(alloc_pages_node(cpu_to_node(cpu),
+	irqstk = page_address(alloc_pages_node(cpu_to_node(cpu),
 					       THREADINFO_GFP,
 					       THREAD_SIZE_ORDER));
-	memset(&irqctx->tinfo, 0, sizeof(struct thread_info));
-	irqctx->tinfo.cpu		= cpu;
-	irqctx->tinfo.addr_limit	= MAKE_MM_SEG(0);
+	per_cpu(softirq_stack, cpu) = irqstk;
 
-	l4x_stack_set(&irqctx->tinfo, l4x_cpu_thread_get(cpu));
-
-	per_cpu(softirq_ctx, cpu) = irqctx;
+#ifdef CONFIG_L4
+	((struct thread_info *)irqstk)->cpu = cpu;
+	l4x_stack_set((struct thread_info *)irqstk, l4x_cpu_thread_get(cpu));
+#endif
 
 	printk(KERN_DEBUG "CPU %u irqstacks, hard=%p soft=%p\n",
-	       cpu, per_cpu(hardirq_ctx, cpu),  per_cpu(softirq_ctx, cpu));
+	       cpu, per_cpu(hardirq_stack, cpu),  per_cpu(softirq_stack, cpu));
 }
 
 void do_softirq_own_stack(void)
 {
-	struct thread_info *curctx;
-	union irq_ctx *irqctx;
-	u32 *isp;
+	struct thread_info *curstk;
+	struct irq_stack *irqstk;
+	u32 *isp, *prev_esp;
 
-	curctx = current_thread_info();
-	irqctx = __this_cpu_read(softirq_ctx);
-	irqctx->tinfo.task = curctx->task;
-	irqctx->tinfo.previous_esp = current_stack_pointer;
+	curstk = current_stack();
+	irqstk = __this_cpu_read(softirq_stack);
 
 	/* build the stack frame on the softirq stack */
-	isp = (u32 *) ((char *)irqctx + sizeof(*irqctx));
+	isp = (u32 *) ((char *)irqstk + sizeof(*irqstk));
+
+	/* Push the previous esp onto the stack */
+	prev_esp = (u32 *)irqstk;
+	*prev_esp = current_stack_pointer;
 
 #ifndef CONFIG_L4_VCPU
-	l4x_stack_set(&irqctx->tinfo, l4_utcb());
-	per_cpu(l4x_current_ti, smp_processor_id()) = &irqctx->tinfo;
+	l4x_stack_set((struct thread_info *)irqstk, l4_utcb());
+	per_cpu(l4x_current_ti, smp_processor_id()) = (struct thread_info *)irqstk;
 #endif
-
 	call_on_stack(__do_softirq, isp);
-
 #ifndef CONFIG_L4_VCPU
-	per_cpu(l4x_current_ti, smp_processor_id()) = curctx;
-	l4x_stack_set(curctx, l4_utcb());
+	per_cpu(l4x_current_ti, smp_processor_id()) = (struct thread_info *)curstk;
+	l4x_stack_set((struct thread_info *)curstk, l4_utcb());
 #endif
 }
 

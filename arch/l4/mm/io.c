@@ -40,7 +40,7 @@ static void set_ioremap_entry(unsigned long real_map_addr,
 	int i;
 
 	if (0)
-		printk("%s(%lx,%lx,%lx,%lx)\n",
+		pr_info("%s(%lx,%lx,%lx,%lx)\n",
 		       __func__, real_map_addr, ioremap_addr, phys_addr, size);
 
 	spin_lock(&ioremap_lock);
@@ -59,7 +59,7 @@ static void set_ioremap_entry(unsigned long real_map_addr,
 		}
 
 	spin_unlock(&ioremap_lock);
-	printk("no free entry in ioremaptable\n");
+	pr_err("no free entry in ioremaptable\n");
 	BUG();
 }
 
@@ -209,7 +209,7 @@ static inline void remap_area_pte(pte_t * pte, unsigned long address, unsigned l
 	pfn = phys_addr >> PAGE_SHIFT;
 	do {
 		if (!pte_none(*pte)) {
-			printk("remap_area_pte: page already exists\n");
+			pr_err("remap_area_pte: page already exists\n");
 			BUG();
 		}
 		set_pte(pte, pfn_pte(pfn, __pgprot(_PAGE_PRESENT | _PAGE_RW |
@@ -308,8 +308,8 @@ __l4x_ioremap(unsigned long phys_addr, size_t size, unsigned long flags)
 	 * then request the whole region at once.
 	 */
 	if (0)
-		printk("%s: Requested region at %08lx [0x%zx Bytes]\n",
-		       __func__, phys_addr, size);
+		pr_info("%s: Requested region at %08lx [0x%zx Bytes]\n",
+		        __func__, phys_addr, size);
 
 	if ((i = __lookup_ioremap_entry_phys(phys_addr)) != -1) {
 		/* Found already existing entry */
@@ -327,7 +327,7 @@ __l4x_ioremap(unsigned long phys_addr, size_t size, unsigned long flags)
 
 	if (!L4XV_FN_i(l4io_has_resource(L4IO_RESOURCE_MEM, phys_addr,
 	                                 phys_addr + size - 1))) {
-		printk("ERROR: IO-memory (%lx+%zx) not available\n",
+		pr_err("ERROR: IO-memory (%lx+%zx) not available\n",
 		       phys_addr, size);
 		WARN_ON(1);
 		return NULL;
@@ -335,13 +335,13 @@ __l4x_ioremap(unsigned long phys_addr, size_t size, unsigned long flags)
 
 	if ((i = L4XV_FN_i(l4io_search_iomem_region(phys_addr, size,
 	                                            &reg_start, &reg_len)))) {
-		printk("ioremap: No region found for %lx: %d\n", phys_addr, i);
+		pr_err("ioremap: No region found for %lx: %d\n", phys_addr, i);
 		return NULL;
 	}
 
 	if ((i = L4XV_FN_i(l4io_request_iomem(reg_start, reg_len,
 	                                      0, (l4_addr_t *)&addr)))) {
-		printk("ERROR: l4io_request_iomem error(%lx+%lx): %d\n",
+		pr_err("ERROR: l4io_request_iomem error(%lx+%lx): %d\n",
 		       reg_start, reg_len, i);
 		return NULL;
 	}
@@ -354,10 +354,10 @@ __l4x_ioremap(unsigned long phys_addr, size_t size, unsigned long flags)
 	                  reg_start,
 	                  reg_len);
 
-	printk("%s: Mapping physaddr %08lx [0x%zx Bytes, %08lx+%06lx] "
-	       "to %08lx+%06lx\n",
-	       __func__, phys_addr, size, reg_start, reg_len,
-	       (unsigned long)addr, offset);
+	pr_info("%s: Mapping physaddr %08lx [0x%zx Bytes, %08lx+%06lx] "
+	        "to %08lx+%06lx\n",
+	        __func__, phys_addr, size, reg_start, reg_len,
+	        (unsigned long)addr, offset);
 
 	return (void __iomem *) (offset + (unsigned long)addr);
 }
@@ -369,7 +369,7 @@ l4x_iounmap(volatile void __iomem *addr)
 	int i, idx;
 
 	if ((idx = lookup_phys_entry((unsigned long)addr)) == -1) {
-		printk("%s: Error unmapping addr %p\n", __func__, addr);
+		pr_err("%s: Error unmapping addr %p\n", __func__, addr);
 		return;
 	}
 	ioremap_addr = get_iotable_entry_ioremap_addr(idx);

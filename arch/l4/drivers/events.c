@@ -14,6 +14,7 @@
 #include <l4/sys/factory.h>
 
 #include <l4/re/env.h>
+#include <l4/re/event_enums.h>
 #include <l4/re/c/event_buffer.h>
 
 L4_EXTERNAL_FUNC(l4re_event_buffer_consumer_foreach_available_event);
@@ -37,6 +38,11 @@ L4_CV static void l4x_event_put(l4re_event_t *event, void *data)
 	}
 
 	if (unlikely(!stream)) {
+		if (unlikely(event->type == L4RE_EV_SYN &&
+		             event->code == L4RE_SYN_STREAM_CFG) &&
+		    event->value == L4RE_SYN_STREAM_CLOSE)
+			return;
+
 		if (!source->ops->new_stream)
 			return;
 
@@ -48,7 +54,15 @@ L4_CV static void l4x_event_put(l4re_event_t *event, void *data)
 		hlist_add_head(&stream->link, bucket);
 	}
 
-	source->ops->process(stream, event);
+	if (unlikely(event->type == L4RE_EV_SYN &&
+	             event->code == L4RE_SYN_STREAM_CFG) &&
+	    event->value == L4RE_SYN_STREAM_CLOSE) {
+		hlist_del(&stream->link);
+		if (source->ops->free_stream)
+			source->ops->free_stream(source, stream);
+		return;
+	} else
+		source->ops->process(stream, event);
 }
 
 static irqreturn_t l4x_event_interrupt_th(int irq, void *data)

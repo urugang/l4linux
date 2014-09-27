@@ -20,7 +20,7 @@ typedef struct {
 #endif
 
 	struct mutex lock;
-	void *vdso;
+	void __user *vdso;
 
 	l4_cap_idx_t task;
 	enum l4x_unmap_mode_enum l4x_unmap_mode;

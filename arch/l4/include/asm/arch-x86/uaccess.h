@@ -127,10 +127,10 @@ extern int early_fixup_exception(unsigned long *ip);
  * accesses to the same area of user memory).
  */
 
-extern long __get_user_1(unsigned char      *val, const void *address);
-extern long __get_user_2(unsigned short     *val, const void *address);
-extern long __get_user_4(unsigned int       *val, const void *address);
-extern long __get_user_8(unsigned long long *val, const void *address);
+extern long __get_user_1(u8  *val, const void *address);
+extern long __get_user_2(u16 *val, const void *address);
+extern long __get_user_4(u32 *val, const void *address);
+extern long __get_user_8(u64 *val, const void *address);
 extern long __get_user_bad(void);
 
 /* Careful: we have to cast the result to the type of the pointer
@@ -182,10 +182,10 @@ do {									\
 
 
 
-extern long __put_user_1(unsigned char 	    val, const void *address);
-extern long __put_user_2(unsigned short     val, const void *address);
-extern long __put_user_4(unsigned int       val, const void *address);
-extern long __put_user_8(unsigned long long val, const void *address);
+extern long __put_user_1(u8  val, const void *address);
+extern long __put_user_2(u16 val, const void *address);
+extern long __put_user_4(u32 val, const void *address);
+extern long __put_user_8(u64 val, const void *address);
 extern long __put_user_bad(void);
 
 
@@ -240,7 +240,7 @@ extern long __put_user_bad(void);
 	switch (sizeof(*(ptr))) {					\
 	case 1:  __ret_pu = __put_user_1(( u8)((unsigned long)__pu_val),ptr); break; \
 	case 2:  __ret_pu = __put_user_2((u16)((unsigned long)__pu_val),ptr); break; \
-	case 4:  __ret_pu = __put_user_4((u32)(__pu_val),ptr); break; \
+	case 4:  __ret_pu = __put_user_4((u32)((unsigned long)__pu_val),ptr); break; \
 	case 8:  __put_user_8_wrap((__pu_val), ptr, __ret_pu); break; \
 	default: __ret_pu = __put_user_bad(); break;			\
 	}								\

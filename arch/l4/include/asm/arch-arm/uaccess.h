@@ -19,7 +19,7 @@
 #include <asm/unified.h>
 #include <asm/compiler.h>
 
-#if __LINUX_ARM_ARCH__ < 6
+#ifndef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
 #include <asm-generic/uaccess-unaligned.h>
 #else
 #define __get_user_unaligned __get_user
@@ -107,10 +107,10 @@ static inline void set_fs(mm_segment_t fs)
  * problem.
  */
 
-extern long __get_user_1(unsigned char      *val, const void *address);
-extern long __get_user_2(unsigned short     *val, const void *address);
-extern long __get_user_4(unsigned int       *val, const void *address);
-extern long __get_user_8(unsigned long long *val, const void *address);
+extern long __get_user_1(u8  *val, const void *address);
+extern long __get_user_2(u16 *val, const void *address);
+extern long __get_user_4(u32 *val, const void *address);
+extern long __get_user_8(u64 *val, const void *address);
 
 #define get_user(x,ptr)							\
 ({	int __ret_gu,__val_gu;						\
@@ -200,8 +200,9 @@ extern int __put_user_8(void *, unsigned long long);
 #define __put_user_check(x,p)							\
 	({								\
 		unsigned long __limit = current_thread_info()->addr_limit - 1; \
+		const typeof(*(p)) __user *__tmp_p = (p);		\
 		register const typeof(*(p)) __r2 asm("r2") = (x);	\
-		register const typeof(*(p)) __user *__p asm("r0") = (p);\
+		register const typeof(*(p)) __user *__p asm("r0") = __tmp_p; \
 		register unsigned long __l asm("r1") = __limit;		\
 		register int __e asm("r0");				\
 		switch (sizeof(*(__p))) {				\
@@ -352,10 +353,10 @@ do {									\
 //extern int __put_user_2(void *, unsigned int);
 //extern int __put_user_4(void *, unsigned int);
 //extern int __put_user_8(void *, unsigned long long);
-extern long __put_user_1(unsigned char      val, const void *address);
-extern long __put_user_2(unsigned short     val, const void *address);
-extern long __put_user_4(unsigned int       val, const void *address);
-extern long __put_user_8(unsigned long long val, const void *address);
+extern long __put_user_1(u8  val, const void *address);
+extern long __put_user_2(u16 val, const void *address);
+extern long __put_user_4(u32 val, const void *address);
+extern long __put_user_8(u64 val, const void *address);
 extern int __put_user_bad(void);
 
 #if 0

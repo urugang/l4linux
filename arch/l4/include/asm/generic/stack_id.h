@@ -10,6 +10,7 @@ enum {
 
 #include <asm/thread_info.h>
 #include <asm/generic/vcpu.h>
+#include <asm/l4x/stack.h>
 
 #ifndef CONFIG_L4_VCPU
 
@@ -31,9 +32,9 @@ static inline void l4x_stack_set(struct thread_info *ti, l4_utcb_t *u)
 	s->utcb = u;
 }
 
-static inline l4_utcb_t *l4x_utcb_current(void)
+static inline l4_utcb_t *l4x_utcb_current(struct thread_info *ti)
 {
-	return l4x_stack_struct_get(current_thread_info())->utcb;
+	return l4x_stack_struct_get(ti)->utcb;
 }
 
 #else
@@ -44,9 +45,9 @@ static inline void l4x_stack_set(struct thread_info *ti, l4_utcb_t *u)
 {
 }
 
-static inline l4_utcb_t *l4x_utcb_current(void)
+static inline l4_utcb_t *l4x_utcb_current(struct thread_info *ti)
 {
-	return l4x_cpu_threads[current_thread_info()->cpu];
+	return l4x_cpu_threads[ti->cpu];
 }
 
 static inline
@@ -60,14 +61,24 @@ l4_vcpu_state_t *l4x_vcpu_state_current(void)
 }
 #endif
 
+static inline l4_cap_idx_t l4x_cap_current_utcb(l4_utcb_t *utcb)
+{
+	return l4_utcb_tcr_u(utcb)->user[L4X_UTCB_TCR_ID];
+}
+
+static inline unsigned int l4x_prio_current_utcb(l4_utcb_t *utcb)
+{
+	return l4_utcb_tcr_u(utcb)->user[L4X_UTCB_TCR_PRIO];
+}
+
 static inline l4_cap_idx_t l4x_cap_current(void)
 {
-	return l4_utcb_tcr_u(l4x_utcb_current())->user[L4X_UTCB_TCR_ID];
+	return l4x_cap_current_utcb(l4x_utcb_current(current_thread_info()));
 }
 
 static inline unsigned int l4x_prio_current(void)
 {
-	return l4_utcb_tcr_u(l4x_utcb_current())->user[L4X_UTCB_TCR_PRIO];
+	return l4x_prio_current_utcb(l4x_utcb_current(current_thread_info()));
 }
 
 #endif /* ! __ASM_L4__GENERIC__STACK_ID_H__ */

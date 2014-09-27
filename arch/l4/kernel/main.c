@@ -67,6 +67,7 @@
 #include <asm/generic/log.h>
 #include <asm/generic/util.h>
 #include <asm/generic/vcpu.h>
+#include <asm/generic/jdb.h>
 #include <asm/server/server.h>
 
 #include <asm/l4x/exception.h>
@@ -127,9 +128,7 @@ L4_EXTERNAL_FUNC(l4io_request_iomem);
 L4_EXTERNAL_FUNC(l4io_request_iomem_region);
 L4_EXTERNAL_FUNC(l4io_release_iomem);
 L4_EXTERNAL_FUNC(l4io_request_ioport);
-L4_EXTERNAL_FUNC(l4io_request_irq);
 L4_EXTERNAL_FUNC(l4io_request_icu);
-L4_EXTERNAL_FUNC(l4io_release_irq);
 L4_EXTERNAL_FUNC(l4io_search_iomem_region);
 L4_EXTERNAL_FUNC(l4io_lookup_device);
 L4_EXTERNAL_FUNC(l4io_lookup_resource);
@@ -515,7 +514,7 @@ L4_CV l4_utcb_t *l4_utcb_wrap(void)
 		asm ("mov %%fs:0, %0" : "=r" (v) : "r" (v));
 		return (l4_utcb_t *)v;
 	}
-	return l4x_utcb_current();
+	return l4x_utcb_current(current_thread_info_stack());
 #else
 #error Add your arch
 #endif
@@ -1021,13 +1020,6 @@ static __init_refok void l4x_setup_upage(void)
 		LOG_printf("Cannot attach upage properly\n");
 		l4x_linux_main_exit();
 	}
-
-#ifdef ARCH_x86
-	memcpy((void *)upage_addr,
-	       &vdso32_int80_start,
-	       &vdso32_int80_end - &vdso32_int80_start);
-#endif
-	/* ARM code is copied in traps.c */
 }
 
 static void l4x_register_region(const l4re_ds_t ds, void *start,
@@ -1397,6 +1389,18 @@ void __init l4x_setup_memory(char *cmdl,
 	l4x_register_pointer_section((void *)((unsigned long)&_text), 0, "text");
 }
 
+#if defined(CONFIG_X86_64) || defined(CONFIG_ARM)
+static void setup_module_area(void)
+{
+	l4_addr_t start = MODULES_VADDR;
+	if (l4re_rm_reserve_area(&start, MODULES_END - MODULES_VADDR,
+	                         0, PGDIR_SHIFT))
+		LOG_printf("Could not reserve module area %08lx-%08lx, "
+		           "modules won't work!\n",
+		           MODULES_VADDR, MODULES_END);
+}
+#endif
+
 #ifdef CONFIG_X86
 #include <asm/l4lxapi/memory.h>
 
@@ -1428,16 +1432,6 @@ void *xlate_dev_mem_and_kmem_ptr_l4x(unsigned long x)
 	if (MODULES_VADDR <= x && x < MODULES_END)
 		return empty_zero_page;
 	return (void *)x;
-}
-
-static void setup_module_area(void)
-{
-	l4_addr_t start = MODULES_VADDR;
-	if (l4re_rm_reserve_area(&start, MODULES_END - MODULES_VADDR,
-	                         0, PGDIR_SHIFT))
-		LOG_printf("Could not reserve module area %08lx-%08lx, "
-		           "modules won't work!\n",
-		           MODULES_VADDR, MODULES_END);
 }
 
 /* Sanity check for hard-coded values used in dispatch.c */
@@ -1472,14 +1466,7 @@ static void l4x_create_ugate(l4_cap_idx_t forthread, unsigned cpu)
 		LOG_printf("Error creating user-gate %d, error=%lx\n",
 		           cpu, l4_error(r));
 
-	{
-		char n[14];
-		snprintf(n, sizeof(n), "l4x ugate-%d", cpu);
-		n[sizeof(n) - 1] = 0;
-#ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
-		l4_debugger_set_object_name(l4x_user_gate[cpu], n);
-#endif
-	}
+	l4x_dbg_set_object_name(l4x_user_gate[cpu], "ugate%d", cpu);
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -1584,7 +1571,7 @@ static __noreturn L4_CV void l4x_cpu_ipi_thread(void *x)
 	int err;
 	l4_utcb_t *utcb = l4_utcb();
 
-	l4x_prepare_irq_thread(current_thread_info(), cpu);
+	l4x_prepare_irq_thread(current_thread_info_stack(), cpu);
 
 	// wait until parent has setup our cap and attached us
 	while (l4_is_invalid_cap(l4x_cpu_ipi_irqs[cpu])) {
@@ -1614,7 +1601,7 @@ static __noreturn L4_CV void l4x_cpu_ipi_thread(void *x)
 
 			while (mask) {
 				vector = ffs(mask) - 1;
-				l4x_do_IPI(vector, current_thread_info());
+				l4x_do_IPI(vector, current_thread_info_stack());
 				mask &= ~(1 << vector);
 			}
 		}
@@ -1688,11 +1675,7 @@ void l4x_cpu_ipi_setup(unsigned cpu)
 		l4x_exit_l4linux();
 	}
 
-#ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
-	snprintf(s, sizeof(s), "l4lx.ipi%d", cpu);
-	s[sizeof(s) - 1] = 0;
-	l4_debugger_set_object_name(c, s);
-#endif
+	l4x_dbg_set_object_name(c, "l4lx.ipi%d", cpu);
 
 #ifdef CONFIG_L4_VCPU
 	t = l4_irq_attach(c, L4X_VCPU_IRQ_IPI << 2,
@@ -1738,11 +1721,13 @@ void l4x_cpu_ipi_stop(unsigned cpu)
 static L4_CV void __cpu_starter(void *data)
 {
 	int cpu = *(int *)data;
+	struct thread_info *ti = current_thread_info_stack();
+	l4_utcb_t *u = l4_utcb();
 
-	current_thread_info()->cpu = cpu;
-	l4x_stack_set(current_thread_info(), l4_utcb());
-	l4x_create_ugate(l4x_cap_current(), cpu);
-	l4lx_thread_pager_change(l4x_cap_current(), l4x_start_thread_id);
+	ti->cpu = cpu;
+	l4x_stack_set(ti, l4_utcb());
+	l4x_create_ugate(l4x_cap_current_utcb(u), cpu);
+	l4lx_thread_pager_change(l4x_cap_current_utcb(u), l4x_start_thread_id);
 
 #ifdef CONFIG_L4_VCPU
 	l4x_vcpu_init(l4x_vcpu_ptr[cpu]);
@@ -2100,13 +2085,8 @@ static long l4x_blink(int state)
 
 static L4_CV void __init cpu0_startup(void *data)
 {
-#ifdef CONFIG_X86_64
-	register unsigned long rsp asm("rsp");
-	struct thread_info *ti = (struct thread_info *)((rsp & ~(THREAD_SIZE - 1)) + KERNEL_STACK_OFFSET);
-#else
-	struct thread_info *ti = current_thread_info();
-#endif
 	l4_cap_idx_t cpu0id = l4x_cpu_thread_get_cap(0);
+	struct thread_info *ti = current_thread_info_stack();
 
 	ti->cpu = 0;
 	l4x_stack_set(ti, l4_utcb());
@@ -2553,22 +2533,14 @@ int __init_refok L4_CV main(int argc, char **argv)
 		= l4_utcb_mr()->mr[L4_THREAD_CONTROL_MR_IDX_PAGER];
 
 #ifndef CONFIG_L4_VCPU
-#ifdef CONFIG_L4_TAMED
 	l4x_tamed_init();
 	l4x_tamed_start(0);
-#endif
 	l4x_repnop_init();
 #endif
 
 	l4x_scan_hw_resources();
 
 #ifdef CONFIG_X86
-	if (l4util_kip_kernel_has_feature(l4lx_kinfo, "io_prot")) {
-#ifndef CONFIG_L4_TAMED
-		enter_kdebug("ioprot-microkernel -> enable TAMED mode!");
-#endif
-	}
-
 	/* Initialize GDT entry offset */
 #ifdef CONFIG_X86_32
 	l4x_fiasco_gdt_entry_offset = fiasco_gdt_get_entry_offset(l4re_env()->main_thread, l4_utcb());
@@ -2593,10 +2565,12 @@ int __init_refok L4_CV main(int argc, char **argv)
 
 	l4x_setup_upage();
 
+#if defined(CONFIG_X86_64) || defined(CONFIG_ARM)
+	setup_module_area();
+#endif
+
 #ifdef ARCH_arm
 	l4x_v2p_add_item(0, NULL, PAGE_SIZE);
-
-	setup_module_area();
 
 	if (l4x_sanity_check_kuser_cmpxchg())
 		return 1;
@@ -2614,8 +2588,10 @@ int __init_refok L4_CV main(int argc, char **argv)
 	                             0, &l4x_vcpu_ptr[0],
 	                             "cpu0", &si);
 
-	if (!l4lx_thread_is_valid(main_id))
+	if (!l4lx_thread_is_valid(main_id)) {
+		LOG_printf("Failed to create vCPU0. Aborting.\n");
 		return 1;
+	}
 
 
 	l4x_cpu_thread_set(0, main_id);
@@ -3193,7 +3169,11 @@ static int l4x_handle_arm_undef(l4_exc_regs_t *exc)
 	unsigned long pc = exc->pc - 4;
 	unsigned long op;
 
+#ifdef CONFIG_L4_NAEC
+	if ((exc->err >> 26) != 0)
+#else
 	if (exc->err != 0x00100000)
+#endif
 		return 1;
 
 	BUG_ON(exc->cpsr & PSR_T_BIT);
@@ -3566,7 +3546,7 @@ void l4x_prepare_irq_thread(struct thread_info *ti, unsigned _cpu)
 #endif
 
 	/* Set pager */
-	l4lx_thread_set_kernel_pager(l4x_cap_current());
+	l4lx_thread_set_kernel_pager(l4x_cap_current_utcb(l4_utcb()));
 
 #if defined(CONFIG_SMP) && defined(ARCH_x86)
 	l4x_load_percpu_gdt_descriptor(get_cpu_gdt_table(_cpu));
@@ -3791,8 +3771,8 @@ EXPORT_SYMBOL(l4lx_task_get_new_task);
 EXPORT_SYMBOL(l4lx_task_number_free);
 EXPORT_SYMBOL(l4lx_task_delete_task);
 EXPORT_SYMBOL(l4re_global_env);
-#ifdef ARCH_x86
 EXPORT_SYMBOL(l4_utcb_wrap);
+#ifdef ARCH_x86
 extern char __l4sys_invoke_direct[];
 EXPORT_SYMBOL(__l4sys_invoke_direct);
 

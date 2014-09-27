@@ -195,7 +195,7 @@ int __glue(_CACHE, _coherent_user_range)(unsigned long start, unsigned long end)
 
 void __glue(_CACHE, _flush_kern_dcache_area)(void *x, size_t size)
 {
-	l4_cache_clean_data((unsigned long)x,
+	l4_cache_flush_data((unsigned long)x,
 	                    (unsigned long)x + size - 1);
 }
 

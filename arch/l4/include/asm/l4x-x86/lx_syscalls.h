@@ -3,9 +3,9 @@
 
 #include <asm/syscall.h>
 
-typedef asmlinkage int (*syscall_t)(long a0,...);
+typedef asmlinkage long (*syscall_t)(long a0,...);
 
-static inline int is_lx_syscall(int nr)
+static inline int is_lx_syscall(unsigned nr)
 {
 	return nr < NR_syscalls;
 }

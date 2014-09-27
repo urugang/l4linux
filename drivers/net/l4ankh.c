@@ -17,6 +17,9 @@
 #include <asm/generic/do_irq.h>
 #include <asm/generic/cap_alloc.h>
 
+#define ASSERT_ASSERT(x) BUG_ON(!(x))
+#define ASSERT_PRINTF    pr_err
+
 #include <l4/re/c/util/cap_alloc.h>
 #include <l4/re/consts.h>
 #include <l4/ankh/client-c.h>

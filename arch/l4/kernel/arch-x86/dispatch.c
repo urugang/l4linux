@@ -195,7 +195,12 @@ static inline void l4x_arch_task_start_setup(struct task_struct *p, l4_cap_idx_t
 
 static inline l4_umword_t l4x_l4pfa(struct thread_struct *t)
 {
-	return (t->cr2 & ~3) | (t->error_code & 2);
+	return t->cr2;
+}
+
+static inline int l4x_iswrpf(unsigned long error_code)
+{
+	return error_code & 2;
 }
 
 static inline int l4x_ispf(struct thread_struct *t)
@@ -256,7 +261,6 @@ DEFINE_PER_CPU(struct thread_info *, l4x_current_proc_run);
 static DEFINE_PER_CPU(unsigned, utcb_snd_size);
 #endif
 
-#include <asm/generic/stack_id.h>
 
 __notrace_funcgraph struct task_struct *
 __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
@@ -265,10 +269,10 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	fpu_switch_t fpu;
 
 	if (0)
-		LOG_printf("%s: cpu%d: %s(%d)[%ld] -> %s(%d)[%ld]\n",
+		LOG_printf("%s: cpu%d: %s(%d)[%lx, %p] -> %s(%d)[%lx, %p]\n",
 		           __func__, cpu,
-		           prev_p->comm, prev_p->pid, prev_p->state,
-		           next_p->comm, next_p->pid, next_p->state);
+		           prev_p->comm, prev_p->pid, prev_p->state, prev_p->stack,
+		           next_p->comm, next_p->pid, next_p->state, next_p->stack);
 #ifdef CONFIG_L4_VCPU
 	TBUF_LOG_SWITCH(fiasco_tbuf_log_3val("SWITCH", (unsigned long)prev_p->stack, (unsigned long)next_p->stack, next_p->thread.sp0));
 #else
@@ -295,6 +299,11 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		__switch_to_xtra(prev_p, next_p, NULL);
 
 	arch_end_context_switch(next_p);
+
+	this_cpu_write(kernel_stack,
+		  (unsigned long)task_stack_page(next_p) +
+		  THREAD_SIZE - KERNEL_STACK_OFFSET);
+
 
 	switch_fpu_finish(next_p, fpu);
 
@@ -331,21 +340,6 @@ static inline void l4x_pte_add_access_flag(pte_t *ptep)
 static inline void l4x_pte_add_access_and_dirty_flags(pte_t *ptep)
 {
 	ptep->pte |= _PAGE_ACCESSED | _PAGE_DIRTY | _PAGE_SOFT_DIRTY;
-}
-
-static inline
-unsigned long l4x_map_page_attr_to_l4(pte_t pte)
-{
-	switch (pte_val(pte) & _PAGE_CACHE_MASK) {
-	case _PAGE_CACHE_WC: /* _PAGE_PWT */
-		return L4_FPAGE_BUFFERABLE << 4;
-	case _PAGE_CACHE_UC_MINUS: /* _PAGE_PCD */
-	case _PAGE_CACHE_UC: /* _PAGE_PCD | _PAGE_PWT */
-		return L4_FPAGE_UNCACHEABLE << 4;
-	case _PAGE_CACHE_WB: /* 0 */
-	default:
-		return 0; /* same attrs as source */
-	};
 }
 
 #ifdef CONFIG_L4_VCPU

@@ -8,7 +8,6 @@
 
 #include <l4/sys/irq.h>
 #include <l4/sys/icu.h>
-#include <l4/sys/factory.h>
 
 #include <asm/api/config.h>
 #include <asm/api/macros.h>
@@ -26,9 +25,8 @@
 #include <asm/generic/stack_id.h>
 #include <asm/generic/smp.h>
 #include <asm/generic/irq.h>
+#include <asm/generic/jdb.h>
 
-#include <l4/re/c/namespace.h>
-#include <l4/log/log.h>
 #include <l4/sys/debugger.h>
 
 #define d_printk(format, args...)  printk(format , ## args)
@@ -56,19 +54,22 @@ static inline l4_cap_idx_t get_irq(struct l4x_irq_desc_private *p)
 
 static inline void attach_to_irq(struct irq_desc *desc)
 {
-	long ret;
-	unsigned long flags;
+	long r;
 	unsigned irq = irq_desc_get_irq_data(desc)->irq;
 	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
 	unsigned cpu = p->is_percpu ? smp_processor_id() : p->cpu;
+	l4_cap_idx_t ic = get_irq(p);
 
-	local_irq_save(flags);
-	if ((ret  = l4_error(l4_irq_attach(get_irq(p), irq << 2,
-	                                   l4x_cpu_thread_get_cap(cpu)))))
+	if ((r = L4XV_FN_i(l4_error(l4_irq_attach(ic, irq << 2,
+	                                          l4x_cpu_thread_get_cap(cpu))))))
 		dd_printk("%s: can't register to irq %u: return=%ld\n",
-		          __func__, irq, ret);
+		          __func__, irq, r);
 
-	local_irq_restore(flags);
+	if (p->is_percpu)
+		L4XV_FN_v(l4x_dbg_set_object_name(ic, "irq%u/%u", irq, cpu));
+	else
+		L4XV_FN_v(l4x_dbg_set_object_name(ic, "irq%u", irq));
+
 }
 
 static void detach_from_interrupt(struct irq_desc *desc)
@@ -87,7 +88,7 @@ void l4lx_irq_init(void)
 {
 }
 
-unsigned int l4lx_irq_io_startup(struct irq_data *data)
+unsigned int l4lx_irq_icu_startup(struct irq_data *data)
 {
 	unsigned irq = data->irq;
 	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
@@ -95,30 +96,13 @@ unsigned int l4lx_irq_io_startup(struct irq_data *data)
 	BUG_ON(p->is_percpu);
 	BUG_ON(!l4_is_invalid_cap(p->c.irq_cap));
 
-	if (l4_is_invalid_cap(p->c.irq_cap = l4x_cap_alloc())) {
-		pr_err("l4x-irq: Failed to get IRQ cap\n");
-		return 0;
-	}
-
-	if (L4XV_FN_i(l4_error(l4_icu_set_mode(l4io_request_icu(),
-	                                       irq, p->trigger))) < 0) {
-		pr_err("l4x-irq: Failed to set type for IRQ %d\n", irq);
-		WARN_ON(1);
-		goto err;
-	}
-
-	if (L4XV_FN_i(l4io_request_irq(irq, p->c.irq_cap))) {
-		pr_err("l4x-irq: Did not get IRQ %d from IO service\n", irq);
-		WARN_ON(1);
-		goto err;
+	p->c.irq_cap = l4x_irq_init(p->icu, irq, p->trigger, "icu");
+	if (l4_is_invalid_cap(p->c.irq_cap)) {
+		pr_err("l4x-irq: Failed to initialize IRQ %d\n", irq);
+		return -ENXIO;
 	}
 
 	l4lx_irq_dev_enable(data);
-	return 0;
-
-err:
-	l4x_cap_free(p->c.irq_cap);
-	p->c.irq_cap = L4_INVALID_CAP;
 	return 0;
 }
 
@@ -131,14 +115,16 @@ unsigned int l4lx_irq_plain_startup(struct irq_data *data)
 	return 0;
 }
 
-void l4lx_irq_io_shutdown(struct irq_data *data)
+void l4lx_irq_icu_shutdown(struct irq_data *data)
 {
 	unsigned irq = data->irq;
 	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 
 	dd_printk("%s: %u\n", __func__, irq);
 	l4lx_irq_dev_disable(data);
-	l4io_release_irq(irq, p->c.irq_cap);
+	if (L4XV_FN_i(l4_error(l4_icu_unbind(p->icu, irq, p->c.irq_cap))))
+		pr_err("l4x-irq: Failed to unbind IRQ %d\n", irq);
+	l4x_irq_release(p->c.irq_cap);
 	l4x_cap_free(p->c.irq_cap);
 	p->c.irq_cap = L4_INVALID_CAP;
 }

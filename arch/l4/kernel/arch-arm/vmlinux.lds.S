@@ -322,7 +322,7 @@ SECTIONS
 	BSS_SECTION(0, 0, 0)
 
 	/* L4: Align to full superpage */
-	. = ALIGN(1048576);
+	. = ALIGN(1 << 21);
 	_end = .;
 
 	STABS_DEBUG

@@ -228,7 +228,7 @@ unsigned long l4x_set_pte(struct mm_struct *mm,
 	if (pte_present(pteval)) {
 		/* new page is present,
 		 * now we have to find out what has changed */
-		if (((pte_val(old) ^ pte_val(pteval)) & PAGE_MASK)
+		if (((pte_val(old) ^ pte_val(pteval)) & L4X_PHYSICAL_PAGE_MASK)
 		    || (pte_young(old) && !pte_young(pteval))) {
 			/* physical page frame changed
 			 * || access attribute changed -> flush */
@@ -245,14 +245,14 @@ unsigned long l4x_set_pte(struct mm_struct *mm,
 	}
 
 	/* Ok, now actually flush or remap the page */
-	l4x_flush_page(mm, pte_val(old), addr, PAGE_SHIFT, flush_rights);
+	l4x_flush_page(mm, pte_val(old) & L4X_PHYSICAL_PAGE_MASK, addr, PAGE_SHIFT, flush_rights);
 	return pte_val(pteval);
 }
 
 void l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte_t pteval)
 {
 	/* Invalidate page */
-	l4x_flush_page(mm, pte_val(pteval), addr, PAGE_SHIFT, L4_FPAGE_RWX);
+	l4x_flush_page(mm, pte_val(pteval) & L4X_PHYSICAL_PAGE_MASK, addr, PAGE_SHIFT, L4_FPAGE_RWX);
 }
 
 
@@ -292,13 +292,9 @@ void l4x_vmalloc_map_vm_area(unsigned long address, unsigned long end)
 		if (!ptep || !pte_present(*ptep)) {
 			if (0)
 				printk("%s: No (valid) PTE for %08lx?!"
-			               " (ptep: %p, pte: %08"
-#ifndef CONFIG_ARM
-				       "l"
-#endif
-				       "x\n",
+			               " (ptep: %p, pte: %08lx\n",
 			               __func__, address,
-			               ptep, pte_val(*ptep));
+			               ptep, (unsigned long)pte_val(*ptep));
 			continue;
 		}
 		l4x_virtual_mem_register(address, *ptep);
@@ -324,7 +320,7 @@ void l4x_vmalloc_unmap_vm_area(unsigned long address, unsigned long end)
 
 		/* check whether we are really flushing a vm page */
 		if (address < (unsigned long)high_memory
-#ifdef CONFIG_ARM
+#if defined(CONFIG_X86_64) || defined(CONFIG_ARM)
 		    && !(address >= MODULES_VADDR && address < MODULES_END)
 #endif
 		    ) {

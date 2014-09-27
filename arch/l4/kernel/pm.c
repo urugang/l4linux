@@ -375,33 +375,43 @@ static ssize_t wakeup_irq_add_store(struct kobject *kobj,
                                     struct kobj_attribute *attr,
                                     const char *buf, size_t sz)
 {
-	unsigned irq = simple_strtoul(buf, NULL, 0);
-	int r = -EINVAL;
+	unsigned irq;
+	int r;
 
-	if (irq < NR_IRQS) {
-		if (list_empty(&wakeup_srcs))
-			suspend_possible = 1;
-		r = l4x_wakeup_source_register(irq);
-		if (!r)
-			return sz;
-	}
-	return r;
+	r = kstrtouint(buf, 0, &irq);
+	if (r)
+		return r;
+
+	if (irq >= NR_IRQS)
+		return -EINVAL;
+
+	if (list_empty(&wakeup_srcs))
+		suspend_possible = 1;
+	r = l4x_wakeup_source_register(irq);
+	if (r)
+		return r;
+	return sz;
 }
 
 static ssize_t wakeup_irq_del_store(struct kobject *kobj,
                                     struct kobj_attribute *attr,
                                     const char *buf, size_t sz)
 {
-	unsigned irq = simple_strtoul(buf, NULL, 0);
-	int r = -EINVAL;
+	unsigned irq;
+	int r;
 
-	if (irq < NR_IRQS) {
-		r = l4x_wakeup_source_unregister(irq);
-		if (!r)
-			r = sz;
-		if (list_empty(&wakeup_srcs))
-			suspend_possible = 0;
-	}
+	r = kstrtouint(buf, 0, &irq);
+	if (r)
+		return r;
+
+	if (irq >= NR_IRQS)
+		return -EINVAL;
+
+	r = l4x_wakeup_source_unregister(irq);
+	if (!r)
+		r = sz;
+	if (list_empty(&wakeup_srcs))
+		suspend_possible = 0;
 	return r;
 }
 

@@ -10,17 +10,19 @@ extern spinlock_t l4x_cap_lock;
 static inline l4_cap_idx_t l4x_cap_alloc(void)
 {
 	l4_cap_idx_t c;
-	spin_lock(&l4x_cap_lock);
+	unsigned long flags;
+	spin_lock_irqsave(&l4x_cap_lock, flags);
 	c = l4re_util_cap_alloc();
-	spin_unlock(&l4x_cap_lock);
+	spin_unlock_irqrestore(&l4x_cap_lock, flags);
 	return c;
 }
 
 static inline void l4x_cap_free(l4_cap_idx_t c)
 {
-	spin_lock(&l4x_cap_lock);
+	unsigned long flags;
+	spin_lock_irqsave(&l4x_cap_lock, flags);
 	l4re_util_cap_free(c);
-	spin_unlock(&l4x_cap_lock);
+	spin_unlock_irqrestore(&l4x_cap_lock, flags);
 }
 
 static inline l4_cap_idx_t l4x_cap_alloc_noctx(void)

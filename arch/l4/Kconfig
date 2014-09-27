@@ -134,12 +134,32 @@ config L4_VPCI
 	  Use (para-)virtual PCI bus to find any devices provided by IO
 	  component.
 
-#config L4_BLK_DRV
-#	bool "Block driver for the generic_blk interface"
-#	help
-#	  Build block driver for the generic_blk interface of DROPS.
-#	  It does not harm to include this driver, it needs to be
-#	  explicitely enabled with "l4bd.l4blk_name=BLKNAME".
+config L4_VBUS
+	bool "Bus driver for l4vbus"
+	help
+	  This driver provides a Linux-internal bus for L4's vbus.
+
+config L4_PM_BUTTON
+	bool "L4 Power management virtual button events"
+	select L4_VBUS
+	depends on INPUT
+	help
+	  This driver handles events on the virtual power, sleep and lid
+	  buttons.
+
+config L4_BLK_DRV
+	bool "Block driver for FDX"
+	help
+	  Build block driver for FDX interface.
+	  It does not harm to include this driver, block devices need to be
+	  explicitely enabled via "l4bd.add=path[,rw]".
+
+config L4_SERVER_FDX
+	bool "File transfer service"
+	depends on L4_SERVER
+	select SYSFS
+	help
+	  Shared-memory-based data transfer service FDX.
 
 config L4_BLK_DS_DRV
 	bool "Block driver for dataspaces"
@@ -291,7 +311,7 @@ config L4_DEBUG_STATS
 
 config L4_DEBUG_TAMED_COUNT_INTERRUPT_DISABLE
 	bool "Count interrupt disables"
-	depends on L4_DEBUG && L4_TAMED && !L4_VCPU
+	depends on L4_DEBUG && !L4_VCPU
 	help
 	  Counts the interrupts disabled events.
 
@@ -306,12 +326,14 @@ config L4_MEMSIZE
 	  Default memory size in MByte. Configureable with the usual "mem="
 	  kernel parameter.
 
-config L4_TAMED
-	def_bool y
-
 config L4_VCPU
 	def_bool y
 	bool "Use vCPU execution model"
+
+config L4_NAEC
+	def_bool y
+	depends on ARM
+	bool #"New ARM error codes -- transitional"
 
 config L4_DMAPOOL
 	bool "Use separate memory pool for DMA memory"

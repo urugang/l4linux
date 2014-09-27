@@ -19,9 +19,9 @@ clean-files := inat-tables.c
 obj-$(CONFIG_SMP) += msr-smp.o cache-smp.o
 
 KBUILD_CFLAGS += -Iarch/x86/lib
+KBUILD_CFLAGS += -Iarch/l4/lib/arch-x86
 
-lib-y := $(b)/delay.o $(b)/misc.o
-
+lib-y := $(b)/delay.o $(b)/misc.o $(b)/cmdline.o
 lib-y += ../memcpy_user.o ../uaccess.o ../pte.o
 lib-y += ../csumpartialcopyuser.o
 lib-y += $(b)/memcpy_$(BITS).o

@@ -17,11 +17,11 @@ L4DIR := $(shell readlink $(L4OBJ)/source)
 export L4OBJ L4DIR
 
 ifneq ($(L4DIR),)
-$(objtree)/Makeconf.l4conf:
+$(LINUX_OBJTREE)/Makeconf.l4conf:
 	@echo L4 source directory: $(L4DIR)
-	$(Q)PWD=$(L4DIR) $(MAKE) -C $(L4DIR) -f $(srctree)/arch/l4/Makefile.l4conf O=$(L4OBJ) L4X_LOOP_CHECK=1 OUTPUT=$@
+	$(Q)PWD=$(L4DIR) $(MAKE) -C $(L4DIR) -f $(LINUX_SRCTREE)/arch/l4/Makefile.l4conf O=$(L4OBJ) L4X_LOOP_CHECK=1 OUTPUT=$@
 else
-$(objtree)/Makeconf.l4conf:
+$(LINUX_OBJTREE)/Makeconf.l4conf:
 	@echo
 	@echo "ERROR:"
 	@echo "    Cannot determine L4 source directory"
@@ -39,7 +39,7 @@ PHONY := all
 
 all:: $(OUTPUT)
 
-$(OUTPUT): $(srctree)/arch/l4/Makefile.l4conf $(OBJ_BASE)/.config.all $(OBJ_BASE)/.config
+$(OUTPUT): $(LINUX_SRCTREE)/arch/l4/Makefile.l4conf $(OBJ_BASE)/.config.all $(OBJ_BASE)/.config
 	@echo "  GEN     $@" ;                                                             \
 	echo "L4BID_CONF_AVAILABLE=yes"                          > $@ ;                   \
 	echo "L4BID_CPPFLAGS_SYSCALLS-$(L4_ABS_SYSCALLS)=$(BID_CPPFLAGS_SYSCALLS)" >> $@ ;\

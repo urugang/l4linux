@@ -20,6 +20,7 @@
 #include <asm/generic/stack_id.h>
 #include <asm/generic/vcpu.h>
 #include <asm/generic/l4lib.h>
+#include <asm/generic/jdb.h>
 #include <asm/api/api.h>
 #include <asm/api/macros.h>
 
@@ -207,9 +208,6 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 {
 	l4_msgtag_t res;
 	struct l4lx_thread_start_info_t si_buf, *si;
-#ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
-	char l4lx_name[20] = "l4lx.";
-#endif
 	l4_utcb_t *utcb;
 	l4_umword_t *sp, *sp_data;
 #if defined(CONFIG_L4_VCPU) || defined(CONFIG_KVM)
@@ -253,14 +251,7 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 	*(--sp) = 0;
 #endif
 
-#ifdef CONFIG_L4_DEBUG_REGISTER_NAMES
-	/* Prefix name with 'l4lx.' */
-	strncpy(l4lx_name + strlen(l4lx_name), name,
-	        sizeof(l4lx_name) - strlen(l4lx_name));
-	l4lx_name[sizeof(l4lx_name) - 1] = 0;
-	l4_debugger_set_object_name(l4cap, l4lx_name);
-#endif
-
+	l4x_dbg_set_object_name(l4cap, "%s", name);
 	if (!utcbp) {
 		utcb = l4lx_thread_ku_alloc_alloc_u();
 		if (!utcb)
@@ -290,14 +281,25 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 
 #if defined(CONFIG_L4_VCPU) || defined(CONFIG_KVM)
 	if (vcpu_state) {
-		(*vcpu_state)->state = 0;
+		int r = 1, vcpu_ext_not_avail = 0;
+		l4_vcpu_state_t *v = *vcpu_state;
+
+		v->state = 0;
+
 #ifdef CONFIG_KVM
-		res = l4_thread_vcpu_control_ext(l4cap, (l4_addr_t)(*vcpu_state));
-#else
-		res = l4_thread_vcpu_control(l4cap, (l4_addr_t)(*vcpu_state));
+		r = l4_error(l4_thread_vcpu_control_ext(l4cap, (l4_addr_t)v));
+		vcpu_ext_not_avail = r == -L4_ENOSYS;
 #endif
-		if (l4_error(res))
+		if (r)
+			r = l4_error(l4_thread_vcpu_control(l4cap,
+			                                    (l4_addr_t)v));
+		if (r)
 			goto out_free_vcpu;
+
+		if (vcpu_ext_not_avail)
+			LOG_printf("Failed to init virtualization in "
+			           "vCPU%d (%s), KVM won't work.\n",
+			           vcpu, name);
 	}
 #endif
 
