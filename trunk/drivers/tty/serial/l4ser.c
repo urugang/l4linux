@@ -62,50 +62,47 @@ static void l4ser_enable_ms(struct uart_port *port)
 {
 }
 
-static int
-l4ser_getchar(struct l4ser_uart_port *l4port)
+static void
+l4ser_process_buf(struct uart_port *port, char *buf, int len)
 {
-	unsigned char c;
+	for (; len--; ++buf) {
+		port->icount.rx++;
 
-	if (l4_is_invalid_cap(l4port->vcon_irq_cap)
-	    || L4XV_FN_i(l4_vcon_read(l4port->vcon_cap, &c, 1)) <= 0)
-		return -1;
+		if (uart_handle_sysrq_char(port, *buf))
+			continue;
 
-	return c;
+		tty_insert_flip_char(&port->state->port, *buf, TTY_NORMAL);
+	}
 }
 
 static void
 l4ser_rx_chars(struct uart_port *port)
 {
 	struct l4ser_uart_port *l4port = (struct l4ser_uart_port *)port;
-	unsigned int flg;
-	int ch;
+	char chbuf[16];
+	int r;
 
-	while (1)  {
-		ch = l4ser_getchar(l4port);
-		if (ch == -1)
+	BUG_ON(l4x_is_vcpu() && !irqs_disabled());
+	if (l4_is_invalid_cap(l4port->vcon_irq_cap))
+		return;
+
+	do {
+		r = l4_vcon_read_with_flags(l4port->vcon_cap,
+		                            chbuf, sizeof(chbuf));
+		if (r < 0)
 			break;
-		port->icount.rx++;
 
-		flg = TTY_NORMAL;
+#if defined(SUPPORT_SYSRQ)
+		if (r & L4_VCON_READ_STAT_BREAK) {
+			port->icount.brk++;
+			WARN_ON(!uart_handle_break(port));
+		}
+#endif
 
-		// ^ can be used as a sysrq starter
-		if (0)
-			if (ch == '^') {
-				if (port->sysrq)
-					port->sysrq = 0;
-				else {
-					port->icount.brk++;
-					uart_handle_break(port);
-					continue;
-				}
-			}
+		r &= L4_VCON_READ_SIZE_MASK;
+		l4ser_process_buf(port, chbuf, min((int)sizeof(chbuf), r));
+	} while (r > sizeof(chbuf));
 
-		if (uart_handle_sysrq_char(port, ch))
-			continue;
-
-		tty_insert_flip_char(&port->state->port, ch, flg);
-	}
 	tty_flip_buffer_push(&port->state->port);
 	return;
 }
@@ -174,7 +171,7 @@ static int l4ser_startup(struct uart_port *port)
 		if (retval)
 			return retval;
 
-		l4ser_rx_chars(port);
+		L4XV_FN_v(l4ser_rx_chars(port));
 	}
 
 	return 0;

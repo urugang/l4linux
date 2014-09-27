@@ -73,7 +73,7 @@ int l4gpio_multi_config_pin(unsigned gpiochip, unsigned pinmask,
 		return -EINVAL;
 
 	r = L4XV_FN_i(l4vbus_gpio_multi_config_pad(vbus, dhandles[gpiochip],
-	                                           pinmask, func, value));
+	                                           0, pinmask, func, value));
 	if (r < 0)
 		pr_warn("l4gpio: Multi-config-pin GPIO(%d*%d) failed\n",
 		        gpiochip, L4GPIO_GROUP_SIZE);
@@ -169,14 +169,14 @@ static int add_chip(unsigned gpio, l4io_device_handle_t dh,
 	chip->dh = dh;
 	chip->gc.direction_input  = l4gpio_direction_input;
 	chip->gc.direction_output = l4gpio_direction_output;
-        chip->gc.get              = l4gpio_get_value;
-        chip->gc.set              = l4gpio_set_value;
-        chip->gc.to_irq           = l4gpio_to_irq;
-        chip->gc.base             = L4GPIO_OFFSET(gpio),
-        chip->gc.ngpio            = L4GPIO_GROUP_SIZE;
-        chip->gc.label            = l4gpio_dev_name(gpio);
-        chip->gc.dev              = pdev ? &pdev->dev : NULL;
-        chip->gc.owner            = THIS_MODULE;
+	chip->gc.get              = l4gpio_get_value;
+	chip->gc.set              = l4gpio_set_value;
+	chip->gc.to_irq           = l4gpio_to_irq;
+	chip->gc.base             = L4GPIO_OFFSET(gpio),
+	chip->gc.ngpio            = L4GPIO_GROUP_SIZE;
+	chip->gc.label            = l4gpio_dev_name(gpio);
+	chip->gc.dev              = pdev ? &pdev->dev : NULL;
+	chip->gc.owner            = THIS_MODULE;
 
 	ret = gpiochip_add(&chip->gc);
 	if (ret) {

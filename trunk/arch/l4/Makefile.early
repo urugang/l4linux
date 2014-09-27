@@ -10,11 +10,18 @@ LINSRCARCH := x86
 endif
 
 ifeq ($(LINSRCARCH),)
- ifneq ($(shell . $$PWD/.config; echo $$CONFIG_L4_ARCH_ARM),)
-   LINSRCARCH := arm
- else
-   LINSRCARCH := x86
- endif
+  L4X_CONFIG=$(shell echo $$PWD/.config)
+  L4X_DEFCONFIG = $(filter %_defconfig,$(MAKECMDGOALS))
+  ifneq ($(L4X_DEFCONFIG),)
+    ifneq ($(wildcard $(srctree)/arch/l4/configs/$(L4X_DEFCONFIG)),)
+      L4X_CONFIG=$(srctree)/arch/l4/configs/$(L4X_DEFCONFIG)
+    endif
+  endif
+  ifneq ($(shell . $(L4X_CONFIG); echo $$CONFIG_L4_ARCH_ARM),)
+    LINSRCARCH := arm
+  else
+    LINSRCARCH := x86
+  endif
 endif
 
 export LINSRCARCH

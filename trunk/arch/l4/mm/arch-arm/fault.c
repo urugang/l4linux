@@ -362,7 +362,10 @@ retry:
 	 * If we are in kernel mode at this point, we
 	 * have no context to handle this fault with.
 	 */
-#ifndef CONFIG_L4
+#ifdef CONFIG_L4
+	if (!(fsr & PF_EUSER))
+		return -1;
+#else
 	if (!user_mode(regs))
 		goto no_context;
 #endif
@@ -412,6 +415,10 @@ do_page_fault(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 int l4x_do_page_fault(unsigned long address, struct pt_regs *regs,
                       unsigned long error_code)
 {
+#ifdef CONFIG_L4_NAEC
+	if (error_code & (1 << 6))
+		error_code |= FSR_WRITE; // Bit6 shall be ignore otherwise
+#endif
 	return do_page_fault(address, error_code, regs);
 }
 

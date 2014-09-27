@@ -141,7 +141,7 @@ static void __init copy_bootdata(char *real_mode_data)
 #endif /* L4 */
 }
 
-asmlinkage void __init x86_64_start_kernel(char * real_mode_data)
+asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
 {
 	int i;
 
@@ -178,7 +178,7 @@ asmlinkage void __init x86_64_start_kernel(char * real_mode_data)
 	 */
 	load_ucode_bsp();
 
-	if (console_loglevel == 10)
+	if (console_loglevel >= CONSOLE_LOGLEVEL_DEBUG)
 		early_printk("Kernel alive\n");
 
 	clear_page(init_level4_pgt);

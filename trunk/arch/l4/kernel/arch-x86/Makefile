@@ -23,7 +23,7 @@ obj-y				+= pci-iommu_table.o
 obj-y				+= resource.o
 obj-y				+= head$(BITS).o
 obj-y				+= probe_roms.o
-obj-y			+= syscall_$(BITS).o
+obj-y			+= syscall_$(BITS).o vsyscall_gtod.o
 obj-$(CONFIG_X86_64)	+= vsyscall_64.o
 obj-$(CONFIG_X86_64)	+= vsyscall_emu_64.o
 obj-$(CONFIG_SYSFS)	+= ksysfs.o
@@ -107,6 +107,7 @@ sysfb-y         += $(b)/sysfb.o
 preempt-y       += $(b)/preempt.o
 ksysfs-y	+= $(b)/ksysfs.o
 tsc_msr-y	+= $(b)/tsc_msr.o
+vsyscall_gtod-y += $(b)/vsyscall_gtod.o
 
 # we have our own versions of destroy_context and init_new_context,
 # so rename the original one

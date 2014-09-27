@@ -62,14 +62,9 @@ static inline void native_halt(void)
 #ifndef __ASSEMBLY__
 #include <linux/types.h>
 
-#if defined(CONFIG_L4_USERPRIV_ONLY) || defined(CONFIG_L4_TAMED) \
-    || defined(CONFIG_L4_VCPU)
-
+#ifdef CONFIG_L4
 #include <asm/generic/irq.h>
 #include <asm/generic/vcpu.h>
-
-#ifdef CONFIG_L4_TAMED
-
 #include <asm/generic/tamed.h>
 
 static inline notrace unsigned long arch_local_save_flags(void)
@@ -104,30 +99,6 @@ static inline void halt(void)
 }
 #endif
 
-#else
-/* Use cli/sti but not popf, sufficient for Fiasco-UX */
-
-static inline notrace unsigned long arch_local_save_flags(void)
-{
-	return l4x_local_save_flags();
-}
-
-static inline notrace void arch_local_irq_restore(unsigned long flags)
-{
-	l4x_local_irq_restore(flags);
-}
-
-static inline notrace void arch_local_irq_disable(void)
-{
-	asm volatile("cli" : : : "memory");
-}
-
-static inline notrace void arch_local_irq_enable(void)
-{
-	asm volatile("sti" : : : "memory");
-}
-
-#endif /* CONFIG_TAMED */
 #else /* ! L4 */
 
 static inline notrace unsigned long arch_local_save_flags(void)
@@ -201,7 +172,7 @@ static inline notrace unsigned long arch_local_irq_save(void)
 
 #define PARAVIRT_ADJUST_EXCEPTION_FRAME	/*  */
 
-#define INTERRUPT_RETURN	iretq
+#define INTERRUPT_RETURN	jmp native_iret
 #define USERGS_SYSRET64				\
 	swapgs;					\
 	sysretq;
@@ -228,7 +199,7 @@ static inline int arch_irqs_disabled_flags(unsigned long flags)
 {
 #if defined(CONFIG_L4_VCPU)
 	return !(flags & L4_VCPU_F_IRQ);
-#elif defined(CONFIG_L4_USERPRIV_ONLY) || defined(CONFIG_L4_TAMED)
+#elif defined(CONFIG_L4)
 	return flags == L4_IRQ_DISABLED;
 #else
 	return !(flags & X86_EFLAGS_IF);

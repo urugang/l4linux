@@ -32,7 +32,7 @@ static struct console early_kdb_console = {
 	.index =	-1,
 };
 
-int __init setup_early_printk(char *buf)
+static int __init setup_early_printk(char *buf)
 {
 	if (!buf)
 		return 0;
@@ -50,4 +50,4 @@ int __init setup_early_printk(char *buf)
 	return 0;
 }
 
-__setup("earlyprintk=", setup_early_printk);
+early_param("earlyprintk", setup_early_printk);

@@ -115,11 +115,14 @@ else
         UTS_MACHINE := x86_64
         CHECKFLAGS += -D__x86_64__ -m64
 
+        biarch := -m64
         KBUILD_AFLAGS += -m64
         KBUILD_CFLAGS += -m64
 
-        # Don't autogenerate MMX or SSE instructions
+        # Don't autogenerate traditional x87, MMX or SSE instructions
         KBUILD_CFLAGS += -mno-mmx -mno-sse
+        KBUILD_CFLAGS += $(call cc-option,-mno-80387)
+        KBUILD_CFLAGS += $(call cc-option,-mno-fp-ret-in-387)
 
 	# Use -mpreferred-stack-boundary=3 if supported.
 	KBUILD_CFLAGS += $(call cc-option,-mpreferred-stack-boundary=3)
@@ -144,7 +147,7 @@ else
 
         # this works around some issues with generating unwind tables in older gccs
         # newer gccs do it by default
-        KBUILD_CFLAGS += -maccumulate-outgoing-args
+        KBUILD_CFLAGS += $(call cc-option,-maccumulate-outgoing-args)
 endif
 
 # Make sure compiler does not have buggy stack-protector support.
@@ -188,6 +191,7 @@ cfi-sections := $(call as-instr,.cfi_sections .debug_frame,-DCONFIG_AS_CFI_SECTI
 
 # does binutils support specific instructions?
 asinstr := $(call as-instr,fxsaveq (%rax),-DCONFIG_AS_FXSAVEQ=1)
+asinstr += $(call as-instr,crc32l %eax$(comma)%eax,-DCONFIG_AS_CRC32=1)
 avx_instr := $(call as-instr,vxorps %ymm0$(comma)%ymm1$(comma)%ymm2,-DCONFIG_AS_AVX=1)
 avx2_instr :=$(call as-instr,vpbroadcastb %xmm0$(comma)%ymm1,-DCONFIG_AS_AVX2=1)
 
@@ -308,7 +312,7 @@ export L4DIR
 # Extra Libs
 L4MODS-$(CONFIG_L4_VCPU)         += libvcpu
 L4MODS-$(CONFIG_L4_USE_L4SHMC)   += shmc
-L4MODS-$(CONFIG_L4_BLK_DRV)      += generic_blk
+L4MODS-$(CONFIG_L4_BLK_DRV)      += libfdx
 L4MODS-$(CONFIG_L4_EXTERNAL_RTC) += rtc
 L4MODS-$(CONFIG_L4_NET_ANKH_DRV) += ankh
 L4MODS-$(CONFIG_L4_TCG_STPM)     += stpm-client
@@ -421,32 +425,32 @@ mtags:
 arch/l4/include/asm/l4-arch/asm:
 	@echo '  LN      asm-l4/l4-arch/asm symlink'
 	$(Q)mkdir -p $(@D)
-	$(Q)ln -s $(src)/arch/l4/include/asm/arch-$(BASEARCH) $@
+	$(Q)ln -s $(if $(KBUILD_SRC),../../../../../source/arch/l4/include/asm,..)/arch-$(BASEARCH) $@
 
 arch/l4/include/asm/arch:
 	@echo '  LN      asm-l4/arch-$(BASEARCH)/arch -> asm/arch symlink'
 	$(Q)mkdir -p $(@D)
-	$(Q)ln -s $(src)/arch/l4/include/asm/arch-$(BASEARCH)/arch $@
+	$(Q)ln -s $(if $(KBUILD_SRC),../../../../source/arch/l4/include/asm/)arch-$(BASEARCH)/arch $@
 
 arch/l4/include/asm/api:
 	@echo '  LN      asm-l4/api-$(BASEENV) -> asm/api symlink'
 	$(Q)mkdir -p $(@D)
-	$(Q)ln -s $(src)/arch/l4/include/asm/api-$(BASEENV) $@
+	$(Q)ln -s $(if $(KBUILD_SRC),../../../../source/arch/l4/include/asm/)api-$(BASEENV) $@
 
 arch/l4/include/asm/l4x:
 	@echo '  LN      asm-l4/l4x-$(BASEARCH) -> asm/l4x symlink'
 	$(Q)mkdir -p $(@D)
-	$(Q)ln -s $(src)/arch/l4/include/asm/l4x-$(BASEARCH) $@
+	$(Q)ln -s $(if $(KBUILD_SRC),../../../../source/arch/l4/include/asm/)l4x-$(BASEARCH) $@
 
 arch/l4/include/asm/l4lxapi/impl:
 	@echo '  LN      asm-l4/l4lxapi/impl symlink'
 	$(Q)mkdir -p $(@D)
-	$(Q)ln -s $(src)/arch/l4/l4lxlib/l4env $@
+	$(Q)ln -s $(if $(KBUILD_SRC),../../../../../source/arch/l4,../../..)/l4lxlib/l4env $@
 
-arch/l4/include/asm/orig-arch:
+arch/l4/include/asm/orig-arch/asm-$(LINSRCARCH):
 	@echo '  LN      asm-l4/orig-arch symlink'
-	$(Q)mkdir -p $@
-	$(Q)ln -s $(src)/arch/$(LINSRCARCH)/include/asm $@/asm-$(LINSRCARCH) 
+	$(Q)mkdir -p $(@D)
+	$(Q)ln -s $(if $(KBUILD_SRC),../../../../../source/arch,../../../..)/$(LINSRCARCH)/include/asm $@
 
 include/generated/mach-types.h: $(srctree)/arch/arm/tools/gen-mach-types $(srctree)/arch/arm/tools/mach-types
 	$(Q)cp $(srctree)/arch/arm/tools/mach-types arch/l4/include/asm/mach-types.list
@@ -462,7 +466,7 @@ symlink_files      = arch/l4/include/asm/api \
 		     arch/l4/include/asm/l4-arch/asm \
                      $(symlink_files_$(BASEARCH))
 
-symlink_dirs       = arch/l4/include/asm/orig-arch
+symlink_dirs       = arch/l4/include/asm/orig-arch/asm-$(LINSRCARCH)
 
 MRPROPER_FILES	  += $(symlink_files) \
 		     $(wildcard vmlinuz*) $(wildcard l4linux*) ldrImage source
@@ -472,7 +476,7 @@ CLEAN_FILES	  += Makeconf.l4conf
 ifeq ($(config-targets),0)
 ifneq ($(wildcard .config),)
 $(objtree)/Makeconf.l4conf: $(srctree)/arch/l4/Makefile.l4conf $(srctree)/arch/l4/Makefile
-	$(Q)$(if $(L4DIR),PWD=$(L4DIR),) $(MAKE) $(if $(L4DIR),-C $(L4DIR),) -f $< O=$(L4OBJ) OUTPUT=$@
+	$(Q)$(if $(L4DIR),PWD=$(L4DIR),) $(MAKE) $(if $(L4DIR),-C $(L4DIR),) -f $(abspath $<) O=$(L4OBJ) OUTPUT=$(abspath $@) LINUX_SRCTREE=$(abspath $(srctree)) LINUX_OBJTREE=$(abspath $(objtree))
 
 archprepare: print_instructions check_linux_config $(symlink_files) $(symlink_dirs) \
              $(objtree)/Makeconf.l4conf
@@ -561,15 +565,16 @@ check_linux_config:
 %.dtb: | scripts
 	$(Q)$(MAKE) $(build)=$(boot)/dts $(boot)/dts/$@
 
-PHONY += dtbs
-dtbs: scripts
-	$(Q)$(MAKE) $(build)=$(boot)/dts dtbs
+PHONY += dtbs dtbs_install
+dtbs dtbs_install: prepare scripts
+	$(Q)$(MAKE) $(build)=$(boot)/dts MACHINE=$(MACHINE) $@
 
 PHONY += chkl4conf check_linux_config
 
 define archhelp
-  echo '* vmlinuz	- Compressed kernel image'
-  echo '  chkl4conf     - Check L4 specific configuration'
-  echo '* dtbs          - Build device tree blobs for enabled boards'
+  echo  '* vmlinuz	 - Compressed kernel image'
+  echo  '  chkl4conf     - Check L4 specific configuration'
+  echo  '* dtbs          - Build device tree blobs for enabled boards'
+  echo  '  dtbs_install  - Install dtbs to $(INSTALL_DTBS_PATH)'
 endef
 

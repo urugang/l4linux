@@ -17,12 +17,13 @@
 #ifdef CONFIG_ARM_LPAE
 #error Add me
 #else
-#define PF_EUSER		0
+#define PF_EUSER		(1 << 14)
 #define PF_EKERNEL		0
 #define PF_EWRITE		(1 << 11)
 #define PF_EREAD		0
 #define PF_EPROTECTION		0xf
 #define PF_ENOTPRESENT		0x7
+#define L4X_PHYSICAL_PAGE_MASK PAGE_MASK
 #endif
 #else
 #define PF_EUSER		4
@@ -31,6 +32,8 @@
 #define PF_EREAD		0
 #define PF_EPROTECTION		1
 #define PF_ENOTPRESENT		0
+
+#define L4X_PHYSICAL_PAGE_MASK PHYSICAL_PAGE_MASK
 #endif
 
 #ifdef CONFIG_X86
@@ -82,7 +85,7 @@ static inline int l4x_pte_present_user(pte_t pte)
 	return pte_present(pte) && (pte_val(pte) & _PAGE_USER);
 #endif
 #ifdef CONFIG_ARM
-	return pte_present_user(pte);
+	return pte_present(pte) && (pte_val(pte) & L_PTE_USER);
 #endif
 	return 0;
 }
@@ -103,7 +106,7 @@ retry:
 	BUG_ON(!irqs_disabled());
 
 #ifdef DEBUG_PARSE_PTABS_READ
-	printk("ppr: pdir: %p, address: %lx, ptep: %p pte: %lx *ptep present: %lu\n", 
+	printk("ppr: pdir: %p, address: %lx, ptep: %p pte: %lx *ptep present: %u\n",
 	       (pgd_t *)current->active_mm->pgd, address, ptep, pte_val(*ptep), pte_present(*ptep));
 #endif
 
@@ -136,7 +139,7 @@ retry:
 	*ptep   = pte_mkyoung(*ptep);
 	spin_unlock(ptl);
 	*offset = address & ~PAGE_MASK;
-	return pte_val(*ptep) & PAGE_MASK;
+	return pte_val(*ptep) & L4X_PHYSICAL_PAGE_MASK;
 
 return_efault:
 	local_irq_restore(*flags);
@@ -203,7 +206,7 @@ retry:
 	*ptep   = pte_mkdirty(pte_mkyoung(*ptep));
 	spin_unlock(ptl);
 	*offset = address & ~PAGE_MASK;
-	return pte_val(*ptep) & PAGE_MASK;
+	return pte_val(*ptep) & L4X_PHYSICAL_PAGE_MASK;
 
 return_efault:
 	local_irq_restore(*flags);

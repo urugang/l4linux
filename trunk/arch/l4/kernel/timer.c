@@ -344,9 +344,9 @@ out1:
 }
 
 #ifdef CONFIG_GENERIC_SCHED_CLOCK
-static u32 notrace kip_clock_read_32(void)
+static u64 kip_clock_read(void)
 {
-	return l4_kip_clock_lw(l4re_kip());
+	return l4_kip_clock(l4re_kip());
 }
 #endif
 
@@ -373,6 +373,6 @@ void __init l4x_timer_init(void)
 		pr_err("l4timer: Failed to initialize!\n");
 
 #ifdef CONFIG_GENERIC_SCHED_CLOCK
-	setup_sched_clock(kip_clock_read_32, 32, 1000000);
+	sched_clock_register(kip_clock_read, 64, 1000000);
 #endif
 }

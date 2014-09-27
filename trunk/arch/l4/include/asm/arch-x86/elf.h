@@ -61,9 +61,6 @@ do {								\
 
 #include <asm/api/config.h>
 
-#undef VDSO_HIGH_BASE
-#define VDSO_HIGH_BASE (UPAGE_USER_ADDRESS)
-
 #undef VDSO_SYM
 #define VDSO_SYM(x) ((unsigned long)(x))
 

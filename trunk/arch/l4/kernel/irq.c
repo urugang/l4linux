@@ -152,10 +152,10 @@ int l4lx_irq_set_wake(struct irq_data *data, unsigned int on)
 	return 0;
 }
 
-struct irq_chip l4x_irq_io_chip = {
-	.name                   = "L4-io",
-	.irq_startup            = l4lx_irq_io_startup,
-	.irq_shutdown           = l4lx_irq_io_shutdown,
+struct irq_chip l4x_irq_icu_chip = {
+	.name                   = "L4-icu",
+	.irq_startup            = l4lx_irq_icu_startup,
+	.irq_shutdown           = l4lx_irq_icu_shutdown,
 	.irq_enable             = l4lx_irq_dev_enable,
 	.irq_disable            = l4lx_irq_dev_disable,
 	.irq_ack                = l4lx_irq_dev_ack,

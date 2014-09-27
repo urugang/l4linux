@@ -31,6 +31,7 @@ struct mm_struct;
 #include <linux/irqflags.h>
 
 #include <l4/sys/types.h>
+#include <asm/api/config.h>
 
 /*
  * We handle most unaligned accesses in hardware.  On the other hand
@@ -451,6 +452,15 @@ struct stack_canary {
 };
 DECLARE_PER_CPU_ALIGNED(struct stack_canary, stack_canary);
 #endif
+/*
+ * per-CPU IRQ handling stacks
+ */
+struct irq_stack {
+	u32                     stack[THREAD_SIZE/sizeof(u32)];
+} __aligned(THREAD_SIZE);
+
+DECLARE_PER_CPU(struct irq_stack *, hardirq_stack);
+DECLARE_PER_CPU(struct irq_stack *, softirq_stack);
 #endif	/* X86_64 */
 
 extern unsigned int xstate_size;

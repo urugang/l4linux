@@ -36,9 +36,9 @@ void l4lx_irq_init(void);
  */
 int l4lx_irq_prio_get(unsigned int irq);
 
-unsigned int l4lx_irq_io_startup(struct irq_data *data);
+unsigned int l4lx_irq_icu_startup(struct irq_data *data);
 unsigned int l4lx_irq_plain_startup(struct irq_data *data);
-void l4lx_irq_io_shutdown(struct irq_data *data);
+void l4lx_irq_icu_shutdown(struct irq_data *data);
 void l4lx_irq_plain_shutdown(struct irq_data *data);
 int l4lx_irq_set_type(struct irq_data *data, unsigned int type);
 void l4lx_irq_dev_enable(struct irq_data *data);

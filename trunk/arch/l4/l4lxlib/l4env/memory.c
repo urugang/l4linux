@@ -26,11 +26,7 @@ int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte)
 	unsigned long size;
 	int r;
 
-#ifdef CONFIG_X86_64
-	pte &= ~0x8000000000000000UL;
-#endif
-
-	addr = pte_val(pte);
+	addr = pte_val(pte) & L4X_PHYSICAL_PAGE_MASK;
 	size = 1;
 	if (L4XV_FN_i(l4re_rm_find(&addr, &size, &offset, &flags, &ds))) {
 		printk("%s: Cannot get dataspace of %08"PTE_VAL_FMTTYPE"x.\n",
@@ -39,7 +35,7 @@ int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte)
 		return -1;
 	}
 
-	offset += (pte_val(pte) & PAGE_MASK) - addr;
+	offset += (pte_val(pte) & L4X_PHYSICAL_PAGE_MASK) - addr;
 	addr    = address & PAGE_MASK;
 	if ((r = L4XV_FN_i(l4re_rm_attach((void **)&addr, PAGE_SIZE,
 	                                  L4RE_RM_IN_AREA | L4RE_RM_EAGER_MAP
@@ -64,7 +60,7 @@ int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte)
 
 			/* Return all ok if it's the same address
 			 * The cap check is not perfect but will do. */
-			if (q == (pte_val(pte) & L4_PAGEMASK)
+			if (q == (pte_val(pte) & L4X_PHYSICAL_PAGE_MASK)
 			    && (ds & L4_CAP_MASK) == (ds2 & L4_CAP_MASK))
 				return 0;
 

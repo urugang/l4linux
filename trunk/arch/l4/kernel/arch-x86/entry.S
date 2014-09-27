@@ -11,6 +11,7 @@
 #include <asm/dwarf2.h>
 #include <asm/ftrace.h>
 #include <asm/irq_vectors.h>
+#include <asm/asm.h>
 
 // just dummy values so that they are defined
 #define SPURIOUS_APIC_VECTOR 20
@@ -383,7 +384,7 @@ ENTRY(ret_from_fork)
 	call schedule_tail
 	GET_THREAD_INFO(%ebp)
 	popl_cfi %eax
-	pushl_cfi $0x0202               # Reset kernel eflags
+	pushl_cfi $0x0202		# Reset kernel eflags
 	popfl_cfi
 	jmp syscall_exit
 	CFI_ENDPROC

@@ -157,7 +157,7 @@ static inline void wait_for_irq_message(unsigned irq)
 				    && irq_disable_cmd_state[irq])
 					detach_from_interrupt(desc, irq);
 			} else if (cmd == CMD_IRQ_UPDATE) {
-				l4x_prepare_irq_thread(current_thread_info(),
+				l4x_prepare_irq_thread(current_thread_info_stack(),
 				                       get_irq_cpu(irq));
 			} else
 				LOG_printf("Unknown cmd: %lu (enabled: %d)\n",
@@ -174,11 +174,11 @@ static inline void wait_for_irq_message(unsigned irq)
 static L4_CV void irq_thread(void *data)
 {
 	unsigned irq = *(unsigned *)data;
-	struct thread_info *ctx = current_thread_info();
+	struct thread_info *ctx = current_thread_info_stack();
 	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 	unsigned state;
 
-	l4x_prepare_irq_thread(current_thread_info(), get_irq_cpu(irq));
+	l4x_prepare_irq_thread(ctx, get_irq_cpu(irq));
 	p->enabled = attach_to_irq(irq_to_desc(irq));
 
 	dd_printk("%s: Started IRQ thread for IRQ %d\n", __func__, irq);
@@ -305,32 +305,18 @@ static void create_irq_thread(unsigned irq, struct l4x_irq_desc_private *p)
  *
  * Seems to be called with irq_desc[irq].lock held.
  */
-unsigned int l4lx_irq_io_startup(struct irq_data *data)
+unsigned int l4lx_irq_icu_startup(struct irq_data *data)
 {
 	unsigned irq = data->irq;
 	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 
-	if (!p)
-		return 0;
-
 	BUG_ON(p->is_percpu);
 	BUG_ON(!l4_is_invalid_cap(p->c.irq_cap));
 
-	if (l4_is_invalid_cap(p->c.irq_cap = l4x_cap_alloc())) {
-		pr_err("l4x-irq: failed to get IRQ cap\n");
-		return 0;
-	}
-
-	if (l4_error(l4_icu_set_mode(l4io_request_icu(),
-	                             irq, p->trigger)) < 0) {
-		pr_err("l4x-irq: Failed to set type for IRQ %d\n", irq);
-		WARN_ON(1);
-		goto err;
-	}
-
-	if (l4io_request_irq(irq, p->c.irq_cap)) {
-			pr_err("l4x-irq: Did not get IRQ %d from IO service\n", irq);
-			goto err;
+	p->c.irq_cap = l4x_irq_init(p->icu, irq, p->trigger, "icu");
+	if (l4_is_invalid_cap(p->c.irq_cap)) {
+		pr_err("l4x-irq: Failed to initialize IRQ %d\n", irq);
+		return -ENXIO;
 	}
 
 	create_irq_thread(irq, p);
@@ -338,10 +324,6 @@ unsigned int l4lx_irq_io_startup(struct irq_data *data)
 	if (!p->enabled)
 		l4lx_irq_dev_enable(data);
 
-	return 0;
-err:
-	l4x_cap_free(p->c.irq_cap);
-	p->c.irq_cap = L4_INVALID_CAP;
 	return 0;
 }
 
@@ -371,14 +353,14 @@ int l4lx_irq_dev_set_affinity(struct irq_data *data,
 }
 #endif
 
-void l4lx_irq_io_shutdown(struct irq_data *data)
+void l4lx_irq_icu_shutdown(struct irq_data *data)
 {
 	struct l4x_irq_desc_private *p = irq_get_chip_data(data->irq);
 
 	dd_printk("%s: %u\n", __func__, data->irq);
 	l4lx_irq_dev_disable(data);
 
-	l4io_release_irq(data->irq, p->c.irq_cap);
+	l4x_irq_release(p->c.irq_cap);
 	l4x_cap_free(p->c.irq_cap);
 	p->c.irq_cap = L4_INVALID_CAP;
 }

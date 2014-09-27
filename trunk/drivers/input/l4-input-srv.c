@@ -8,6 +8,7 @@
 #include <asm/generic/setup.h>
 
 #include <asm/server/input-srv.h>
+#include <l4/re/event_enums.h>
 
 L4_EXTERNAL_FUNC(l4x_srv_input_init);
 L4_EXTERNAL_FUNC(l4x_srv_input_trigger);
@@ -183,6 +184,8 @@ static int evdev_connect(struct input_handler *handler, struct input_dev *dev,
 		evdev->next->prev_next = &evdev->next;
 
 	first_evdev = evdev;
+	evdev_event(&evdev->handle, EV_SYN, L4RE_SYN_STREAM_CFG,
+	            L4RE_SYN_STREAM_NEW);
 
 	evdev->open = 1;
 	return 0;
@@ -196,6 +199,8 @@ err_free_evdev:
 static void evdev_disconnect(struct input_handle *handle)
 {
 	struct evdev *evdev = handle->private;
+
+	evdev_event(handle, EV_SYN, L4RE_SYN_STREAM_CFG, L4RE_SYN_STREAM_CLOSE);
 
 	/* evdev is marked dead so no one else accesses evdev->open */
 	if (evdev && evdev->open) {

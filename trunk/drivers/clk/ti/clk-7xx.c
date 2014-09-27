@@ -16,7 +16,7 @@
 #include <linux/clkdev.h>
 #include <linux/clk/ti.h>
 
-#define DRA7_DPLL_ABE_DEFFREQ				361267200
+#define DRA7_DPLL_ABE_DEFFREQ				180633600
 #define DRA7_DPLL_GMAC_DEFFREQ				1000000000
 
 
@@ -24,7 +24,7 @@ static struct ti_dt_clk dra7xx_clks[] = {
 	DT_CLK(NULL, "atl_clkin0_ck", "atl_clkin0_ck"),
 	DT_CLK(NULL, "atl_clkin1_ck", "atl_clkin1_ck"),
 	DT_CLK(NULL, "atl_clkin2_ck", "atl_clkin2_ck"),
-	DT_CLK(NULL, "atlclkin3_ck", "atlclkin3_ck"),
+	DT_CLK(NULL, "atl_clkin3_ck", "atl_clkin3_ck"),
 	DT_CLK(NULL, "hdmi_clkin_ck", "hdmi_clkin_ck"),
 	DT_CLK(NULL, "mlb_clkin_ck", "mlb_clkin_ck"),
 	DT_CLK(NULL, "mlbp_clkin_ck", "mlbp_clkin_ck"),
@@ -262,7 +262,6 @@ static struct ti_dt_clk dra7xx_clks[] = {
 	DT_CLK(NULL, "vip1_gclk_mux", "vip1_gclk_mux"),
 	DT_CLK(NULL, "vip2_gclk_mux", "vip2_gclk_mux"),
 	DT_CLK(NULL, "vip3_gclk_mux", "vip3_gclk_mux"),
-	DT_CLK(NULL, "gpmc_ck", "dummy_ck"),
 	DT_CLK("omap_i2c.1", "ick", "dummy_ck"),
 	DT_CLK("omap_i2c.2", "ick", "dummy_ck"),
 	DT_CLK("omap_i2c.3", "ick", "dummy_ck"),
@@ -322,6 +321,11 @@ int __init dra7xx_dt_clk_init(void)
 		rc = clk_set_rate(dpll_ck, DRA7_DPLL_ABE_DEFFREQ);
 	if (rc)
 		pr_err("%s: failed to configure ABE DPLL!\n", __func__);
+
+	dpll_ck = clk_get_sys(NULL, "dpll_abe_m2x2_ck");
+	rc = clk_set_rate(dpll_ck, DRA7_DPLL_ABE_DEFFREQ * 2);
+	if (rc)
+		pr_err("%s: failed to configure ABE DPLL m2x2!\n", __func__);
 
 	dpll_ck = clk_get_sys(NULL, "dpll_gmac_ck");
 	rc = clk_set_rate(dpll_ck, DRA7_DPLL_GMAC_DEFFREQ);
