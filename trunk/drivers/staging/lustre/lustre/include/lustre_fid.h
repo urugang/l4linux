@@ -152,8 +152,8 @@
  *  Even so, the MDT and OST resources are also in different LDLM namespaces.
  */
 
-#include <linux/libcfs/libcfs.h>
-#include <lustre/lustre_idl.h>
+#include "../../include/linux/libcfs/libcfs.h"
+#include "lustre/lustre_idl.h"
 
 struct lu_env;
 struct lu_site;
@@ -312,7 +312,7 @@ static inline void lu_last_id_fid(struct lu_fid *fid, __u64 seq)
 		fid->f_seq = fid_idif_seq(0, 0);
 	} else {
 		LASSERTF(fid_seq_is_norm(seq) || fid_seq_is_echo(seq) ||
-			 fid_seq_is_idif(seq), LPX64"\n", seq);
+			 fid_seq_is_idif(seq), "%#llx\n", seq);
 		fid->f_seq = seq;
 	}
 	fid->f_oid = 0;
@@ -346,7 +346,7 @@ struct lu_client_seq {
 	struct lu_seq_range	 lcs_space;
 
 	/* Seq related proc */
-	struct proc_dir_entry   *lcs_proc_dir;
+	struct dentry		*lcs_debugfs_entry;
 
 	/* This holds last allocated fid in last obtained seq */
 	struct lu_fid	   lcs_fid;
@@ -358,7 +358,7 @@ struct lu_client_seq {
 	 * Service uuid, passed from MDT + seq name to form unique seq name to
 	 * use it with procfs.
 	 */
-	char		    lcs_name[80];
+	char		    lcs_name[LUSTRE_MDT_MAXNAMELEN];
 
 	/*
 	 * Sequence width, that is how many objects may be allocated in one
@@ -392,9 +392,6 @@ struct lu_server_seq {
 	/* /seq file object device */
 	struct dt_object       *lss_obj;
 
-	/* Seq related proc */
-	struct proc_dir_entry   *lss_proc_dir;
-
 	/* LUSTRE_SEQ_SERVER or LUSTRE_SEQ_CONTROLLER */
 	enum lu_mgr_type       lss_type;
 
@@ -408,7 +405,7 @@ struct lu_server_seq {
 	 * Service uuid, passed from MDT + seq name to form unique seq name to
 	 * use it with procfs.
 	 */
-	char		    lss_name[80];
+	char		    lss_name[LUSTRE_MDT_MAXNAMELEN];
 
 	/*
 	 * Allocation chunks for super and meta sequences. Default values are
@@ -469,7 +466,7 @@ void seq_client_flush(struct lu_client_seq *seq);
 int seq_client_alloc_fid(const struct lu_env *env, struct lu_client_seq *seq,
 			 struct lu_fid *fid);
 int seq_client_get_seq(const struct lu_env *env, struct lu_client_seq *seq,
-		       seqno_t *seqnr);
+		       u64 *seqnr);
 int seq_site_fini(const struct lu_env *env, struct seq_server_site *ss);
 /* Fids common stuff */
 int fid_is_local(const struct lu_env *env,

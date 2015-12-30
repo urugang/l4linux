@@ -28,6 +28,7 @@
 #include <asm/dbell.h>
 #include <asm/fsl_guts.h>
 #include <asm/code-patching.h>
+#include <asm/cputhreads.h>
 
 #include <sysdev/fsl_soc.h>
 #include <sysdev/mpic.h>
@@ -168,6 +169,24 @@ static inline u32 read_spin_table_addr_l(void *spin_table)
 	return in_be32(&((struct epapr_spin_table *)spin_table)->addr_l);
 }
 
+#ifdef CONFIG_PPC64
+static void wake_hw_thread(void *info)
+{
+	void fsl_secondary_thread_init(void);
+	unsigned long imsr1, inia1;
+	int nr = *(const int *)info;
+
+	imsr1 = MSR_KERNEL;
+	inia1 = *(unsigned long *)fsl_secondary_thread_init;
+
+	mttmr(TMRN_IMSR1, imsr1);
+	mttmr(TMRN_INIA1, inia1);
+	mtspr(SPRN_TENS, TEN_THREAD(1));
+
+	smp_generic_kick_cpu(nr);
+}
+#endif
+
 static int smp_85xx_kick_cpu(int nr)
 {
 	unsigned long flags;
@@ -182,6 +201,31 @@ static int smp_85xx_kick_cpu(int nr)
 	WARN_ON(hw_cpu < 0 || hw_cpu >= NR_CPUS);
 
 	pr_debug("smp_85xx_kick_cpu: kick CPU #%d\n", nr);
+
+#ifdef CONFIG_PPC64
+	/* Threads don't use the spin table */
+	if (cpu_thread_in_core(nr) != 0) {
+		int primary = cpu_first_thread_sibling(nr);
+
+		if (WARN_ON_ONCE(!cpu_has_feature(CPU_FTR_SMT)))
+			return -ENOENT;
+
+		if (cpu_thread_in_core(nr) != 1) {
+			pr_err("%s: cpu %d: invalid hw thread %d\n",
+			       __func__, nr, cpu_thread_in_core(nr));
+			return -ENOENT;
+		}
+
+		if (!cpu_online(primary)) {
+			pr_err("%s: cpu %d: primary %d not online\n",
+			       __func__, nr, primary);
+			return -ENOENT;
+		}
+
+		smp_call_function_single(primary, wake_hw_thread, &nr, 0);
+		return 0;
+	}
+#endif
 
 	np = of_get_cpu_node(nr, NULL);
 	cpu_rel_addr = of_get_property(np, "cpu-release-addr", NULL);
@@ -301,6 +345,7 @@ void mpc85xx_smp_kexec_cpu_down(int crash_shutdown, int secondary)
 	local_irq_disable();
 
 	if (secondary) {
+		__flush_disable_L1();
 		atomic_inc(&kexec_down_cpus);
 		/* loop forever */
 		while (1);
@@ -313,60 +358,10 @@ static void mpc85xx_smp_kexec_down(void *arg)
 		ppc_md.kexec_cpu_down(0,1);
 }
 
-static void map_and_flush(unsigned long paddr)
-{
-	struct page *page = pfn_to_page(paddr >> PAGE_SHIFT);
-	unsigned long kaddr  = (unsigned long)kmap(page);
-
-	flush_dcache_range(kaddr, kaddr + PAGE_SIZE);
-	kunmap(page);
-}
-
-/**
- * Before we reset the other cores, we need to flush relevant cache
- * out to memory so we don't get anything corrupted, some of these flushes
- * are performed out of an overabundance of caution as interrupts are not
- * disabled yet and we can switch cores
- */
-static void mpc85xx_smp_flush_dcache_kexec(struct kimage *image)
-{
-	kimage_entry_t *ptr, entry;
-	unsigned long paddr;
-	int i;
-
-	if (image->type == KEXEC_TYPE_DEFAULT) {
-		/* normal kexec images are stored in temporary pages */
-		for (ptr = &image->head; (entry = *ptr) && !(entry & IND_DONE);
-		     ptr = (entry & IND_INDIRECTION) ?
-				phys_to_virt(entry & PAGE_MASK) : ptr + 1) {
-			if (!(entry & IND_DESTINATION)) {
-				map_and_flush(entry);
-			}
-		}
-		/* flush out last IND_DONE page */
-		map_and_flush(entry);
-	} else {
-		/* crash type kexec images are copied to the crash region */
-		for (i = 0; i < image->nr_segments; i++) {
-			struct kexec_segment *seg = &image->segment[i];
-			for (paddr = seg->mem; paddr < seg->mem + seg->memsz;
-			     paddr += PAGE_SIZE) {
-				map_and_flush(paddr);
-			}
-		}
-	}
-
-	/* also flush the kimage struct to be passed in as well */
-	flush_dcache_range((unsigned long)image,
-			   (unsigned long)image + sizeof(*image));
-}
-
 static void mpc85xx_smp_machine_kexec(struct kimage *image)
 {
 	int timeout = INT_MAX;
 	int i, num_cpus = num_present_cpus();
-
-	mpc85xx_smp_flush_dcache_kexec(image);
 
 	if (image->type == KEXEC_TYPE_DEFAULT)
 		smp_call_function(mpc85xx_smp_kexec_down, NULL, 0);

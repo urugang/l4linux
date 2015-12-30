@@ -3,7 +3,6 @@
  * Copyright (C) 2006, 2007 David S. Miller (davem@davemloft.net)
  */
 
-#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/tty.h>
@@ -268,6 +267,9 @@ static void sunhv_send_xchar(struct uart_port *port, char ch)
 	unsigned long flags;
 	int limit = 10000;
 
+	if (ch == __DISABLED_CHAR)
+		return;
+
 	spin_lock_irqsave(&port->lock, flags);
 
 	while (limit-- > 0) {
@@ -282,11 +284,6 @@ static void sunhv_send_xchar(struct uart_port *port, char ch)
 
 /* port->lock held by caller.  */
 static void sunhv_stop_rx(struct uart_port *port)
-{
-}
-
-/* port->lock held by caller.  */
-static void sunhv_enable_ms(struct uart_port *port)
 {
 }
 
@@ -379,7 +376,6 @@ static struct uart_ops sunhv_pops = {
 	.start_tx	= sunhv_start_tx,
 	.send_xchar	= sunhv_send_xchar,
 	.stop_rx	= sunhv_stop_rx,
-	.enable_ms	= sunhv_enable_ms,
 	.break_ctl	= sunhv_break_ctl,
 	.startup	= sunhv_startup,
 	.shutdown	= sunhv_shutdown,
@@ -624,12 +620,10 @@ static const struct of_device_id hv_match[] = {
 	},
 	{},
 };
-MODULE_DEVICE_TABLE(of, hv_match);
 
 static struct platform_driver hv_driver = {
 	.driver = {
 		.name = "hv",
-		.owner = THIS_MODULE,
 		.of_match_table = hv_match,
 	},
 	.probe		= hv_probe,
@@ -643,16 +637,11 @@ static int __init sunhv_init(void)
 
 	return platform_driver_register(&hv_driver);
 }
+device_initcall(sunhv_init);
 
-static void __exit sunhv_exit(void)
-{
-	platform_driver_unregister(&hv_driver);
-}
-
-module_init(sunhv_init);
-module_exit(sunhv_exit);
-
+#if 0 /* ...def MODULE ; never supported as such */
 MODULE_AUTHOR("David S. Miller");
 MODULE_DESCRIPTION("SUN4V Hypervisor console driver");
 MODULE_VERSION("2.0");
 MODULE_LICENSE("GPL");
+#endif

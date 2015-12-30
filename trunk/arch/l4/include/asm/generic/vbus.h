@@ -26,6 +26,7 @@ struct l4x_vbus_device {
 struct l4x_vbus_driver_ops {
 	int (*add)(struct l4x_vbus_device *dev);
 	int (*remove)(struct l4x_vbus_device *dev);
+	void (*shutdown)(struct l4x_vbus_device *dev);
 	void (*notify)(struct l4x_vbus_device *dev, unsigned type,
 	               unsigned code, unsigned value);
 };

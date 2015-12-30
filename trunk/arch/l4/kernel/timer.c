@@ -148,37 +148,33 @@ static l4_msgtag_t l4timer_stop(l4_cap_idx_t timer)
 }
 
 
+static int timer_set_oneshot(struct clock_event_device *clk)
+{
+	int r;
+	r = L4XV_FN_i(l4_error(l4timer_stop(this_cpu_read(timer_srv))));
+	if (r) {
+		pr_warn("l4timer: stop failed (%d)\n", r);
+		return r;
+	}
 
+	while (L4XV_FN_i(l4_ipc_error(l4_ipc_receive(*this_cpu_ptr(timer_irq_caps),
+	                                             l4_utcb(), L4_IPC_BOTH_TIMEOUT_0),
+	                              l4_utcb())) != L4_IPC_RETIMEOUT)
+		;
 
-static void timer_set_mode(enum clock_event_mode mode,
-                           struct clock_event_device *clk)
+	return 0;
+}
+
+static int timer_set_periodic(struct clock_event_device *clk)
 {
 	const l4timer_time_t increment = 1000000 / HZ;
 	int r;
-
-	switch (mode) {
-	case CLOCK_EVT_MODE_SHUTDOWN:
-	case CLOCK_EVT_MODE_ONESHOT:
-		r = L4XV_FN_i(l4_error(l4timer_stop(this_cpu_read(timer_srv))));
-		if (r)
-			pr_warn("l4timer: stop failed (%d)\n", r);
-		while (L4XV_FN_i(l4_ipc_error(l4_ipc_receive(*this_cpu_ptr(timer_irq_caps), l4_utcb(), L4_IPC_BOTH_TIMEOUT_0), l4_utcb())) != L4_IPC_RETIMEOUT)
-			;
-		break;
-	case CLOCK_EVT_MODE_PERIODIC:
-	case CLOCK_EVT_MODE_RESUME:
-		r = L4XV_FN_i(l4_error(l4timer_start(this_cpu_read(timer_srv), 0,
-		                                     l4_kip_clock(l4lx_kinfo),
-		                                     increment)));
-		if (r)
-			pr_warn("l4timer: start failed (%d)\n", r);
-		break;
-	case CLOCK_EVT_MODE_UNUSED:
-		break;
-	default:
-		pr_warn("l4timer_set_mode: Unknown mode %d\n", mode);
-		break;
-	}
+	r = L4XV_FN_i(l4_error(l4timer_start(this_cpu_read(timer_srv), 0,
+	                                     l4_kip_clock(l4lx_kinfo),
+	                                     increment)));
+	if (r)
+		pr_warn("l4timer: start failed (%d)\n", r);
+	return r;
 }
 
 static int timer_set_next_event(unsigned long evt,
@@ -238,18 +234,21 @@ static int timer_clock_event_init(struct clock_event_device *clk)
 	this_cpu_write(timer_threads, thread);
 	this_cpu_write(timer_srv, l4lx_thread_get_cap(thread));
 
-	clk->features       = CLOCK_EVT_FEAT_ONESHOT | CLOCK_EVT_FEAT_PERIODIC
-		              | CLOCK_EVT_FEAT_C3STOP;
-	clk->name           = "l4-timer";
-	clk->rating         = 300;
-	clk->cpumask        = cpumask_of(cpu);
-	clk->irq            = timer_irq;
-	clk->set_mode       = timer_set_mode;
-	clk->set_next_event = timer_set_next_event;
+	clk->features           = CLOCK_EVT_FEAT_ONESHOT
+	                          | CLOCK_EVT_FEAT_PERIODIC;
+	clk->name               = "l4-timer";
+	clk->rating             = 300;
+	clk->cpumask            = cpumask_of(cpu);
+	clk->irq                = timer_irq;
+	clk->set_next_event     = timer_set_next_event;
+	clk->set_state_shutdown = timer_set_oneshot,
+	clk->set_state_oneshot  = timer_set_oneshot,
+	clk->set_state_periodic = timer_set_periodic,
+	clk->tick_resume        = timer_set_periodic,
 
 	enable_percpu_irq(timer_irq, IRQ_TYPE_NONE);
 
-	clk->set_mode(CLOCK_EVT_MODE_SHUTDOWN, clk);
+	clk->set_state_shutdown(clk);
 	clockevents_config_and_register(clk, 1000000, 1, ~0UL);
 
 	return 0;
@@ -267,7 +266,7 @@ static void timer_clock_stop(struct clock_event_device *clk)
 	l4lx_thread_t t = this_cpu_read(timer_threads);
 
 	disable_percpu_irq(clk->irq);
-	clk->set_mode(CLOCK_EVT_MODE_UNUSED, clk);
+	clk->set_state_shutdown(clk);
 
 	L4XV_FN_v(l4lx_thread_shutdown(t, 1, NULL, 1));
 	this_cpu_write(timer_threads, NULL);

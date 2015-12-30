@@ -77,6 +77,18 @@ ifdef CONFIG_X86_NEED_RELOCS
         LDFLAGS_vmlinux := --emit-relocs
 endif
 
+ifneq ($(CONFIG_X86),)
+#
+# Prevent GCC from generating any FP code by mistake.
+#
+# This must happen before we try the -mpreferred-stack-boundary, see:
+#
+#    https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53383
+#
+KBUILD_CFLAGS += -mno-sse -mno-mmx -mno-sse2 -mno-3dnow
+KBUILD_CFLAGS += $(call cc-option,-mno-avx,)
+endif
+
 ifeq ($(CONFIG_X86_32),y)
         BITS := 32
         UTS_MACHINE := i386
@@ -88,9 +100,6 @@ ifeq ($(CONFIG_X86_32),y)
 
         #KBUILD_CFLAGS += -msoft-float -mregparm=3 -freg-struct-return
 	KBUILD_CFLAGS += -mregparm=3
-
-        # Don't autogenerate MMX or SSE instructions
-        KBUILD_CFLAGS += -mno-mmx -mno-sse
 
         # Never want PIC in a 32-bit kernel, prevent breakage with GCC built
         # with nonstandard options
@@ -105,7 +114,7 @@ ifeq ($(CONFIG_X86_32),y)
 				$(call cc-option,-fno-unit-at-a-time))
 
         # CPU-specific tuning. Anything which can be shared with UML should go here.
-        include $(srctree)/arch/x86/Makefile_32.cpu
+        include arch/x86/Makefile_32.cpu
         KBUILD_CFLAGS += $(cflags-y)
 
         # temporary until string.h is fixed
@@ -119,13 +128,21 @@ else
         KBUILD_AFLAGS += -m64
         KBUILD_CFLAGS += -m64
 
-        # Don't autogenerate traditional x87, MMX or SSE instructions
-        KBUILD_CFLAGS += -mno-mmx -mno-sse
+        # Align jump targets to 1 byte, not the default 16 bytes:
+        KBUILD_CFLAGS += -falign-jumps=1
+
+        # Pack loops tightly as well:
+        KBUILD_CFLAGS += -falign-loops=1
+
+        # Don't autogenerate traditional x87 instructions
         KBUILD_CFLAGS += $(call cc-option,-mno-80387)
         KBUILD_CFLAGS += $(call cc-option,-mno-fp-ret-in-387)
 
 	# Use -mpreferred-stack-boundary=3 if supported.
 	KBUILD_CFLAGS += $(call cc-option,-mpreferred-stack-boundary=3)
+
+	# Use -mskip-rax-setup if supported.
+	KBUILD_CFLAGS += $(call cc-option,-mskip-rax-setup)
 
         # FIXME - should be integrated in Makefile.cpu (Makefile_32.cpu)
         cflags-$(CONFIG_MK8) += $(call cc-option,-march=k8)
@@ -183,20 +200,15 @@ endif
 sp-$(CONFIG_X86_32) := esp
 sp-$(CONFIG_X86_64) := rsp
 
-# do binutils support CFI?
-cfi := $(call as-instr,.cfi_startproc\n.cfi_rel_offset $(sp-y)$(comma)0\n.cfi_endproc,-DCONFIG_AS_CFI=1)
-# is .cfi_signal_frame supported too?
-cfi-sigframe := $(call as-instr,.cfi_startproc\n.cfi_signal_frame\n.cfi_endproc,-DCONFIG_AS_CFI_SIGNAL_FRAME=1)
-cfi-sections := $(call as-instr,.cfi_sections .debug_frame,-DCONFIG_AS_CFI_SECTIONS=1)
-
 # does binutils support specific instructions?
 asinstr := $(call as-instr,fxsaveq (%rax),-DCONFIG_AS_FXSAVEQ=1)
+asinstr += $(call as-instr,pshufb %xmm0$(comma)%xmm0,-DCONFIG_AS_SSSE3=1)
 asinstr += $(call as-instr,crc32l %eax$(comma)%eax,-DCONFIG_AS_CRC32=1)
 avx_instr := $(call as-instr,vxorps %ymm0$(comma)%ymm1$(comma)%ymm2,-DCONFIG_AS_AVX=1)
 avx2_instr :=$(call as-instr,vpbroadcastb %xmm0$(comma)%ymm1,-DCONFIG_AS_AVX2=1)
 
-KBUILD_AFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections) $(asinstr) $(avx_instr) $(avx2_instr)
-KBUILD_CFLAGS += $(cfi) $(cfi-sigframe) $(cfi-sections) $(asinstr) $(avx_instr) $(avx2_instr)
+KBUILD_AFLAGS += $(asinstr) $(avx_instr) $(avx2_instr)
+KBUILD_CFLAGS += $(asinstr) $(avx_instr) $(avx2_instr)
 
 LDFLAGS := -m elf_$(UTS_MACHINE)
 
@@ -206,9 +218,6 @@ KBUILD_CFLAGS += -pipe
 KBUILD_CFLAGS += -Wno-sign-compare
 #
 KBUILD_CFLAGS += -fno-asynchronous-unwind-tables
-# prevent gcc from generating any FP code by mistake
-KBUILD_CFLAGS += $(call cc-option,-mno-sse -mno-mmx -mno-sse2 -mno-3dnow,)
-KBUILD_CFLAGS += $(call cc-option,-mno-avx,)
 
 endif
 
@@ -217,6 +226,18 @@ ifeq ($(CONFIG_CPU_ENDIAN_BE8),y)
 LDFLAGS_vmlinux += --be8
 LDFLAGS_MODULE += --be8
 endif
+
+ifeq ($(CONFIG_ARM_MODULE_PLTS),y)
+LDFLAGS_MODULE	+= -T $(srctree)/arch/arm/kernel/module.lds
+endif
+
+#
+# The Scalar Replacement of Aggregates (SRA) optimization pass in GCC 4.9 and
+# later may result in code being generated that handles signed short and signed
+# char struct members incorrectly. So disable it.
+# (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=65932)
+#
+KBUILD_CFLAGS	+= $(call cc-option,-fno-ipa-sra)
 
 # This selects which instruction set is used.
 # Note that GCC does not numerically define an architecture version
@@ -308,7 +329,7 @@ L4DIR := $(shell readlink $(L4OBJ)/source)
 export L4OBJ
 export L4DIR
 
-
+ifneq ($(config-targets),1)
 # Extra Libs
 L4MODS-$(CONFIG_L4_VCPU)         += libvcpu
 L4MODS-$(CONFIG_L4_USE_L4SHMC)   += shmc
@@ -316,7 +337,7 @@ L4MODS-$(CONFIG_L4_BLK_DRV)      += libfdx
 L4MODS-$(CONFIG_L4_EXTERNAL_RTC) += rtc
 L4MODS-$(CONFIG_L4_NET_ANKH_DRV) += ankh
 L4MODS-$(CONFIG_L4_TCG_STPM)     += stpm-client
-L4MODS-$(CONFIG_L4_FERRET)       += ferret
+endif
 
 L4INC		= -I$(L4OBJ)/include/$(L4_MK_ARCH)/$(L4_MK_API) \
 		  -I$(L4OBJ)/include/$(L4_MK_ARCH) \
@@ -339,6 +360,7 @@ core-$(CONFIG_KVM)		+= arch/l4/kvm/arch-x86/
 endif
 
 ifeq ($(BASEARCH),arm)
+core-$(CONFIG_VDSO)		+= arch/arm/vdso/
 core-y				+= arch/l4/common/arch-arm/
 core-y				+= arch/arm/net/
 endif
@@ -481,6 +503,9 @@ $(objtree)/Makeconf.l4conf: $(srctree)/arch/l4/Makefile.l4conf $(srctree)/arch/l
 archprepare: print_instructions check_linux_config $(symlink_files) $(symlink_dirs) \
              $(objtree)/Makeconf.l4conf
 	$(Q)mkdir -p arch/$(BASEARCH)/lib
+ifeq ($(CONFIG_KEXEC_FILE),y)
+	$(Q)$(MAKE) $(build)=arch/x86/purgatory arch/x86/purgatory/kexec-purgatory.c
+endif
 
 endif # .config available
 else # no archprepare when configuring the kernel
@@ -494,18 +519,13 @@ archclean:
 	$(Q)rm -rf $(objtree)/arch/x86_64
 	$(Q)$(MAKE) $(clean)=$(boot)
 	$(Q)$(MAKE) $(clean)=arch/x86/tools
-
-PHONY += kvmconfig
-kvmconfig:
-	$(if $(wildcard $(objtree)/.config),, $(error You need an existing .config for this target))
-	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/kconfig/merge_config.sh -m -O $(objtree) $(objtree)/.config arch/x86/configs/kvm_guest.config
-	$(Q)yes "" | $(MAKE) oldconfig
+	$(Q)$(MAKE) $(clean)=arch/x86/purgatory
 
 ifeq ($(BASEARCH),x86)
 # Syscall table generation
 
 archheaders:
-	$(Q)$(MAKE) $(build)=arch/x86/syscalls all
+	$(Q)$(MAKE) $(build)=arch/x86/entry/syscalls all
 endif
 
 chkl4conf:
@@ -528,6 +548,7 @@ DIS_OPTS := HIGHMEM4G HIGHMEM64G PCI_GOANY PCI_GOBIOS \
 	    CPU_FREQ VM86 X86_DS X86_PTRACE_BTS HT_IRQ DMI \
 	    TRANSPARENT_HUGEPAGE COMPACTION X86_PAE ACPI X86_SMAP \
 	    M486 M586 M586TSC M586MMX PNP \
+	    X86_16BIT DEBUG_RODATA \
 	    $(DIS_OPTS-$(BASEARCH)-$(BITS))
 ENA_OPTS := $(ENA_OPTS-$(BASEARCH))
 
@@ -563,11 +584,15 @@ check_linux_config:
 	fi
 
 %.dtb: | scripts
-	$(Q)$(MAKE) $(build)=$(boot)/dts $(boot)/dts/$@
+	$(Q)$(MAKE) $(build)=$(boot)/dts MACHINE=$(MACHINE) $(boot)/dts/$@
 
 PHONY += dtbs dtbs_install
-dtbs dtbs_install: prepare scripts
-	$(Q)$(MAKE) $(build)=$(boot)/dts MACHINE=$(MACHINE) $@
+
+dtbs: prepare scripts
+	$(Q)$(MAKE) $(build)=$(boot)/dts
+
+dtbs_install:
+	$(Q)$(MAKE) $(dtbinst)=$(boot)/dts
 
 PHONY += chkl4conf check_linux_config
 

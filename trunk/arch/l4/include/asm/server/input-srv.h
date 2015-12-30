@@ -18,7 +18,7 @@ struct l4x_input_srv_ops
 	L4_CV int (*num_streams)(void);
 	L4_CV int (*stream_info)(int, l4re_event_stream_info_t *);
 	L4_CV int (*stream_info_for_id)(l4_umword_t, l4re_event_stream_info_t *);
-	L4_CV int (*axis_info)(l4_umword_t id, unsigned naxes, unsigned *axis,
+	L4_CV int (*axis_info)(l4_umword_t id, unsigned naxes, const unsigned *axis,
 	                       l4re_event_absinfo_t *info);
 };
 

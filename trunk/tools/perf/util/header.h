@@ -30,6 +30,7 @@ enum {
 	HEADER_BRANCH_STACK,
 	HEADER_PMU_MAPPINGS,
 	HEADER_GROUP_DESC,
+	HEADER_AUXTRACE,
 	HEADER_LAST_FEATURE,
 	HEADER_FEAT_BITS	= 256,
 };
@@ -65,7 +66,7 @@ struct perf_header;
 int perf_file_header__read(struct perf_file_header *header,
 			   struct perf_header *ph, int fd);
 
-struct perf_session_env {
+struct perf_env {
 	char			*hostname;
 	char			*os_release;
 	char			*version;
@@ -83,6 +84,7 @@ struct perf_session_env {
 	int			nr_pmu_mappings;
 	int			nr_groups;
 	char			*cmdline;
+	const char		**cmdline_argv;
 	char			*sibling_cores;
 	char			*sibling_threads;
 	char			*numa_nodes;
@@ -96,7 +98,7 @@ struct perf_header {
 	u64				data_size;
 	u64				feat_offset;
 	DECLARE_BITMAP(adds_features, HEADER_FEAT_BITS);
-	struct perf_session_env 	env;
+	struct perf_env 	env;
 };
 
 struct perf_evlist;
@@ -122,10 +124,6 @@ int perf_header__process_sections(struct perf_header *header, int fd,
 
 int perf_header__fprintf_info(struct perf_session *s, FILE *fp, bool full);
 
-int build_id_cache__add_s(const char *sbuild_id, const char *debugdir,
-			  const char *name, bool is_kallsyms, bool is_vdso);
-int build_id_cache__remove_s(const char *sbuild_id, const char *debugdir);
-
 int perf_event__synthesize_attr(struct perf_tool *tool,
 				struct perf_event_attr *attr, u32 ids, u64 *id,
 				perf_event__handler_t process);
@@ -150,6 +148,10 @@ int perf_event__process_build_id(struct perf_tool *tool,
 				 union perf_event *event,
 				 struct perf_session *session);
 bool is_perf_magic(u64 magic);
+
+#define NAME_ALIGN 64
+
+int write_padded(int fd, const void *bf, size_t count, size_t count_aligned);
 
 /*
  * arch specific callback

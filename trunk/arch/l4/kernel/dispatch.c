@@ -35,10 +35,9 @@ DEFINE_PER_CPU(int, l4x_idle_running);
 
 static inline l4_umword_t l4x_parse_ptabs(struct task_struct *p,
                                           l4_umword_t address,
-                                          l4_umword_t *pferror,
 					  l4_fpage_t *fp, unsigned long *attr)
 {
-	unsigned fpage_size = L4_LOG2_PAGESIZE;
+	unsigned fpage_size;
 	spinlock_t *ptl;
 	l4_umword_t phy = (l4_umword_t)(-EFAULT);
 	pte_t *ptep;
@@ -48,7 +47,7 @@ static inline l4_umword_t l4x_parse_ptabs(struct task_struct *p,
 	local_save_flags(flags);
 
 retry:
-	ptep = lookup_pte_lock(p->mm, address, &ptl);
+	ptep = lookup_pte_lock(p->mm, address, &fpage_size, &ptl);
 
 #ifdef CONFIG_HUGETLB_PAGE
 	struct vm_area_struct *vma = find_vma(p->mm, address);
@@ -85,7 +84,7 @@ retry:
 		*fp   = l4_fpage(phy, fpage_size,
 		                 pte_exec(*ptep)
 		                  ? L4_FPAGE_RX : L4_FPAGE_RO);
-		*attr = l4x_map_page_attr_to_l4(*ptep) << 4;
+		*attr = l4x_map_page_attr_to_l4(*ptep);
 	} else {
 		/* write access */
 		if (pte_write(*ptep)) {
@@ -100,12 +99,10 @@ retry:
 			*fp = l4_fpage(phy, fpage_size,
 			               pte_exec(*ptep)
 			                ? L4_FPAGE_RWX: L4_FPAGE_RW);
-			*attr = l4x_map_page_attr_to_l4(*ptep) << 4;
+			*attr = l4x_map_page_attr_to_l4(*ptep);
 		} else {
 			/* page present, but not writable
 			 * --> return error */
-			*pferror = PF_EUSER + PF_EWRITE +
-			           PF_EPROTECTION;
 			fp->raw = 0;
 		}
 	}
@@ -117,12 +114,6 @@ not_present_locked:
 	spin_unlock(ptl);
 not_present:
 	/* page and/or pgdir not present --> return error */
-	if (l4x_iswrpf(p->thread.error_code))
-		*pferror = PF_EUSER + PF_EWRITE +
-			   PF_ENOTPRESENT;
-	else
-		*pferror = PF_EUSER + PF_EREAD +
-		           PF_ENOTPRESENT;
 	fp->raw = 0;
 
 	return phy;
@@ -131,15 +122,15 @@ not_present:
 static inline void verbose_segfault(struct task_struct *p,
                                     struct pt_regs *regs,
                                     l4_umword_t pfa, l4_umword_t ip,
-                                    l4_umword_t pferror)
+                                    l4_umword_t error_code)
 {
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
 	if (l4x_dbg_stop_on_segv_pf) {
 		l4x_printf("cpu%d: segfault for %s(%d) [T:%lx] "
-		           "at %08lx, ip=%08lx, pferror = %lx\n",
+		           "at %08lx, ip=%08lx, error_code = %lx\n",
 		           raw_smp_processor_id(), p->comm, p->pid,
 		           l4_debugger_global_id(p->mm->context.task),
-		           pfa, ip, pferror);
+		           pfa, ip, error_code);
 		l4x_print_vm_area_maps(p, ip);
 		l4x_print_regs(thread_val_err(&p->thread),
 		               thread_val_trapno(&p->thread), regs);
@@ -154,52 +145,37 @@ static inline int l4x_handle_page_fault(struct task_struct *p,
                                         l4_umword_t pfa, l4_umword_t err,
                                         l4_umword_t ip)
 {
+	l4_umword_t lxaddr;
+	unsigned long attr = 0;
+	l4_fpage_t fp;
+
 	l4x_debug_stats_pagefault_hit();
 
-	if (likely(pfa < TASK_SIZE)) {
-		/* Normal page fault with a process' virtual address space */
-		l4_umword_t lxaddr;
-		unsigned long attr = 0;
-		l4_fpage_t fp;
-		l4_umword_t pferror = 0;
+#ifdef CONFIG_ARM
+	if (unlikely((pfa & PAGE_MASK) == UPAGE_USER_ADDRESS
+	             && !l4x_iswrpf(err)))
+		return 0;
+#endif
 
-		lxaddr = l4x_parse_ptabs(p, pfa, &pferror, &fp, &attr);
-		// optimize here: if we found the page, reply immediately
-		// without looking for work, it's just a tlb miss
-		if (lxaddr == (l4_umword_t)(-EFAULT)) {
-			int ret;
-			unsigned long flags;
+	lxaddr = l4x_parse_ptabs(p, pfa, &fp, &attr);
+	// optimize here: if we found the page, reply immediately
+	// without looking for work, it's just a tlb miss
+	if (lxaddr == (l4_umword_t)(-EFAULT)) {
+		int ret;
+		unsigned long flags;
 
-			local_save_flags(flags);
-			ret = l4x_do_page_fault(pfa, regs, pferror);
-			local_irq_restore(flags);
-			if (ret) {
-				verbose_segfault(p, regs, pfa, ip, pferror);
-				return 1;
-			}
-
-		} else {
-			l4x_debug_stats_pagefault_but_in_PTs_hit();
-			if (l4x_iswrpf(err))
-				l4x_debug_stats_pagefault_write_hit();
+		local_save_flags(flags);
+		ret = l4x_do_page_fault(pfa, regs, err);
+		local_irq_restore(flags);
+		if (ret) {
+			verbose_segfault(p, regs, pfa, ip, err);
+			return 1;
 		}
 
-#ifdef CONFIG_L4_FERRET_USER
-	} else if (l4x_ferret_handle_pf(pfa, d0, d1)) {
-		/* Handled */
-#endif
-	/* page fault in upage ? */
-	} else if ((pfa & PAGE_MASK) == UPAGE_USER_ADDRESS && !l4x_iswrpf(err)) {
-		/* */
 	} else {
-		printk("WARN: %s: Page-fault above task size: pfa=%lx pc=%lx\n",
-		        p->comm, pfa, ip);
-#ifdef CONFIG_L4_DEBUG_SEGFAULTS
-		l4x_print_vm_area_maps(p, ip);
-#endif
-		l4x_print_regs(thread_val_err(&p->thread),
-		               thread_val_trapno(&p->thread), regs);
-		return 1; /* Failed */
+		l4x_debug_stats_pagefault_but_in_PTs_hit();
+		if (l4x_iswrpf(err))
+			l4x_debug_stats_pagefault_write_hit();
 	}
 
 	return 0; /* Success */
@@ -209,11 +185,6 @@ static void
 l4x_pf_pfa_to_fp(struct task_struct *p, unsigned long pfa,
 		 l4_umword_t *d0, l4_umword_t *d1)
 {
-	l4_fpage_t fp;
-	l4_umword_t pferror = 0;
-
-	*d0 = pfa;
-
 #ifdef CONFIG_L4_VCPU
 	BUG_ON(!irqs_disabled());
 #endif
@@ -221,8 +192,9 @@ l4x_pf_pfa_to_fp(struct task_struct *p, unsigned long pfa,
 	if (likely(pfa < TASK_SIZE)) {
 		l4_umword_t phy;
 		unsigned long attr = 0;
+		l4_fpage_t fp;
 
-		phy = l4x_parse_ptabs(p, pfa, &pferror, &fp, &attr);
+		phy = l4x_parse_ptabs(p, pfa, &fp, &attr);
 		if (phy == (l4_umword_t)(-EFAULT)) {
 			*d0 = 0;
 			return;
@@ -232,18 +204,16 @@ l4x_pf_pfa_to_fp(struct task_struct *p, unsigned long pfa,
 		    (l4_fpage_page(fp) << L4_LOG2_PAGESIZE,
 		     ((l4_fpage_page(fp) + 1) << l4_fpage_size(fp)));
 
-		*d0 = (*d0 & L4_PAGEMASK) | L4_ITEM_MAP | attr;
+		*d0 = l4_map_control(pfa & L4_PAGEMASK, attr, 0);
 		*d1  = fp.fpage;
-#ifdef CONFIG_L4_FERRET_USER
-	} else if (l4x_ferret_handle_pf(pfa, d0, d1)) {
-		/* Handled */
-#endif
+#ifdef CONFIG_ARM
 	/* page fault in upage ? */
 	} else if ((pfa & PAGE_MASK) == UPAGE_USER_ADDRESS
 	           && !l4x_iswrpf(p->thread.error_code)) {
 		*d1 = l4_fpage(upage_addr, L4_LOG2_PAGESIZE,
 		               L4_FPAGE_RX).fpage;
-		*d0 = (*d0 & PAGE_MASK) | L4_ITEM_MAP;
+		*d0 = l4_map_control(pfa & L4_PAGEMASK, 0, 0);
+#endif
 	} else {
 		*d0 = 0;
 	}
@@ -283,7 +253,7 @@ static int l4x_hybrid_return(struct thread_info *ti,
 	/* Wake up hybrid task h and reschedule */
 	wake_up_process(h);
 
-	return 1;
+	return 0;
 
 out_fail:
 	LOG_printf("%s: Invalid hybrid return for %p ("
@@ -300,7 +270,7 @@ out_fail:
 	           __func__, PRINTF_L4TASK_ARG(current->thread.user_thread_id),
 	           PRINTF_L4TASK_ARG(l4x_cap_current()), current->pid);
 	enter_kdebug("hybrid_return failed");
-	return 0;
+	return -EINVAL;
 }
 
 struct l4x_hybrid_object
@@ -526,6 +496,7 @@ static int l4x_handle_async_event(l4_umword_t label,
                                   l4_msgtag_t tag)
 {
 	struct l4x_srv_object *o = (struct l4x_srv_object *)(label & ~3UL);
+	printk("%s %d: label=%lx\n", __func__, __LINE__, label); 
 	return o->dispatch(o, label, u, &tag);
 }
 
@@ -571,10 +542,8 @@ void l4x_idle(void)
 		                                       l4x_cap_alloc(),
 		                                       CONFIG_L4_PRIO_IDLER,
 		                                       0, 0, s, NULL);
-		if (!l4lx_thread_is_valid(idler_thread[cpu])) {
-			LOG_printf("Could not create idler thread... exiting\n");
-			l4x_exit_l4linux();
-		}
+		if (!l4lx_thread_is_valid(idler_thread[cpu]))
+			l4x_exit_l4linux_msg("Could not create idler thread... exiting\n");
 		l4lx_thread_pager_change(l4lx_thread_get_cap(idler_thread[cpu]), me);
 		idler_up[cpu] = 1;
 	}
@@ -643,10 +612,10 @@ wait_again:
 
 		/* Paranoia */
 		if (!l4_msgtag_is_exception(tag)
-		    || !l4x_is_triggered_exception(u_err)) {
+		    || !l4x_is_triggered_exception_from_val(u_err)) {
 			LOG_printf("idler%d: error=%d label=%lx"
 			           " exc-val = 0x%lx [!=%lx]"
-			           "tag = %ld pc = %lx\n",
+			           " tag = %ld pc = %lx\n",
 			           cpu, error, label, u_err,
 				   l4_utcb_exc_typeval(l4_utcb_exc_u(utcb)),
 				   l4_msgtag_label(tag),
@@ -699,7 +668,7 @@ l4x_user_task_create(void)
 
 	if (l4lx_task_get_new_task(L4_INVALID_CAP, &c)
 	    || l4_is_invalid_cap(c)) {
-		l4x_printf("l4x_thread_create: No task no left for user\n");
+		l4x_printf("l4x_thread_create: No task left for user\n");
 		return L4_INVALID_CAP;
 	}
 
@@ -818,8 +787,6 @@ static inline void l4x_spawn_cpu_thread(struct task_struct *p,
 
 		l4x_arch_task_start_setup(p, p->mm->context.task);
 
-		l4x_arch_do_syscall_trace(p);
-
 		TBUF_LOG_START(fiasco_tbuf_log_3val("task start", TBUF_TID(t->user_thread_id), regs_pc(p), regs_sp(p)));
 
 		if (signal_pending(p))
@@ -827,7 +794,6 @@ static inline void l4x_spawn_cpu_thread(struct task_struct *p,
 
 		t->initial_state_set = 1;
 		t->is_hybrid = 0; /* cloned thread need to reset this */
-
 	}
 
 	l4x_arch_task_setup(t);
@@ -855,11 +821,11 @@ static void l4x_user_dispatcher(void)
 	goto reply_IPC;
 
 	while (1) {
-		if (l4x_ispf(t)) {
+		if (l4x_ispf_t(t)) {
 			reply_with_fpage = l4x_dispatch_page_fault(p, t, task_pt_regs(p));
 		} else {
 			if (!l4x_dispatch_exception(p, t, thread_val_err(t),
-			                            thread_val_trapno(t), task_pt_regs(p)))
+			                            thread_val_trapno(t), task_pt_regs(p), l4x_l4pfa(t)))
 				l4x_pre_iret_work(task_pt_regs(p), p, 0, 0, 0);
 
 			reply_with_fpage = 0;
@@ -1017,8 +983,7 @@ static void l4x_handle_external_event(l4_vcpu_state_t *v,
 
 void l4x_vcpu_handle_irq(l4_vcpu_state_t *v, struct pt_regs *regs)
 {
-	int irq;
-	unsigned long flags;
+	unsigned long irq, flags;
 
 	local_irq_save(flags);
 	irq = v->i.label >> 2;
@@ -1173,13 +1138,13 @@ l4x_vcpu_entry_kern(l4_vcpu_state_t *vcpu)
 	int copy_ptregs = 0;
 
 	if (l4vcpu_is_irq_entry(vcpu)) {
-		vcpu_to_ptregs(vcpu, regsp);
+		vcpu_to_ptregs_kern(vcpu, regsp);
 		l4x_vcpu_handle_irq(vcpu, regsp);
 		l4x_pre_iret_work(regsp, p, 0, 0, 1);
 		copy_ptregs = 1;
 
-	} else if (l4vcpu_is_page_fault_entry(vcpu)) {
-		vcpu_to_ptregs(vcpu, regsp);
+	} else if (l4x_ispf_v(vcpu)) {
+		vcpu_to_ptregs_kern(vcpu, regsp);
 		if (vcpu->saved_state & L4_VCPU_F_IRQ)
 			local_irq_enable();
 		l4x_do_page_fault(vcpu->r.pfa, regsp, vcpu->r.err);
@@ -1189,10 +1154,11 @@ l4x_vcpu_entry_kern(l4_vcpu_state_t *vcpu)
 		if (!ret) {
 			unsigned long err    = vcpu_val_err(vcpu);
 			unsigned long trapno = vcpu_val_trapno(vcpu);
-			vcpu_to_ptregs(vcpu, regsp);
+			vcpu_to_ptregs_kern(vcpu, regsp);
 			if (vcpu->saved_state & L4_VCPU_F_IRQ)
 				local_irq_enable();
-			if (!l4x_dispatch_exception(p, t, err, trapno, regsp))
+			if (!l4x_dispatch_exception(p, t, err, trapno,
+			                            regsp, vcpu->r.pfa))
 				l4x_pre_iret_work(regsp, p, 0, 0, 1);
 			copy_ptregs = 1;
 		}
@@ -1214,7 +1180,7 @@ l4x_vcpu_entry_kern(l4_vcpu_state_t *vcpu)
 	l4x_vcpu_iret(p, t, regsp, 0, 0, copy_ptregs);
 }
 
-#ifdef ARCH_arm
+#ifdef CONFIG_ARM
 asm(
 ".global l4x_vcpu_entry \n\t"
 "l4x_vcpu_entry: \n\t"
@@ -1240,7 +1206,7 @@ void l4x_vcpu_entry(l4_vcpu_state_t *vcpu)
 	struct task_struct *p;
 	struct thread_struct *t;
 
-	vcpu->state = 0;
+	vcpu->state = L4_VCPU_F_EXCEPTIONS;
 	smp_mb();
 
 	if (likely((vcpu->saved_state & L4_VCPU_F_USER_MODE)))
@@ -1259,13 +1225,13 @@ void l4x_vcpu_entry(l4_vcpu_state_t *vcpu)
 
 	regsp = task_pt_regs(p);
 
-	vcpu_to_ptregs(vcpu, regsp);
+	vcpu_to_ptregs_user(vcpu, regsp);
 	vcpu_to_thread_struct(vcpu, t);
 
 	if (l4vcpu_is_irq_entry(vcpu)) {
 		l4x_vcpu_handle_irq(vcpu, regsp);
 		l4x_pre_iret_work(regsp, p, 0, 0, 0);
-	} else if (l4vcpu_is_page_fault_entry(vcpu)) {
+	} else if (l4x_ispf_v(vcpu)) {
 		int reply_with_fpage = l4x_dispatch_page_fault(p, t, regsp);
 
 		if (reply_with_fpage) {
@@ -1279,7 +1245,7 @@ void l4x_vcpu_entry(l4_vcpu_state_t *vcpu)
 		l4x_pre_iret_work(regsp, p, 0, 0, 0);
 	} else {
 		if (!l4x_dispatch_exception(p, t, vcpu_val_err(vcpu),
-		                            vcpu_val_trapno(vcpu), regsp))
+		                            vcpu_val_trapno(vcpu), regsp, l4x_l4pfa(t)))
 			l4x_pre_iret_work(regsp, p, 0, 0, 0);
 	}
 

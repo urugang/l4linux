@@ -4,10 +4,11 @@
  * This file is licensed under the terms of the GNU General Public License 2.
  * See file COPYING-GPL-2 for details.
  */
+#define L4_RPC_DISABLE_LEGACY_DISPATCH 1
 #include <l4/re/util/video/goos_svr>
 #include <l4/re/util/object_registry>
 #include <l4/re/util/dataspace_svr>
-#include <l4/sys/typeinfo_svr>
+#include <l4/sys/cxx/ipc_epiface>
 
 #include <l4/log/log.h>
 
@@ -18,12 +19,14 @@
 
 class Fb : public L4Re::Util::Video::Goos_svr,
            public L4Re::Util::Dataspace_svr,
-           public l4x_srv_object
+           public l4x_srv_epiface_t<Fb, L4::Kobject_2t<void, L4Re::Video::Goos, L4Re::Dataspace> >
 {
 public:
+	using L4Re::Util::Video::Goos_svr::op_info;
+	using L4Re::Util::Dataspace_svr::op_info;
+
 	Fb();
 	~Fb() throw() {}
-	int dispatch(l4_umword_t obj, L4::Ipc::Iostream &ios);
 	int map_hook(l4_addr_t offs, unsigned long flags,
 	             l4_addr_t min, l4_addr_t max);
 	void set(struct l4fb_info *info, L4::Cap<L4::Thread> thread);
@@ -38,7 +41,6 @@ private:
 Fb::Fb()
  : _map_done(false), _active(0), _vidmem_start(0), _vidmem_size(0)
 {
-	l4x_srv_object::dispatch = &l4x_srv_generic_dispatch<Fb>;
 }
 
 int
@@ -72,22 +74,6 @@ Fb::map_hook(l4_addr_t, unsigned long flags, l4_addr_t, l4_addr_t)
 	return 0;
 }
 
-int
-Fb::dispatch(l4_umword_t obj, L4::Ipc::Iostream &ios)
-{
-	l4_msgtag_t tag;
-	ios >> tag;
-	switch (tag.label()) {
-		case L4::Meta::Protocol:
-			return L4::Util::handle_meta_request<L4Re::Video::Goos>(ios);
-		case L4Re::Protocol::Goos:
-			return L4Re::Util::Video::Goos_svr::dispatch(obj, ios);
-		case L4Re::Protocol::Dataspace:
-			return L4Re::Util::Dataspace_svr::dispatch(obj, ios);
-		default:
-			return -L4_EBADPROTO;
-	}
-}
 
 void
 Fb::set(struct l4fb_info *info, L4::Cap<L4::Thread> thread)

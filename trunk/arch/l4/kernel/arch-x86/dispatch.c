@@ -6,16 +6,17 @@
 #include <linux/tick.h>
 #include <linux/kprobes.h>
 #include <linux/delay.h>
+#include <linux/moduleparam.h>
 
 #include <asm/processor.h>
 #include <asm/mmu_context.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/unistd.h>
-#include <asm/i387.h>
 #include <asm/traps.h>
-#include <asm/fpu-internal.h>
+#include <asm/fpu/internal.h>
 #include <asm/switch_to.h>
+#include <asm/kdebug.h>
 
 #include <l4/sys/ipc.h>
 #include <l4/sys/kdebug.h>
@@ -31,9 +32,7 @@
 #include <asm/api/macros.h>
 
 #include <asm/generic/dispatch.h>
-#include <asm/generic/ferret.h>
 #include <asm/generic/task.h>
-#include <asm/generic/upage.h>
 #include <asm/generic/memory.h>
 #include <asm/generic/setup.h>
 #include <asm/generic/ioremap.h>
@@ -48,6 +47,7 @@
 #include <asm/l4x/lx_syscalls.h>
 #include <asm/l4x/utcb.h>
 #include <asm/l4x/signal.h>
+#include <asm/l4x/entry-common.h>
 
 #if 0
 #define TBUF_LOG_IDLE(x)        TBUF_DO_IT(x)
@@ -60,7 +60,6 @@
 #define TBUF_LOG_DSP_IPC_IN(x)  TBUF_DO_IT(x)
 #define TBUF_LOG_DSP_IPC_OUT(x) TBUF_DO_IT(x)
 #define TBUF_LOG_SUSPEND(x)     TBUF_DO_IT(x)
-#define TBUF_LOG_SWITCH(x)      TBUF_DO_IT(x)
 #define TBUF_LOG_HYB_BEGIN(x)   TBUF_DO_IT(x)
 #define TBUF_LOG_HYB_RETURN(x)  TBUF_DO_IT(x)
 
@@ -76,10 +75,16 @@
 #define TBUF_LOG_DSP_IPC_IN(x)
 #define TBUF_LOG_DSP_IPC_OUT(x)
 #define TBUF_LOG_SUSPEND(x)
-#define TBUF_LOG_SWITCH(x)
 #define TBUF_LOG_HYB_BEGIN(x)
 #define TBUF_LOG_HYB_RETURN(x)
 
+#endif
+
+#ifdef CONFIG_X86_32
+#include "dispatch_32.c"
+#endif
+#ifdef CONFIG_X86_64
+#include "dispatch_64.c"
 #endif
 
 asmlinkage void __sched preempt_schedule_irq(void);
@@ -107,7 +112,7 @@ static inline int l4x_msgtag_copy_ureg(l4_utcb_t *u)
 	return 0;
 }
 
-static inline int l4x_is_triggered_exception(l4_umword_t val)
+static inline int l4x_is_triggered_exception_from_val(l4_umword_t val)
 {
 	return val == 0xff;
 }
@@ -124,15 +129,12 @@ static inline unsigned long regs_sp(struct task_struct *p)
 
 static inline void l4x_arch_task_setup(struct thread_struct *t)
 {
-#ifdef CONFIG_X86_32
-	load_TLS(t, 0);
-#endif
+	load_TLS(t, smp_processor_id());
 }
 
 static inline void l4x_arch_do_syscall_trace(struct task_struct *p)
 {
-	if (unlikely(current_thread_info()->flags & _TIF_WORK_SYSCALL_EXIT))
-		syscall_trace_leave(task_pt_regs(p));
+	syscall_return_slowpath(task_pt_regs(p));
 }
 
 static inline int l4x_hybrid_check_after_syscall(l4_utcb_t *utcb)
@@ -171,13 +173,13 @@ static inline void l4x_arch_task_start_setup(struct task_struct *p, l4_cap_idx_t
 		task_pt_regs(p)->fs = gs;
 
 	/* Setup LDTs */
-	if (p->mm && p->mm->context.size) {
+	if (p->mm && p->mm->context.ldt) {
 		unsigned i;
 		L4XV_V(f);
 		L4XV_L(f);
-		for (i = 0; i < p->mm->context.size;
+		for (i = 0; i < p->mm->context.ldt->size;
 		     i += L4_TASK_LDT_X86_MAX_ENTRIES) {
-			unsigned sz = p->mm->context.size - i;
+			unsigned sz = p->mm->context.ldt->size - i;
 			int r;
 			if (sz > L4_TASK_LDT_X86_MAX_ENTRIES)
 				sz = L4_TASK_LDT_X86_MAX_ENTRIES;
@@ -203,51 +205,17 @@ static inline int l4x_iswrpf(unsigned long error_code)
 	return error_code & 2;
 }
 
-static inline int l4x_ispf(struct thread_struct *t)
+static inline int l4x_ispf_v(l4_vcpu_state_t *v)
+{
+	return v->r.trapno == 14;
+}
+
+static inline int l4x_ispf_t(struct thread_struct *t)
 {
 	return t->trap_nr == 14;
 }
 
-static inline void l4x_print_regs(unsigned long err, unsigned long trapno,
-                                  struct pt_regs *r)
-{
-	printk("ip: %08lx sp: %08lx err: %08lx trp: %08lx\n",
-	       r->ip, r->sp, err, trapno);
-	printk("ax: %08lx bx: %08lx  cx: %08lx  dx: %08lx\n",
-	       r->ax, r->bx, r->cx, r->dx);
-#ifdef CONFIG_X86_32
-	printk("di: %08lx si: %08lx  bp: %08lx  gs: %08lx fs: %08lx\n",
-	       r->di, r->si, r->bp, r->gs, r->fs);
-#else
-	printk("di: %08lx si: %08lx  bp: %08lx\n",
-	       r->di, r->si, r->bp);
-#endif
-}
-
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
-#if 0
-asm(
-".section .text			\n"
-#ifdef CONFIG_L4_VCPU
-".global ret_from_fork          \n"
-#endif
-"ret_from_fork:			\n"
-// why do we need the push/pop?
-#ifdef CONFIG_X86_32
-"pushl	%ebx			\n"
-#endif
-"call	schedule_tail		\n"
-#ifdef CONFIG_X86_32
-"popl	%ebx			\n"
-#endif
-#ifdef CONFIG_L4_VCPU
-"jmp	l4x_vcpu_ret_from_fork  \n"
-#else
-"jmp	l4x_user_dispatcher	\n"
-#endif
-".previous			\n"
-);
-#endif
 
 #ifndef CONFIG_L4_VCPU
 void l4x_idle(void);
@@ -261,77 +229,6 @@ DEFINE_PER_CPU(struct thread_info *, l4x_current_proc_run);
 static DEFINE_PER_CPU(unsigned, utcb_snd_size);
 #endif
 
-
-__notrace_funcgraph struct task_struct *
-__switch_to(struct task_struct *prev_p, struct task_struct *next_p)
-{
-	int cpu = smp_processor_id();
-	fpu_switch_t fpu;
-
-	if (0)
-		LOG_printf("%s: cpu%d: %s(%d)[%lx, %p] -> %s(%d)[%lx, %p]\n",
-		           __func__, cpu,
-		           prev_p->comm, prev_p->pid, prev_p->state, prev_p->stack,
-		           next_p->comm, next_p->pid, next_p->state, next_p->stack);
-#ifdef CONFIG_L4_VCPU
-	TBUF_LOG_SWITCH(fiasco_tbuf_log_3val("SWITCH", (unsigned long)prev_p->stack, (unsigned long)next_p->stack, next_p->thread.sp0));
-#else
-	TBUF_LOG_SWITCH(fiasco_tbuf_log_3val("SWITCH", (prev_p->pid << 16) | TBUF_TID(prev_p->thread.user_thread_id), (next_p->pid << 16) | TBUF_TID(next_p->thread.user_thread_id), 0));
-#endif
-
-	fpu = switch_fpu_prepare(prev_p, next_p, cpu);
-
-#ifndef CONFIG_L4_VCPU
-	this_cpu_write(l4x_current_ti,
-	               (struct thread_info *)((unsigned long)next_p->stack & ~(THREAD_SIZE - 1)));
-#endif
-
-	/*
-	 * If it were not for PREEMPT_ACTIVE we could guarantee that the
-	 * preempt_count of all tasks was equal here and this would not be
-	 * needed.
-	 */
-	task_thread_info(prev_p)->saved_preempt_count = this_cpu_read(__preempt_count);
-	this_cpu_write(__preempt_count, task_thread_info(next_p)->saved_preempt_count);
-
-	if (unlikely(task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV ||
-	             task_thread_info(next_p)->flags & _TIF_WORK_CTXSW_NEXT))
-		__switch_to_xtra(prev_p, next_p, NULL);
-
-	arch_end_context_switch(next_p);
-
-	this_cpu_write(kernel_stack,
-		  (unsigned long)task_stack_page(next_p) +
-		  THREAD_SIZE - KERNEL_STACK_OFFSET);
-
-
-	switch_fpu_finish(next_p, fpu);
-
-	this_cpu_write(current_task, next_p);
-
-#if defined(CONFIG_SMP) && !defined(CONFIG_L4_VCPU)
-	next_p->thread.user_thread_id = next_p->thread.user_thread_ids[cpu];
-	l4x_stack_struct_get(next_p->stack)->utcb
-		= l4x_stack_struct_get(prev_p->stack)->utcb;
-#endif
-
-#ifdef CONFIG_L4_VCPU
-	l4x_vcpu_ptr[cpu]->entry_sp = (unsigned long)task_pt_regs(next_p);
-#endif
-
-#ifdef CONFIG_X86_32
-	if (next_p->mm
-#ifndef CONFIG_L4_VCPU
-	    && !l4_is_invalid_cap(next_p->thread.user_thread_id)
-	    && next_p->thread.user_thread_id
-#endif
-	    )
-		load_TLS(&next_p->thread, 0);
-#endif
-
-	return prev_p;
-}
-
 static inline void l4x_pte_add_access_flag(pte_t *ptep)
 {
 	ptep->pte |= _PAGE_ACCESSED;
@@ -343,7 +240,6 @@ static inline void l4x_pte_add_access_and_dirty_flags(pte_t *ptep)
 }
 
 #ifdef CONFIG_L4_VCPU
-
 static inline void
 state_to_vcpu(l4_vcpu_state_t *vcpu, struct pt_regs *regs,
               struct task_struct *p)
@@ -421,19 +317,15 @@ static inline void dispatch_system_call(struct task_struct *p,
 	regsp->orig_ax = syscall = regsp->ax;
 	regsp->ax = -ENOSYS;
 
-#ifdef CONFIG_L4_FERRET_SYSCALL_COUNTER
-	ferret_histo_bin_inc(l4x_ferret_syscall_ctr, syscall);
-#endif
-
 	if (show_syscalls)
 		printk("Syscall %3d for %s(%d at %p): args: %lx,%lx,%lx\n",
 		       syscall, p->comm, p->pid, (void *)regsp->ip,
-		       regsp->bx, regsp->cx, regsp->dx);
+		       regsp->S_ARG0, regsp->S_ARG1, regsp->S_ARG2);
 
 	if (show_syscalls && syscall == 11) {
 		struct filename *fn;
 		printk("execve: pid: %d(%s): ", p->pid, p->comm);
-		fn = getname((char *)regsp->bx);
+		fn = getname((char *)regsp->S_ARG0);
 		printk("%s\n", IS_ERR(fn) ? "UNKNOWN" : fn->name);
 		putname(fn);
 	}
@@ -441,42 +333,48 @@ static inline void dispatch_system_call(struct task_struct *p,
 	if (show_syscalls && syscall == 120)
 		printk("Syscall %3d for %s(%d at %p): arg1 = %lx ebp=%lx\n",
 		       syscall, p->comm, p->pid, (void *)regsp->ip,
-		       regsp->bx, regsp->bp);
+		       regsp->S_ARG0, regsp->S_ARG5);
 
 	if (show_syscalls && syscall == 21)
 		printk("Syscall %3d mount for %s(%d at %p): %lx %lx %lx %lx %lx %lx\n",
 		       syscall, p->comm, p->pid, (void *)regsp->ip,
-		       regsp->bx, regsp->cx, regsp->dx, regsp->si,
-		       regsp->di, regsp->bp);
+		       regsp->S_ARG0, regsp->S_ARG1, regsp->S_ARG2,
+		       regsp->S_ARG3, regsp->S_ARG4, regsp->S_ARG5);
 	if (show_syscalls && syscall == 5) {
-		struct filename *fn = getname((char *)regsp->bx);
+		struct filename *fn = getname((char *)regsp->S_ARG0);
 		printk("open: pid: %d(%s): %s (%lx)\n",
 		       current->pid, current->comm,
-		       IS_ERR(fn) ? "UNKNOWN" : fn->name, regsp->bx);
-		putname(fn);
+		       IS_ERR(fn) ? "UNKNOWN" : fn->name, regsp->S_ARG0);
+		if (!IS_ERR(fn))
+			putname(fn);
 	}
 
 	if (unlikely(!is_lx_syscall(syscall))) {
 		printk("Syscall %3d for %s(%d at %p): arg1 = %lx\n",
 		       syscall, p->comm, p->pid, (void *)regsp->ip,
-		       regsp->bx);
+		       regsp->S_ARG0);
 		l4x_print_regs(p->thread.error_code, p->thread.trap_nr, regsp);
 	}
 
-	if (likely((is_lx_syscall(syscall))
-		   && ((syscall_fn = (syscall_t)sys_call_table[syscall])))) {
+	if (!likely((is_lx_syscall(syscall))
+		   && ((syscall_fn = (syscall_t)sys_call_table[syscall]))))
+		goto ret_from_syscall;
 
-		if (unlikely(current_thread_info()->flags & _TIF_WORK_SYSCALL_ENTRY))
-			syscall_trace_enter(regsp);
-
-		regsp->ax = syscall_fn(regsp->bx, regsp->cx,
-		                       regsp->dx, regsp->si,
-		                       regsp->di, regsp->bp);
-
-		if (unlikely(current_thread_info()->flags & _TIF_WORK_SYSCALL_EXIT))
-			syscall_trace_leave(regsp);
+	if (unlikely(current_thread_info()->flags & _TIF_WORK_SYSCALL_ENTRY)) {
+		syscall = syscall_trace_enter(regsp);
+		if (!likely((is_lx_syscall(syscall))
+		            && ((syscall_fn = (syscall_t)sys_call_table[syscall]))))
+			goto ret_from_syscall;
 	}
 
+	regsp->ax = syscall_fn(regsp->S_ARG0, regsp->S_ARG1,
+	                       regsp->S_ARG2, regsp->S_ARG3,
+	                       regsp->S_ARG4, regsp->S_ARG5);
+
+	if (unlikely(current_thread_info()->flags & _TIF_ALLWORK_MASK))
+		syscall_return_slowpath(regsp);
+
+ret_from_syscall:
 	if (show_syscalls)
 		printk("Syscall %3d for %s(%d at %p): return %lx/%ld\n",
 		       syscall, p->comm, p->pid, (void *)regsp->ip,
@@ -491,55 +389,23 @@ l4x_pre_iret_work(struct pt_regs *regs, struct task_struct *p,
                   unsigned long scno, void *dummy,
                   unsigned kernel_context)
 {
-	unsigned long tifl;
 	unsigned was_interruptible = 0;
 
 	if (kernel_context)
-		goto from_kernel_context;
-
-resume_userspace:
-	local_irq_disable();
-
-	tifl = current_thread_info()->flags;
-	if (tifl & _TIF_WORK_MASK)
-		goto work_pending;
-
-	goto restore_all;
-
-work_pending:
-	if (!(current_thread_info()->flags & _TIF_NEED_RESCHED))
-		goto work_notifysig;
-
-work_resched:
-	schedule();
-	was_interruptible = 1;
-
-	local_irq_disable();
-
-	tifl = current_thread_info()->flags;
-	if (!(tifl & _TIF_WORK_MASK))
-		goto restore_all;
-	if (tifl & _TIF_NEED_RESCHED)
-		goto work_resched;
-
-work_notifysig:
-	local_irq_enable();
-	was_interruptible = 1;
-
-	if ((regs->cs & SEGMENT_RPL_MASK) < USER_RPL)
-from_kernel_context:
 #ifdef CONFIG_PREEMPT
 		goto resume_kernel;
 #else
 		goto restore_all;
 #endif
 
-	do_notify_resume(regs, 0, tifl);
-	goto resume_userspace;
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+	lockdep_sys_exit();
+#endif
+	local_irq_disable();
+	// TRACE_IRQS_OFF
+	prepare_exit_to_usermode(regs);
+	goto restore_all;
 
-restore_all:
-
-	return was_interruptible;
 
 #ifdef CONFIG_PREEMPT
 resume_kernel:
@@ -549,10 +415,6 @@ resume_kernel:
 		goto restore_all;
 
 need_resched:
-	tifl = current_thread_info()->flags;
-	if (!(tifl & _TIF_NEED_RESCHED))
-		goto restore_all;
-
 	if (regs->flags & X86_EFLAGS_IF)
 		goto restore_all;
 
@@ -561,7 +423,78 @@ need_resched:
 
 	goto need_resched;
 #endif
+
+restore_all:
+	// TRACE_IRQS_IRET
+	return was_interruptible;
 }
+
+static int l4x_port_emu_rtc_dummy(bool in, u32 port,
+                                  u8 accesslen, u32 *value)
+{
+	static bool rtc_emu_info;
+	if (port != 0x70 && port != 0x71)
+		return 0;
+
+	if (in) {
+		if (!rtc_emu_info)
+			pr_warn("l4x: Faking dummy RTC\n");
+		rtc_emu_info = true;
+		/* returning 0 will provide
+		 * RTC time:  0:00:00, date: 00/00/00
+		 * which is better than ~0
+		 */
+		*value = 0;
+	}
+
+	return 1;
+}
+
+static int l4x_port_emu_vga_dummy(bool in, u32 port,
+                                  u8 accesslen, u32 *value)
+{
+	if (port < 0x3b0 || port > 0x3df)
+		return 0;
+
+	if (in)
+		*value = ~0;
+
+	return 1;
+}
+
+static int l4x_port_emu_pci_dummy(bool in, u32 port,
+                                  u8 accesslen, u32 *value)
+{
+	if (port != 0xcf8)
+		return 0;
+
+	*value = ~0;
+	return 1;
+}
+
+static int l4x_port_emu_i8042_dummy(bool in, u32 port,
+                                    u8 accesslen, u32 *value)
+{
+	if (port != 0x60 && port != 0x64)
+		return 0;
+
+	if (in)
+		*value = ~0;
+
+	return 1;
+}
+
+
+typedef int (*l4x_port_emu_function)(bool in, u32 port,
+                                     u8 accesslen, u32 *value);
+
+static l4x_port_emu_function l4x_port_emu_funcs[] = {
+	l4x_port_emu_rtc_dummy,
+	l4x_port_emu_vga_dummy,
+	l4x_port_emu_pci_dummy,
+	l4x_port_emu_i8042_dummy,
+};
+
 
 /*
  * A primitive emulation.
@@ -570,36 +503,87 @@ need_resched:
  */
 static inline int l4x_port_emulation(struct pt_regs *regs)
 {
-	u8 op;
+	u8 insn, ilen, accesslen = 0;
+	u32 port, value = 0;
+	bool in_op = 0;
+	int i, ioffset = 0;
+	bool operand_size_prefix = 0;
+	/* 64bit mode writes zero extends eax to rax */
+	const unsigned long operand_mask[] = { 0xff, 0xffff, ~0ul };
 
-	if (get_user(op, (char *)regs->ip))
+	/**
+         *   0:   ec                      in     (%dx),%al
+         *   1:   66 ed                   in     (%dx),%ax
+         *   3:   ed                      in     (%dx),%eax
+         *   4:   e4 01                   in     $0x1,%al
+         *   6:   66 e5 02                in     $0x2,%ax
+         *   9:   e5 03                   in     $0x3,%eax
+         *   b:   ee                      out    %al,(%dx)
+         *   c:   66 ef                   out    %ax,(%dx)
+         *   e:   ef                      out    %eax,(%dx)
+         *   f:   e6 01                   out    %al,$0x1
+         *  11:   66 e7 02                out    %ax,$0x2
+         *  14:   e7 03                   out    %eax,$0x3
+	 */
+
+	if (get_user(insn, (char *)regs->ip))
 		return 0; /* User memory could not be accessed */
 
-	//printf("OP: %x (ip: %08x) dx = 0x%x\n", op, regs->ip, regs->edx & 0xffff);
+	if (insn == 0x66) {
+		operand_size_prefix = 1;
+		ioffset = 1;
+		if (get_user(insn, (char *)(regs->ip + ioffset)))
+			return 0; /* User memory could not be accessed */
+	}
 
-	switch (op) {
-		case 0xed: /* in dx, eax */
-		case 0xec: /* in dx, al */
-			switch (regs->dx & 0xffff) {
-				case 0xcf8:
-				case 0x3da:
-				case 0x3cc:
-				case 0x3c1:
-					regs->ax = -1;
-					regs->ip++;
-					return 1;
-			};
-		case 0xee: /* out al, dx */
-			switch (regs->dx & 0xffff) {
-				case 0x3c0:
-					regs->ip++;
-					return 1;
-			};
-	};
+	/* no IN or OUT instruction, skip emulation */
+	if ((insn & 0xf4) != 0xe4)
+		return 0;
+
+	/* handle instructions that support the operand size prefix */
+	if (insn & 1) /* handle 0xe5, 0xed, 0xe7, and 0xef */
+		/* 16bit if override prefix is on 32bit is default */
+		accesslen = operand_size_prefix ? 1 : 2;
+
+	if (insn & 8) {
+		/* use DX as IO-port address */
+		port = regs->dx & 0xffff;
+		ilen = ioffset + 1;
+	} else {
+		/* use imm8 as port address */
+		if (get_user(port, (char *)regs->ip + ioffset + 1))
+			return 0; /* User memory could not be accessed */
+		ilen = ioffset + 2;
+	}
+
+	if (insn & 2) {
+		/* OUT operation, load value from eax, ax, or al */
+		in_op = 0;
+		value = regs->ax & operand_mask[accesslen];
+	} else {
+		/* IN operation */
+		in_op = 1;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(l4x_port_emu_funcs); ++i)
+		if (l4x_port_emu_funcs[i](in_op, port, accesslen, &value)) {
+			regs->ip += ilen;
+			if (in_op) {
+				/* put the result for IN into al, ax, or eax */
+				value &= operand_mask[accesslen];
+				regs->ax = (regs->ax & ~operand_mask[accesslen]) | value;
+			}
+			return 1;
+		}
+
+	pr_info("l4x: IO-Port: port=%x %s (insn=0x%x ip=%08lx)\n",
+		port, in_op ? "IN" : "OUT", insn, regs->ip);
 
 	return 0; /* Not handled here */
 }
 
+static bool l4x_emulate_kdebug;
+module_param(l4x_emulate_kdebug, bool, 0);
 /*
  * Emulation of (some) jdb commands. The user program may not
  * be allowed to issue jdb commands, they trap in here. Nevertheless
@@ -613,6 +597,9 @@ static int l4x_kdebug_emulation(struct pt_regs *regs)
 	u8 op = 0, val;
 	char *addr = (char *)regs->ip - 1;
 	int i, len;
+
+	if (!l4x_emulate_kdebug)
+		return 0;
 
 	if (get_user(op, addr))
 		return 0; /* User memory could not be accessed */
@@ -718,7 +705,8 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
                                          struct thread_struct *t,
                                          unsigned long err,
                                          unsigned long trapno,
-                                         struct pt_regs *regs)
+                                         struct pt_regs *regs,
+                                         unsigned long pfa)
 {
 #ifndef CONFIG_L4_VCPU
 	l4x_hybrid_do_regular_work();
@@ -734,9 +722,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 
 		return 0;
 #endif
-	} else if (likely(trapno == 0xd && err == 0x402)) {
-		/* int 0x80 is trap 0xd and err 0x402 (0x80 << 3 | 2) */
-
+	} else if (likely(l4x_is_linux_syscall(err, trapno, regs))) {
 		TBUF_LOG_INT80(fiasco_tbuf_log_3val("int80  ", TBUF_TID(t->user_thread_id), regs->ip, regs->ax));
 
 		/* set after int 0x80, before syscall so the forked childs
@@ -748,29 +734,58 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		BUG_ON(p != current);
 
 		return 0;
-	} else if (trapno == 7) {
-		do_device_not_available(regs, -1);
+#ifdef CONFIG_IA32_EMULATION
+	} else if (likely(l4x_is_compat_syscall(err, trapno, regs))) {
+		/* set after int 0x80, before syscall so the forked childs
+		 * get the increase too */
+		regs->ip += 2;
+
+		dispatch_compat_system_call(p, regs);
+
+		BUG_ON(p != current);
+
 		return 0;
-	} else if (unlikely(trapno == 1)) {
-		do_debug(regs, 0);
-		return 0;
-	} else if (trapno == 0xd) {
-#ifndef CONFIG_L4_VCPU
-		if (l4x_hybrid_begin(p, t))
-			return 0;
 #endif
-		/* Fall through otherwise */
 	}
 
-	if (trapno == 3) {
-		if (l4x_kdebug_emulation(regs))
-			return 0; /* known and handled */
-		do_int3(regs, err);
+	switch (trapno) {
+		case  X86_TRAP_MF:
+			do_coprocessor_error(regs, err);
+			break;
+		case X86_TRAP_XF:
+			do_simd_coprocessor_error(regs, err);
+			break;
+		case X86_TRAP_NM:
+			do_device_not_available(regs, err);
+			break;
+		case X86_TRAP_DB:
+			do_debug(regs, err);
+			break;
+		case X86_TRAP_BP:
+			if (l4x_kdebug_emulation(regs))
+				return 0;
+			do_int3(regs, err);
+			break;
+		case X86_TRAP_GP:
+#ifndef CONFIG_L4_VCPU
+			if (l4x_hybrid_begin(p, t))
+				return 0;
+#endif
+			/* Fall through */
+		case X86_TRAP_PF:
+			if (l4x_port_emulation(regs))
+				return 0;
+		default:
+			goto unknown_fault;
+	}
+
+	return 0;
+
+unknown_fault:
+	if (!user_mode(regs)) {
+		die("Exception", regs, err);
 		return 0;
 	}
-
-	if (l4x_port_emulation(regs))
-		return 0; /* known and handled */
 
 	TBUF_LOG_EXCP(fiasco_tbuf_log_3val("except ", TBUF_TID(t->user_thread_id), t->trap_nr, t->error_code));
 

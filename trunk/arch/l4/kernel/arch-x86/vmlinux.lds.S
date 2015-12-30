@@ -82,7 +82,11 @@ PHDRS {
 SECTIONS
 {
 #ifdef CONFIG_X86_32
+#ifdef CONFIG_L4
 	. = 0x400000;
+#else
+        . = LOAD_OFFSET + LOAD_PHYSICAL_ADDR;
+#endif
         phys_startup_32 = startup_32 - LOAD_OFFSET;
 #else
         . = __START_KERNEL;
@@ -90,10 +94,10 @@ SECTIONS
 #endif
 
 	/* Text and read-only data */
-
+#ifdef CONFIG_L4
 	startup_32 = .;
 	startup_64 = .;
-	/*_stext = .;*/
+#endif
 	.text :  AT(ADDR(.text) - LOAD_OFFSET) {
 		_text = .;
 		/* bootstrapping code */
@@ -190,6 +194,10 @@ SECTIONS
 	 * start another segment - init.
 	 */
 	PERCPU_VADDR(INTERNODE_CACHE_BYTES, 0, :percpu)
+#ifndef CONFIG_L4
+	ASSERT(SIZEOF(.data..percpu) < CONFIG_PHYSICAL_START,
+	       "per-CPU data too large - increase CONFIG_PHYSICAL_START")
+#endif /* L4 */
 #endif
 
 	INIT_TEXT_SECTION(PAGE_SIZE)
@@ -366,7 +374,7 @@ INIT_PER_CPU(irq_stack_union);
 
 #endif /* CONFIG_X86_32 */
 
-#ifdef CONFIG_KEXEC
+#ifdef CONFIG_KEXEC_CORE
 #include <asm/kexec.h>
 
 . = ASSERT(kexec_control_code_size <= KEXEC_CONTROL_CODE_MAX_SIZE,

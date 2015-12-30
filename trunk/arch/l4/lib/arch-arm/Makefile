@@ -1,47 +1,54 @@
 
-lib-y	+= ../csumpartialcopyuser.o
+lib-y		:= backtrace.o changebit.o csumipv6.o csumpartial.o   \
+		   csumpartialcopy.o csumpartialcopyuser.o clearbit.o \
+		   delay.o delay-loop.o findbit.o memchr.o memcpy.o   \
+		   memmove.o memset.o memzero.o setbit.o              \
+		   strchr.o strrchr.o                                 \
+		   testchangebit.o testclearbit.o testsetbit.o        \
+		   ashldi3.o ashrdi3.o lshrdi3.o muldi3.o             \
+		   ucmpdi2.o lib1funcs.o div64.o                      \
+		   io-readsb.o io-writesb.o io-readsl.o io-writesl.o  \
+		   call_with_stack.o bswapsdi2.o
 
-lib-y	+= ../../../arm/lib/memcpy.o
-lib-y	+= ../../../arm/lib/memmove.o
-lib-y	+= ../../../arm/lib/memzero.o
-lib-y	+= ../../../arm/lib/memchr.o
-lib-y	+= ../../../arm/lib/memset.o
-lib-y	+= ../../../arm/lib/strchr.o
-lib-y	+= ../../../arm/lib/strrchr.o
-lib-y	+= ../../../arm/lib/copy_page.o
-lib-y	+= ../../../arm/lib/lib1funcs.o
-lib-y	+= ../../../arm/lib/muldi3.o
-lib-y	+= ../../../arm/lib/div64.o
-lib-y	+= ../../../arm/lib/ucmpdi2.o
-lib-y	+= ../../../arm/lib/ashldi3.o
-lib-y	+= ../../../arm/lib/ashrdi3.o
-lib-y	+= ../../../arm/lib/lshrdi3.o
-lib-y	+= ../../../arm/lib/testsetbit.o
-lib-y	+= ../../../arm/lib/testclearbit.o
-lib-y	+= ../../../arm/lib/testchangebit.o
-lib-y	+= ../../../arm/lib/setbit.o
-lib-y	+= ../../../arm/lib/clearbit.o
-lib-y	+= ../../../arm/lib/findbit.o
-lib-y	+= ../../../arm/lib/changebit.o
-lib-y	+= ../../../arm/lib/delay.o
-lib-y	+= ../../../arm/lib/delay-loop.o
-lib-y	+= ../../../arm/lib/csumipv6.o
-lib-y	+= ../../../arm/lib/csumpartial.o
-lib-y	+= ../../../arm/lib/csumpartialcopy.o
-lib-y	+= ../../../arm/lib/io-readsl.o
-lib-y	+= ../../../arm/lib/io-readsb.o
-lib-y	+= ../../../arm/lib/io-writesl.o
-lib-y	+= ../../../arm/lib/io-writesb.o
-lib-y	+= ../../../arm/lib/backtrace.o
-lib-y	+= ../../../arm/lib/io-readsw-armv4.o
-lib-y	+= ../../../arm/lib/io-writesw-armv4.o
-lib-y   += ../../../arm/lib/call_with_stack.o
-lib-y   += ../../../arm/lib/bswapsdi2.o
+mmu-y		:= copy_page.o
 
-lib-y	+= ../pte.o
-lib-y	+= ../memcpy_user.o
-lib-y	+= ../uaccess.o
+# using lib_ here won't override already available weak symbols
+obj-$(CONFIG_UACCESS_WITH_MEMCPY) += uaccess_with_memcpy.o
 
-obj-y	+= proc.o
-proc-y	+= ../proc.o
+lib-$(CONFIG_MMU) += $(mmu-y)
+
+ifeq ($(CONFIG_CPU_32v3),y)
+  lib-y	+= io-readsw-armv3.o io-writesw-armv3.o
+else
+  lib-y	+= io-readsw-armv4.o io-writesw-armv4.o
+endif
+
+lib-$(CONFIG_ARCH_RPC)		+= ecard.o io-acorn.o floppydma.o
+
+$(obj)/$(b)/csumpartialcopy.o:	$(obj)/$(b)/csumpartialcopygeneric.S
+$(obj)/csumpartialcopyuser.o:	$(obj)/csumpartialcopygeneric.S
+
+ifeq ($(CONFIG_KERNEL_MODE_NEON),y)
+  NEON_FLAGS			:= -mfloat-abi=softfp -mfpu=neon
+  CFLAGS_xor-neon.o		+= $(NEON_FLAGS)
+  obj-$(CONFIG_XOR_BLOCKS)	+= xor-neon.o
+endif
+
+lib-y	+= ../pte.o ../memcpy_user.o ../uaccess.o
+
+obj-y	+= ../proc.o
 obj-$(CONFIG_L4_DEBUG) += ../debugfs.o
+
+include arch/l4/Makefile.lib
+
+lib-y := $(call L4X_PREFIX_IF, ../../../arm/lib, $(lib-y), \
+           backtrace changebit csumipv6 csumpartial csumpartialcopy \
+	   clearbit delay delay-loop findbit memchr memcpy \
+	   memmove memset memzero setbit strchr strrchr \
+	   testchangebit testclearbit testsetbit \
+	   ashldi3 ashrdi3 lshrdi3 muldi3 \
+	   ucmpdi2 lib1funcs div64 \
+	   io-readsb io-writesb io-readsl io-writesl \
+	   call_with_stack bswapsdi2 io-writesw-armv4 io-readsw-armv4 \
+	   copy_page)
+lib-y := $(call L4X_PREFIX_IF, .., $(lib-y), csumpartialcopyuser)

@@ -78,6 +78,21 @@ extern u64 __ua_limit;
 
 #define segment_eq(a, b)	((a).seg == (b).seg)
 
+/*
+ * eva_kernel_access() - determine whether kernel memory access on an EVA system
+ *
+ * Determines whether memory accesses should be performed to kernel memory
+ * on a system using Extended Virtual Addressing (EVA).
+ *
+ * Return: true if a kernel memory access on an EVA system, else false.
+ */
+static inline bool eva_kernel_access(void)
+{
+	if (!config_enabled(CONFIG_EVA))
+		return false;
+
+	return segment_eq(get_fs(), get_ds());
+}
 
 /*
  * Is a address valid? This does a straighforward calculation rather
@@ -103,7 +118,8 @@ extern u64 __ua_limit;
  * @addr: User space pointer to start of block to check
  * @size: Size of block to check
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * Checks if a pointer to a block of memory in user space is valid.
  *
@@ -138,7 +154,8 @@ extern u64 __ua_limit;
  * @x:	 Value to copy to user space.
  * @ptr: Destination address, in user space.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple value from kernel space to user
  * space.  It supports simple types like char and int, but not larger
@@ -157,7 +174,8 @@ extern u64 __ua_limit;
  * @x:	 Variable to store result.
  * @ptr: Source address, in user space.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple variable from user space to kernel
  * space.  It supports simple types like char and int, but not larger
@@ -177,7 +195,8 @@ extern u64 __ua_limit;
  * @x:	 Value to copy to user space.
  * @ptr: Destination address, in user space.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple value from kernel space to user
  * space.  It supports simple types like char and int, but not larger
@@ -199,7 +218,8 @@ extern u64 __ua_limit;
  * @x:	 Variable to store result.
  * @ptr: Source address, in user space.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple variable from user space to kernel
  * space.  It supports simple types like char and int, but not larger
@@ -281,7 +301,7 @@ do {									\
 ({									\
 	int __gu_err;							\
 									\
-	if (segment_eq(get_fs(), get_ds())) {				\
+	if (eva_kernel_access()) {					\
 		__get_kernel_common((x), size, ptr);			\
 	} else {							\
 		__chk_user_ptr(ptr);					\
@@ -297,11 +317,12 @@ do {									\
 									\
 	might_fault();							\
 	if (likely(access_ok(VERIFY_READ,  __gu_ptr, size))) {		\
-		if (segment_eq(get_fs(), get_ds()))			\
+		if (eva_kernel_access())				\
 			__get_kernel_common((x), size, __gu_ptr);	\
 		else							\
 			__get_user_common((x), size, __gu_ptr);		\
-	}								\
+	} else								\
+		(x) = 0;						\
 									\
 	__gu_err;							\
 })
@@ -316,6 +337,7 @@ do {									\
 	"	.insn						\n"	\
 	"	.section .fixup,\"ax\"				\n"	\
 	"3:	li	%0, %4					\n"	\
+	"	move	%1, $0					\n"	\
 	"	j	2b					\n"	\
 	"	.previous					\n"	\
 	"	.section __ex_table,\"a\"			\n"	\
@@ -420,7 +442,7 @@ do {									\
 	int __pu_err = 0;						\
 									\
 	__pu_val = (x);							\
-	if (segment_eq(get_fs(), get_ds())) {				\
+	if (eva_kernel_access()) {					\
 		__put_kernel_common(ptr, size);				\
 	} else {							\
 		__chk_user_ptr(ptr);					\
@@ -437,7 +459,7 @@ do {									\
 									\
 	might_fault();							\
 	if (likely(access_ok(VERIFY_WRITE,  __pu_addr, size))) {	\
-		if (segment_eq(get_fs(), get_ds()))			\
+		if (eva_kernel_access())				\
 			__put_kernel_common(__pu_addr, size);		\
 		else							\
 			__put_user_common(__pu_addr, size);		\
@@ -496,7 +518,8 @@ extern void __put_user_unknown(void);
  * @x:	 Value to copy to user space.
  * @ptr: Destination address, in user space.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple value from kernel space to user
  * space.  It supports simple types like char and int, but not larger
@@ -515,7 +538,8 @@ extern void __put_user_unknown(void);
  * @x:	 Variable to store result.
  * @ptr: Source address, in user space.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple variable from user space to kernel
  * space.  It supports simple types like char and int, but not larger
@@ -535,7 +559,8 @@ extern void __put_user_unknown(void);
  * @x:	 Value to copy to user space.
  * @ptr: Destination address, in user space.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple value from kernel space to user
  * space.  It supports simple types like char and int, but not larger
@@ -557,7 +582,8 @@ extern void __put_user_unknown(void);
  * @x:	 Variable to store result.
  * @ptr: Source address, in user space.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple variable from user space to kernel
  * space.  It supports simple types like char and int, but not larger
@@ -630,6 +656,7 @@ do {									\
 	"	.insn						\n"	\
 	"	.section .fixup,\"ax\"				\n"	\
 	"3:	li	%0, %4					\n"	\
+	"	move	%1, $0					\n"	\
 	"	j	2b					\n"	\
 	"	.previous					\n"	\
 	"	.section __ex_table,\"a\"			\n"	\
@@ -773,10 +800,11 @@ extern void __put_user_unaligned_unknown(void);
 	"jal\t" #destination "\n\t"
 #endif
 
-#ifndef CONFIG_CPU_DADDI_WORKAROUNDS
-#define DADDI_SCRATCH "$0"
-#else
+#if defined(CONFIG_CPU_DADDI_WORKAROUNDS) || (defined(CONFIG_EVA) &&	\
+					      defined(CONFIG_CPU_HAS_PREFETCH))
 #define DADDI_SCRATCH "$3"
+#else
+#define DADDI_SCRATCH "$0"
 #endif
 
 extern size_t __copy_user(void *__to, const void *__from, size_t __n);
@@ -811,7 +839,8 @@ extern size_t __copy_user(void *__to, const void *__from, size_t __n);
  * @from: Source address, in kernel space.
  * @n:	  Number of bytes to copy.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * Copy data from kernel space to user space.  Caller must check
  * the specified block with access_ok() before calling this function.
@@ -829,7 +858,7 @@ extern size_t __copy_user(void *__to, const void *__from, size_t __n);
 	__cu_from = (from);						\
 	__cu_len = (n);							\
 	might_fault();							\
-	if (segment_eq(get_fs(), get_ds()))				\
+	if (eva_kernel_access())					\
 		__cu_len = __invoke_copy_to_kernel(__cu_to, __cu_from,	\
 						   __cu_len);		\
 	else								\
@@ -849,7 +878,7 @@ extern size_t __copy_user_inatomic(void *__to, const void *__from, size_t __n);
 	__cu_to = (to);							\
 	__cu_from = (from);						\
 	__cu_len = (n);							\
-	if (segment_eq(get_fs(), get_ds()))				\
+	if (eva_kernel_access())					\
 		__cu_len = __invoke_copy_to_kernel(__cu_to, __cu_from,	\
 						   __cu_len);		\
 	else								\
@@ -867,7 +896,7 @@ extern size_t __copy_user_inatomic(void *__to, const void *__from, size_t __n);
 	__cu_to = (to);							\
 	__cu_from = (from);						\
 	__cu_len = (n);							\
-	if (segment_eq(get_fs(), get_ds()))				\
+	if (eva_kernel_access())					\
 		__cu_len = __invoke_copy_from_kernel_inatomic(__cu_to,	\
 							      __cu_from,\
 							      __cu_len);\
@@ -884,7 +913,8 @@ extern size_t __copy_user_inatomic(void *__to, const void *__from, size_t __n);
  * @from: Source address, in kernel space.
  * @n:	  Number of bytes to copy.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * Copy data from kernel space to user space.
  *
@@ -900,7 +930,7 @@ extern size_t __copy_user_inatomic(void *__to, const void *__from, size_t __n);
 	__cu_to = (to);							\
 	__cu_from = (from);						\
 	__cu_len = (n);							\
-	if (segment_eq(get_fs(), get_ds())) {				\
+	if (eva_kernel_access()) {					\
 		__cu_len = __invoke_copy_to_kernel(__cu_to,		\
 						   __cu_from,		\
 						   __cu_len);		\
@@ -1071,7 +1101,8 @@ extern size_t __copy_in_user_eva(void *__to, const void *__from, size_t __n);
  * @from: Source address, in user space.
  * @n:	  Number of bytes to copy.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * Copy data from user space to kernel space.  Caller must check
  * the specified block with access_ok() before calling this function.
@@ -1103,7 +1134,8 @@ extern size_t __copy_in_user_eva(void *__to, const void *__from, size_t __n);
  * @from: Source address, in user space.
  * @n:	  Number of bytes to copy.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * Copy data from user space to kernel space.
  *
@@ -1122,7 +1154,7 @@ extern size_t __copy_in_user_eva(void *__to, const void *__from, size_t __n);
 	__cu_to = (to);							\
 	__cu_from = (from);						\
 	__cu_len = (n);							\
-	if (segment_eq(get_fs(), get_ds())) {				\
+	if (eva_kernel_access()) {					\
 		__cu_len = __invoke_copy_from_kernel(__cu_to,		\
 						     __cu_from,		\
 						     __cu_len);		\
@@ -1146,7 +1178,7 @@ extern size_t __copy_in_user_eva(void *__to, const void *__from, size_t __n);
 	__cu_to = (to);							\
 	__cu_from = (from);						\
 	__cu_len = (n);							\
-	if (segment_eq(get_fs(), get_ds())) {				\
+	if (eva_kernel_access()) {					\
 		__cu_len = ___invoke_copy_in_kernel(__cu_to, __cu_from,	\
 						    __cu_len);		\
 	} else {							\
@@ -1166,7 +1198,7 @@ extern size_t __copy_in_user_eva(void *__to, const void *__from, size_t __n);
 	__cu_to = (to);							\
 	__cu_from = (from);						\
 	__cu_len = (n);							\
-	if (segment_eq(get_fs(), get_ds())) {				\
+	if (eva_kernel_access()) {					\
 		__cu_len = ___invoke_copy_in_kernel(__cu_to,__cu_from,	\
 						    __cu_len);		\
 	} else {							\
@@ -1246,7 +1278,7 @@ __strncpy_from_user(char *__to, const char __user *__from, long __len)
 {
 	long res;
 
-	if (segment_eq(get_fs(), get_ds())) {
+	if (eva_kernel_access()) {
 		__asm__ __volatile__(
 			"move\t$4, %1\n\t"
 			"move\t$5, %2\n\t"
@@ -1295,7 +1327,7 @@ strncpy_from_user(char *__to, const char __user *__from, long __len)
 {
 	long res;
 
-	if (segment_eq(get_fs(), get_ds())) {
+	if (eva_kernel_access()) {
 		__asm__ __volatile__(
 			"move\t$4, %1\n\t"
 			"move\t$5, %2\n\t"
@@ -1321,38 +1353,12 @@ strncpy_from_user(char *__to, const char __user *__from, long __len)
 	return res;
 }
 
-/* Returns: 0 if bad, string length+1 (memory size) of string if ok */
-static inline long __strlen_user(const char __user *s)
-{
-	long res;
-
-	if (segment_eq(get_fs(), get_ds())) {
-		__asm__ __volatile__(
-			"move\t$4, %1\n\t"
-			__MODULE_JAL(__strlen_kernel_nocheck_asm)
-			"move\t%0, $2"
-			: "=r" (res)
-			: "r" (s)
-			: "$2", "$4", __UA_t0, "$31");
-	} else {
-		might_fault();
-		__asm__ __volatile__(
-			"move\t$4, %1\n\t"
-			__MODULE_JAL(__strlen_user_nocheck_asm)
-			"move\t%0, $2"
-			: "=r" (res)
-			: "r" (s)
-			: "$2", "$4", __UA_t0, "$31");
-	}
-
-	return res;
-}
-
 /*
  * strlen_user: - Get the size of a string in user space.
  * @str: The string to measure.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * Get the size of a NUL-terminated string in user space.
  *
@@ -1366,7 +1372,7 @@ static inline long strlen_user(const char __user *s)
 {
 	long res;
 
-	if (segment_eq(get_fs(), get_ds())) {
+	if (eva_kernel_access()) {
 		__asm__ __volatile__(
 			"move\t$4, %1\n\t"
 			__MODULE_JAL(__strlen_kernel_asm)
@@ -1393,7 +1399,7 @@ static inline long __strnlen_user(const char __user *s, long n)
 {
 	long res;
 
-	if (segment_eq(get_fs(), get_ds())) {
+	if (eva_kernel_access()) {
 		__asm__ __volatile__(
 			"move\t$4, %1\n\t"
 			"move\t$5, %2\n\t"
@@ -1418,25 +1424,24 @@ static inline long __strnlen_user(const char __user *s, long n)
 }
 
 /*
- * strlen_user: - Get the size of a string in user space.
+ * strnlen_user: - Get the size of a string in user space.
  * @str: The string to measure.
  *
- * Context: User context only.	This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * Get the size of a NUL-terminated string in user space.
  *
  * Returns the size of the string INCLUDING the terminating NUL.
  * On exception, returns 0.
- *
- * If there is a limit on the length of a valid string, you may wish to
- * consider using strnlen_user() instead.
+ * If the string is too long, returns a value greater than @n.
  */
 static inline long strnlen_user(const char __user *s, long n)
 {
 	long res;
 
 	might_fault();
-	if (segment_eq(get_fs(), get_ds())) {
+	if (eva_kernel_access()) {
 		__asm__ __volatile__(
 			"move\t$4, %1\n\t"
 			"move\t$5, %2\n\t"

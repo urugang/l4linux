@@ -133,9 +133,15 @@ static int get_framebuffer(void)
 	info.screen_base        = (l4_addr_t)fb_info->screen_base;
 	info.screen_size        = (l4_addr_t)fb_info->fix.smem_len;
 	info.bytes_per_scanline = fb_info->fix.line_length;
+	if (info.screen_size == 0) {
+		/* in the case of a useless screen size calculate the size
+		 * from the bytes per line
+		 */
+		info.screen_size = l4_round_page(info.bytes_per_scanline * info.i.height);
+	}
 	pr_debug(PREFIX "screen_base: 0x%lx\n", info.screen_base);
 	pr_debug(PREFIX "screen_size: 0x%lx\n", info.screen_size);
-	pr_debug(PREFIX "bytes_per_scanline = %d\n", info.bytes_per_scanline);
+	pr_debug(PREFIX "bytes_per_scanline = %d bitsPP=%d\n", info.bytes_per_scanline, fb_info->var.bits_per_pixel);
 	pr_debug(PREFIX "smem_start = 0x%lx\n", fb_info->fix.smem_start);
 
 	/* now tell it L4Re */

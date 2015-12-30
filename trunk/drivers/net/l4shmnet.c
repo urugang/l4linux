@@ -236,13 +236,16 @@ static int l4x_l4shmc_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 	ret = l4shm_buf_tx(&priv->sb, skb->data, skb->len);
 	if (ret == -EAGAIN) {
 		netif_stop_queue(netdev);
+		L4XV_FN_v(l4shmc_trigger(&priv->tx_sig));
 		return 1;
 	}
 	/* XXX: handle other l4shm_buf_tx errors */
 
-	wmb();
-
-	L4XV_FN_v(l4shmc_trigger(&priv->tx_sig));
+	if (!skb->xmit_more
+	    || netif_xmit_stopped(netdev_get_tx_queue(netdev, 0))) {
+		wmb();
+		L4XV_FN_v(l4shmc_trigger(&priv->tx_sig));
+	}
 
 	netdev->trans_start = jiffies;
 	priv->net_stats.tx_packets++;
@@ -329,7 +332,7 @@ static int l4x_l4shmc_open(struct net_device *netdev)
 	netif_carrier_off(netdev);
 
 	if ((err = request_irq(netdev->irq, l4x_l4shmc_interrupt,
-	                       IRQF_SHARED,
+	                       IRQF_TRIGGER_RISING,
 	                       netdev->name, netdev))) {
 		dev_err(&netdev->dev, "%s: request_irq(%d, ...) failed: %d\n",
 		        netdev->name, netdev->irq, err);
@@ -516,7 +519,7 @@ static int l4x_l4shmnet_setup(const char *val, struct kernel_param *kp)
 			else {
 				char *end = strchr(c, ',');
 				pr_err("l4shmnet: unknown argument: %*s",
-					end ? end - c : strlen(c), c);
+					(int)(end ? end - c : strlen(c)), c);
 			}
 		} while ((c = strchr(c, ',')));
 	}

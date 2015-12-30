@@ -11,7 +11,6 @@ obj-y		:= main.o process_gen.o hybrid.o syscall_guard.o irq.o \
 
 obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
 obj-$(CONFIG_PM)		+= pm.o
-obj-$(CONFIG_L4_FERRET)		+= ferret.o
 
 obj-$(CONFIG_L4_SAMPLE_MODULE)	+= l4x_module.o
 obj-$(CONFIG_L4_CONFIG_CHECKS)  += check.o

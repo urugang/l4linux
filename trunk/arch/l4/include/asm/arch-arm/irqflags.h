@@ -159,6 +159,7 @@ static inline void arch_local_irq_enable(void)
 }
 
 #define local_fiq_enable()	do { } while (0)
+#define local_fiq_disable()	do { } while (0)
 
 static inline unsigned long arch_local_irq_save(void)
 {

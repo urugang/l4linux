@@ -164,7 +164,7 @@ static int l4x_net_open(struct net_device *netdev)
 	}
 
 	if ((err = request_irq(netdev->irq, l4x_net_interrupt,
-	                       IRQF_SHARED,
+	                       IRQF_TRIGGER_RISING,
 	                       netdev->name, netdev))) {
 		dev_err(&netdev->dev, "request_irq(%d, ...) failed: %d\n",
 		        netdev->irq, err);

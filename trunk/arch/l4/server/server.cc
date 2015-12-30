@@ -1,9 +1,10 @@
 #include <l4/sys/capability>
 #include <l4/sys/typeinfo_svr>
+#include <l4/sys/thread>
 #include <l4/sys/ipc_gate>
 #include <l4/sys/factory>
 #include <l4/cxx/ipc_stream>
-#include <l4/cxx/thread>
+#include <l4/cxx/ipc_server>
 #include <l4/re/env>
 #include <l4/re/util/cap_alloc>
 
@@ -68,11 +69,6 @@ l4x_srv_register_name_c(struct l4x_srv_object *obj,
 
 static L4::Cap<L4::Kobject> _rcv_cap;
 
-L4::Cap<L4::Kobject> l4x_srv_rcv_cap()
-{
-	return _rcv_cap;
-}
-
 C_FUNC void
 l4x_srv_setup_recv(l4_utcb_t *u)
 {
@@ -81,12 +77,46 @@ l4x_srv_setup_recv(l4_utcb_t *u)
 	l4_utcb_br_u(u)->bdr = 0;
 }
 
+static struct l4x_svr_ops const *_server_ops;
+
 C_FUNC void
-l4x_srv_init(void)
+l4x_srv_init(struct l4x_svr_ops const *ops)
 {
+	_server_ops = ops;
 	_rcv_cap = L4Re::Util::cap_alloc.alloc<L4::Kobject>();
 	if (!_rcv_cap)
 		LOG_printf("l4x_srv: rcv-cap alloc failed\n");
 	l4x_srv_setup_recv(l4_utcb());
 }
+
+
+class L4x_server : public L4::Ipc_svr::Br_manager_no_buffers
+{
+public:
+	L4::Cap<void> get_rcv_cap(int index) const
+	{
+		if (index != 0)
+			return L4::Cap<void>::Invalid;
+		return _rcv_cap;
+	}
+
+	int realloc_rcv_cap(int index)
+	{
+		if (index != 0)
+			return -L4_EINVAL;
+
+		l4_cap_idx_t c = _server_ops->cap_alloc();
+		if (l4_is_invalid_cap(c))
+			return -L4_ENOMEM;
+
+		_rcv_cap = L4::Cap<L4::Kobject>(c);
+		return 0;
+	}
+};
+
+static L4x_server _l4x_server;
+
+L4::Ipc_svr::Server_iface *l4x_srv_get_server_data()
+{ return &_l4x_server; }
+
 

@@ -14,6 +14,7 @@
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
 #include <asm/r4kcache.h>
+#include <asm/mips-cm.h>
 
 /*
  * MIPS32/MIPS64 L2 cache handling
@@ -81,6 +82,7 @@ static inline int mips_sc_is_activated(struct cpuinfo_mips *c)
 	case CPU_PROAPTIV:
 	case CPU_P5600:
 	case CPU_BMIPS5000:
+	case CPU_QEMU_GENERIC:
 		if (config2 & (1 << 12))
 			return 0;
 	}
@@ -93,6 +95,38 @@ static inline int mips_sc_is_activated(struct cpuinfo_mips *c)
 	return 1;
 }
 
+static int __init mips_sc_probe_cm3(void)
+{
+	struct cpuinfo_mips *c = &current_cpu_data;
+	unsigned long cfg = read_gcr_l2_config();
+	unsigned long sets, line_sz, assoc;
+
+	if (cfg & CM_GCR_L2_CONFIG_BYPASS_MSK)
+		return 0;
+
+	sets = cfg & CM_GCR_L2_CONFIG_SET_SIZE_MSK;
+	sets >>= CM_GCR_L2_CONFIG_SET_SIZE_SHF;
+	c->scache.sets = 64 << sets;
+
+	line_sz = cfg & CM_GCR_L2_CONFIG_LINE_SIZE_MSK;
+	line_sz >>= CM_GCR_L2_CONFIG_LINE_SIZE_SHF;
+	c->scache.linesz = 2 << line_sz;
+
+	assoc = cfg & CM_GCR_L2_CONFIG_ASSOC_MSK;
+	assoc >>= CM_GCR_L2_CONFIG_ASSOC_SHF;
+	c->scache.ways = assoc + 1;
+	c->scache.waysize = c->scache.sets * c->scache.linesz;
+	c->scache.waybit = __ffs(c->scache.waysize);
+
+	c->scache.flags &= ~MIPS_CACHE_NOT_PRESENT;
+
+	return 1;
+}
+
+void __weak platform_early_l2_init(void)
+{
+}
+
 static inline int __init mips_sc_probe(void)
 {
 	struct cpuinfo_mips *c = &current_cpu_data;
@@ -102,9 +136,19 @@ static inline int __init mips_sc_probe(void)
 	/* Mark as not present until probe completed */
 	c->scache.flags |= MIPS_CACHE_NOT_PRESENT;
 
+	/*
+	 * Do we need some platform specific probing before
+	 * we configure L2?
+	 */
+	platform_early_l2_init();
+
+	if (mips_cm_revision() >= CM_REV_CM3)
+		return mips_sc_probe_cm3();
+
 	/* Ignore anything but MIPSxx processors */
 	if (!(c->isa_level & (MIPS_CPU_ISA_M32R1 | MIPS_CPU_ISA_M32R2 |
-			      MIPS_CPU_ISA_M64R1 | MIPS_CPU_ISA_M64R2)))
+			      MIPS_CPU_ISA_M32R6 | MIPS_CPU_ISA_M64R1 |
+			      MIPS_CPU_ISA_M64R2 | MIPS_CPU_ISA_M64R6)))
 		return 0;
 
 	/* Does this MIPS32/MIPS64 CPU have a config2 register? */

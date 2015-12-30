@@ -25,7 +25,7 @@ int l4x_deliver_signal(int exception_nr)
 
 	return 0;
 }
-#elif defined(ARCH_arm)
+#elif defined(CONFIG_ARM)
 int l4x_deliver_signal(int exception_nr)
 {
 	siginfo_t info;

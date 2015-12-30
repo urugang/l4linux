@@ -74,6 +74,14 @@ static irqreturn_t l4x_event_interrupt_th(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+void l4x_event_poll_source(struct l4x_event_source *source)
+{
+	l4re_event_buffer_consumer_foreach_available_event(&source->events,
+	                                                   source,
+	                                                   l4x_event_put);
+}
+EXPORT_SYMBOL(l4x_event_poll_source);
+
 static irqreturn_t l4x_event_interrupt_ll(int irq, void *data)
 {
 	return IRQ_WAKE_THREAD;
@@ -87,6 +95,19 @@ void l4x_event_init_source(struct l4x_event_source *source)
 }
 EXPORT_SYMBOL(l4x_event_init_source);
 
+int l4x_event_source_enable_wakeup(struct l4x_event_source *source,
+                                   bool enable)
+{
+	if (enable) {
+		enable_irq_wake(source->irq_num);
+		disable_irq(source->irq_num);
+	} else {
+		enable_irq(source->irq_num);
+		disable_irq_wake(source->irq_num);
+	}
+	return 0;
+}
+EXPORT_SYMBOL(l4x_event_source_enable_wakeup);
 
 int l4x_event_setup_source(struct l4x_event_source *source,
                           unsigned long hash_entries,
@@ -139,8 +160,8 @@ int l4x_event_setup_source(struct l4x_event_source *source,
 		goto out_release_irq;
 
 	res = request_threaded_irq(source->irq_num, l4x_event_interrupt_ll,
-	                           l4x_event_interrupt_th, 0, "l4event",
-	                           source);
+	                           l4x_event_interrupt_th,
+	                           IRQF_TRIGGER_RISING, "l4event", source);
 	if (res < 0)
 		goto out_unregister_irq;
 

@@ -1,49 +1,104 @@
 #
-# arch/l4/kernel/arch-x86/Makefile
+# Makefile for the linux kernel.
 #
 
-obj-y		:= dispatch.o entry.o ioport.o \
-		   ldt.o pci-dma.o pci-nommu.o process.o process_$(BITS).o ptrace.o reboot.o \
-		   setup.o signal.o time.o traps.o e820.o \
-		   unimpl.o topology.o alternative.o tsc.o tsc_msr.o \
-		   tls.o step.o rtc.o io_delay.o memory.o \
-		   kdebugfs.o x86_init.o i8259.o
+#extra-y                := head_$(BITS).o head$(BITS).o head.o vmlinux.lds
 
-#extra-$(CONFIG_X86_64)	+= head_$(BITS).o
-obj-$(CONFIG_X86_64)	+= head_$(BITS).o
+#CPPFLAGS_vmlinux.lds += -U$(UTS_MACHINE)
 
+ifdef CONFIG_FUNCTION_TRACER
+# Do not profile debug and lowlevel utilities
+CFLAGS_REMOVE_tsc.o = -pg
+CFLAGS_REMOVE_paravirt-spinlocks.o = -pg
+CFLAGS_REMOVE_pvclock.o = -pg
+CFLAGS_REMOVE_kvmclock.o = -pg
+CFLAGS_REMOVE_ftrace.o = -pg
+CFLAGS_REMOVE_early_printk.o = -pg
+endif
 
-obj-y				+= i387.o xsave.o
-obj-y				+= dumpstack_$(BITS).o
-obj-y				+= irq.o irq_$(BITS).o irq_l4.o irqinit.o
-obj-y				+= dumpstack.o nmi.o
-obj-y				+= hw_breakpoint.o
-obj-y				+= jump_label.o
-obj-y				+= pci-iommu_table.o
-obj-y				+= resource.o
-obj-y				+= head$(BITS).o
-obj-y				+= probe_roms.o
-obj-y			+= syscall_$(BITS).o vsyscall_gtod.o
-obj-$(CONFIG_X86_64)	+= vsyscall_64.o
-obj-$(CONFIG_X86_64)	+= vsyscall_emu_64.o
+KASAN_SANITIZE_head$(BITS).o := n
+KASAN_SANITIZE_dumpstack.o := n
+KASAN_SANITIZE_dumpstack_$(BITS).o := n
+
+CFLAGS_irq.o := -I$(src)/../include/asm/trace
+
+obj-y			:= process_$(BITS).o signal.o
+obj-$(CONFIG_COMPAT)	+= signal_compat.o
+obj-y			+= traps.o irq.o irq_$(BITS).o dumpstack_$(BITS).o
+obj-y			+= time.o ioport.o dumpstack.o nmi.o
+obj-$(CONFIG_MODIFY_LDT_SYSCALL)	+= ldt.o
+obj-y			+= setup.o x86_init.o i8259.o irqinit.o jump_label.o
+obj-$(CONFIG_IRQ_WORK)  += irq_work.o
+obj-y			+= probe_roms.o
+#obj-$(CONFIG_X86_32)	+= i386_ksyms_32.o
+obj-$(CONFIG_X86_64)	+= sys_x86_64.o x8664_ksyms_64.o
+#obj-$(CONFIG_X86_64)	+= mcount_64.o
+#obj-$(CONFIG_X86_ESPFIX64)	+= espfix_64.o
 obj-$(CONFIG_SYSFS)	+= ksysfs.o
-obj-$(CONFIG_X86_64)            += sys_x86_64.o #x8664_ksyms_64.o
-obj-y				+= quirks.o
+#obj-y			+= bootflag.o e820.o
+obj-y			+= e820.o
+obj-y			+= pci-dma.o quirks.o topology.o kdebugfs.o
+#obj-y			+= alternative.o i8253.o pci-nommu.o hw_breakpoint.o
+obj-y			+= alternative.o pci-nommu.o hw_breakpoint.o
+obj-y			+= tsc.o tsc_msr.o io_delay.o rtc.o
+obj-y			+= pci-iommu_table.o
+obj-y			+= resource.o
 
-obj-$(CONFIG_PREEMPT)	+= preempt.o
-
+obj-y				+= process.o
+obj-y				+= fpu/
+obj-y				+= ptrace.o
+obj-$(CONFIG_X86_32)		+= tls.o
+obj-$(CONFIG_IA32_EMULATION)	+= tls.o
+obj-y				+= step.o
+#obj-$(CONFIG_INTEL_TXT)		+= tboot.o
+#obj-$(CONFIG_ISA_DMA_API)	+= i8237.o
 obj-$(CONFIG_STACKTRACE)	+= stacktrace.o
 obj-y				+= cpu/
 obj-$(CONFIG_ACPI)		+= acpi.o
-obj-$(CONFIG_MODULES)		+= module.o
-obj-$(CONFIG_KGDB)		+= kgdb.o
-obj-y				+= kprobes/
-obj-$(CONFIG_AMD_NB)		+= amd_nb.o
-obj-$(CONFIG_PCI)               += early-quirks.o
-obj-y				+= apic/
+obj-y				+= reboot.o
+#obj-$(CONFIG_X86_MSR)		+= msr.o
+#obj-$(CONFIG_X86_CPUID)		+= cpuid.o
+obj-$(CONFIG_PCI)		+= early-quirks.o
+#apm-y				:= apm_32.o
+#obj-$(CONFIG_APM)		+= apm.o
+obj-$(CONFIG_SMP)		+= smp.o
+obj-$(CONFIG_SMP)		+= smpboot.o
+#obj-$(CONFIG_SMP)		+= tsc_sync.o
+obj-$(CONFIG_SMP)		+= setup_percpu.o
 obj-$(CONFIG_X86_MPPARSE)	+= mpparse.o
-obj-$(CONFIG_SMP)		+= smp.o smpboot.o setup_percpu.o
-obj-$(CONFIG_HPET_TIMER)	+= hpet.o
+obj-y				+= apic/
+#obj-$(CONFIG_X86_REBOOTFIXUPS)	+= reboot_fixups_32.o
+#obj-$(CONFIG_DYNAMIC_FTRACE)	+= ftrace.o
+#obj-$(CONFIG_LIVEPATCH)		+= livepatch.o
+#obj-$(CONFIG_FUNCTION_GRAPH_TRACER) += ftrace.o
+#obj-$(CONFIG_FTRACE_SYSCALLS)	+= ftrace.o
+obj-$(CONFIG_X86_TSC)		+= trace_clock.o
+obj-$(CONFIG_KEXEC_CORE)	+= machine_kexec_$(BITS).o
+obj-$(CONFIG_KEXEC_CORE)	+= relocate_kernel_$(BITS).o crash.o
+obj-$(CONFIG_KEXEC_FILE)	+= kexec-bzimage64.o
+obj-$(CONFIG_CRASH_DUMP)	+= crash_dump_$(BITS).o
+obj-y				+= kprobes/
+obj-$(CONFIG_MODULES)		+= module.o
+obj-$(CONFIG_DOUBLEFAULT)	+= doublefault.o
+obj-$(CONFIG_KGDB)		+= kgdb.o
+obj-$(CONFIG_VM86)		+= vm86_32.o
+#obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
+
+obj-$(CONFIG_HPET_TIMER) 	+= hpet.o
+obj-$(CONFIG_APB_TIMER)		+= apb_timer.o
+
+obj-$(CONFIG_AMD_NB)		+= amd_nb.o
+obj-$(CONFIG_DEBUG_RODATA_TEST)	+= test_rodata.o
+obj-$(CONFIG_DEBUG_NX_TEST)	+= test_nx.o
+obj-$(CONFIG_DEBUG_NMI_SELFTEST) += nmi_selftest.o
+
+#obj-$(CONFIG_KVM_GUEST)		+= kvm.o kvmclock.o
+#obj-$(CONFIG_PARAVIRT)		+= paravirt.o paravirt_patch_$(BITS).o
+#obj-$(CONFIG_PARAVIRT_SPINLOCKS)+= paravirt-spinlocks.o
+#obj-$(CONFIG_PARAVIRT_CLOCK)	+= pvclock.o
+#obj-$(CONFIG_X86_PMEM_LEGACY_DEVICE) += pmem.o
+
+obj-$(CONFIG_PCSPKR_PLATFORM)	+= pcspeaker.o
 
 obj-$(CONFIG_X86_CHECK_BIOS_CORRUPTION) += check.o
 
@@ -55,59 +110,37 @@ obj-$(CONFIG_X86_SYSFB)			+= sysfb_simplefb.o
 obj-$(CONFIG_EFI)			+= sysfb_efi.o
 
 obj-$(CONFIG_PERF_EVENTS)		+= perf_regs.o
-obj-$(CONFIG_X86_TSC)			+= trace_clock.o
+obj-$(CONFIG_TRACING)			+= tracepoint.o
 
 ###
 # 64 bit specific files
 ifeq ($(CONFIG_X86_64),y)
-	obj-y			+= vsmp_64.o
+	obj-$(CONFIG_AUDIT)		+= audit_64.o
+
+#	obj-$(CONFIG_GART_IOMMU)	+= amd_gart_64.o aperture_64.o
+#	obj-$(CONFIG_CALGARY_IOMMU)	+= pci-calgary_64.o tce_64.o
+
+#	obj-$(CONFIG_PCI_MMCONFIG)	+= mmconf-fam10h_64.o
+	obj-y				+= vsmp_64.o
 endif
 
+obj-y				+= head$(BITS).o
+obj-$(CONFIG_X86_64)		+= head_$(BITS).o
+obj-$(CONFIG_L4)		+= dispatch.o irq_l4.o memory.o unimpl.o
+
 # -------------------------------------------
-b		:= ../../../x86/kernel
-alternative-y	:= $(b)/alternative.o
-ldt-y		:= $(b)/ldt.o
-module-y	:= $(b)/module.o
-pci-nommu-y	:= $(b)/pci-nommu.o
-pci-dma-y	:= $(b)/pci-dma.o
-topology-y	:= $(b)/topology.o
-amd_nb-y	+= $(b)/amd_nb.o
-stacktrace-y	+= $(b)/stacktrace.o
-tls-y		+= $(b)/tls.o
-step-y		+= $(b)/step.o
-ds-y		+= $(b)/ds.o
-io_delay-y	+= $(b)/io_delay.o
-setup_percpu-y  += $(b)/setup_percpu.o
-probe_roms-y	+= $(b)/probe_roms.o
-early-quirks-y	+= $(b)/early-quirks.o
-kdebugfs-y	+= $(b)/kdebugfs.o
-dumpstack_$(BITS)-y	+= $(b)/dumpstack_$(BITS).o
-dumpstack-y	+= $(b)/dumpstack.o
-hw_breakpoint-y += $(b)/hw_breakpoint.o
-i8259-y         += $(b)/i8259.o
-jump_label-y    += $(b)/jump_label.o
-resource-y      += $(b)/resource.o
-time-y          += $(b)/time.o
-pci-iommu_table-y += $(b)/pci-iommu_table.o
-syscall_$(BITS)-y += $(b)/syscall_$(BITS).o
-#vsyscall_64-y   += $(b)/vsyscall_64.o
-vread_tsc_64-y	+= $(b)/vread_tsc_64.o
-hpet-y          += $(b)/hpet.o
-quirks-y        += $(b)/quirks.o
-sys_x86_64-y	+= $(b)/sys_x86_64.o
-pci-swiotlb-y	+= $(b)/pci-swiotlb.o
-devicetree-y	+= $(b)/devicetree.o
-vsmp_64-y	+= $(b)/vsmp_64.o
-x8664_ksyms_64-y += $(b)/x8664_ksyms_64.o
-vsyscall_emu_64-y += $(b)/vsyscall_emu_64.o
-nmi-y           += $(b)/nmi.o
-perf_regs-y     += $(b)/perf_regs.o
-trace_clock-y   += $(b)/trace_clock.o
-sysfb-y         += $(b)/sysfb.o
-preempt-y       += $(b)/preempt.o
-ksysfs-y	+= $(b)/ksysfs.o
-tsc_msr-y	+= $(b)/tsc_msr.o
-vsyscall_gtod-y += $(b)/vsyscall_gtod.o
+include arch/l4/Makefile.lib
+
+$(call L4X_FILEREF, ../../../x86/kernel,                         \
+       amd_nb audit_64 devicetree doublefault ds dumpstack       \
+       dumpstack_$(BITS) early-quirks hpet hw_breakpoint i8259   \
+       io_delay irq_64 irq_work jump_label kdebugfs ksysfs ldt   \
+       module nmi pci-dma pci-iommu_table pci-nommu pci-swiotlb  \
+       perf_regs preempt probe_roms quirks resource rtc          \
+       setup_percpu signal_compat stacktrace step sys_x86_64     \
+       syscall_32                                                \
+       syscall_64 sysfb time tls topology trace_clock tsc_msr    \
+       vread_tsc_64 vsmp_64 vsyscall_emu_64 vsyscall_gtod)
 
 # we have our own versions of destroy_context and init_new_context,
 # so rename the original one

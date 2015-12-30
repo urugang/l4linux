@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <bits/l4-malloc.h>
 
 #include <l4/util/elf.h>
 #include <l4/util/util.h>
@@ -41,6 +42,24 @@ L4_CV l4_utcb_t *l4_utcb_wrap(void)
 		return exchg.l4lx_utcb();
 	l4_barrier();
 	return l4_utcb_direct();
+}
+
+static char morecore_buf[0x2000];
+static void *morecore_end;
+
+void *uclibc_morecore(long bytes)
+{
+	if (bytes <= 0)
+		return morecore_end;
+
+	if (morecore_end) {
+		LOG_printf("uclibc_morecore(%ld): Called too often.\n", bytes);
+		return MAP_FAILED;
+	}
+
+	morecore_end = morecore_buf + sizeof(morecore_buf);
+
+	return morecore_end;
 }
 
 void *mmap(void *addr, size_t length, int prot, int flags,
@@ -149,7 +168,7 @@ int main(int argc, char **argv)
 			map_addr = ph->p_paddr;
 			if (l4re_rm_attach((void **)&map_addr,
 			                    ph->p_memsz, L4RE_RM_EAGER_MAP,
-			                    ds, 0, 0)) {
+			                    ds | L4_CAP_FPAGE_RW, 0, 0)) {
 				printf("lxldr: failed attaching memory:"
 				       " "FMT" - "FMT"\n",
 				       ph->p_paddr,
@@ -196,7 +215,7 @@ int main(int argc, char **argv)
 		map_addr = ph->p_paddr;
 		if (l4re_rm_attach((void **)&map_addr,
 		                    ph->p_memsz, L4RE_RM_EAGER_MAP,
-		                    new_ds, 0, 0)) {
+		                    new_ds | L4_CAP_FPAGE_RW, 0, 0)) {
 			printf("lxldr: failed to attach section\n");
 			return 1;
 		}

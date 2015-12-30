@@ -289,7 +289,7 @@ static int l4ser_shm_startup(struct uart_port *port)
 
 	if (port->irq) {
 		retval = request_irq(port->irq, l4ser_shm_int,
-		                     0, "L4-shm-uart", port);
+		                     IRQF_TRIGGER_RISING, "L4-shm-uart", port);
 		if (retval)
 			return retval;
 
@@ -340,7 +340,7 @@ l4ser_shm_verify_port(struct uart_port *port, struct serial_struct *ser)
 	return 0;
 }
 
-static struct uart_ops l4ser_shm_pops = {
+static const struct uart_ops l4ser_shm_pops = {
 	.tx_empty	= l4ser_shm_tx_empty,
 	.set_mctrl	= l4ser_shm_set_mctrl,
 	.get_mctrl	= l4ser_shm_get_mctrl,

@@ -59,7 +59,7 @@ static l4_cap_idx_t get_int_cap(int irq)
 {
 	if (irq < NR_IRQS_HW) {
 		struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
-		return p->c.irq_cap;
+		return p ? p->c.irq_cap : L4_INVALID_CAP;
 	}
 
 	if (irq < NR_IRQS)
@@ -278,14 +278,26 @@ void l4x_virtual_mem_unregister(unsigned long address)
 {
 	struct l4x_virtual_mem_struct *e, *tmp;
 
+	/* move all regions that are to be removed to a local list under
+	 * lock protection. Then free the memory without lock protection.
+	 *
+	 * Q: may there ever by more than one matching element in the list?
+	 *    I assume not.
+	 */
+	LIST_HEAD(to_free);
+	unsigned long flags;
+	spin_lock_irqsave(&virtual_pages_lock, flags);
 	list_for_each_entry_safe(e, tmp, &virtual_pages, list) {
 		if (e->address == address) {
-			unsigned long flags;
-			spin_lock_irqsave(&virtual_pages_lock, flags);
 			list_del(&e->list);
-			spin_unlock_irqrestore(&virtual_pages_lock, flags);
-			kfree(e);
+			list_add(&e->list, &to_free);
 		}
+	}
+	spin_unlock_irqrestore(&virtual_pages_lock, flags);
+
+	list_for_each_entry_safe(e, tmp, &to_free, list) {
+		list_del(&e->list);
+		kfree(e);
 	}
 }
 

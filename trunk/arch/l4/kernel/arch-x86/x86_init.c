@@ -11,7 +11,6 @@
 #include <asm/bios_ebda.h>
 #include <asm/paravirt.h>
 #include <asm/pci_x86.h>
-#include <asm/pci.h>
 #include <asm/mpspec.h>
 #include <asm/setup.h>
 #include <asm/apic.h>
@@ -27,6 +26,7 @@
 
 #include <asm/generic/timer.h>
 #include <asm/l4x/init.h>
+#include <asm/l4x/irq_msi.h>
 
 void x86_init_noop(void) { }
 void __init x86_init_uint_noop(unsigned int unused) { }
@@ -112,19 +112,11 @@ struct x86_platform_ops x86_platform = {
 EXPORT_SYMBOL_GPL(x86_platform);
 
 #if defined(CONFIG_PCI_MSI)
-void l4x_compose_msi_msg(struct pci_dev *pdev,
-		unsigned int irq, unsigned int dest,
-		struct msi_msg *msg, u8 hpet_id) {}
-
 struct x86_msi_ops x86_msi = {
 	.setup_msi_irqs		= native_setup_msi_irqs,
-	.compose_msi_msg	= l4x_compose_msi_msg,
 	.teardown_msi_irq	= native_teardown_msi_irq,
 	.teardown_msi_irqs	= default_teardown_msi_irqs,
 	.restore_msi_irqs	= default_restore_msi_irqs,
-	.setup_hpet_msi		= default_setup_hpet_msi,
-	.msi_mask_irq		= default_msi_mask_irq,
-	.msix_mask_irq		= default_msix_mask_irq,
 };
 
 /* MSI arch specific hooks */
@@ -147,24 +139,9 @@ void arch_restore_msi_irqs(struct pci_dev *dev)
 {
 	x86_msi.restore_msi_irqs(dev);
 }
-u32 arch_msi_mask_irq(struct msi_desc *desc, u32 mask, u32 flag)
-{
-	return x86_msi.msi_mask_irq(desc, mask, flag);
-}
-u32 arch_msix_mask_irq(struct msi_desc *desc, u32 flag)
-{
-	return x86_msi.msix_mask_irq(desc, flag);
-}
 #endif
 
 struct x86_io_apic_ops x86_io_apic_ops = {
-	.init			= l4x_io_apic_init_mappings,
 	.read			= l4x_io_apic_read,
-	.write			= l4x_io_apic_write,
-	.modify			= l4x_io_apic_modify,
 	.disable		= l4x_disable_io_apic,
-	.print_entries		= l4x_io_apic_print_entries,
-	.set_affinity		= l4x_ioapic_set_affinity,
-	.setup_entry		= l4x_setup_ioapic_entry,
-	.eoi_ioapic_pin		= l4x_eoi_ioapic_pin,
 };

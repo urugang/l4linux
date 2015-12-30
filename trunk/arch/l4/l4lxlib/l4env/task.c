@@ -47,6 +47,7 @@ int l4lx_task_create_thread_in_task(l4_cap_idx_t thread, l4_cap_idx_t task,
                                     l4_cap_idx_t pager, unsigned vcpu)
 {
 	l4_msgtag_t t;
+	int e;
 	l4_utcb_t *u = l4_utcb();
 	l4_sched_param_t l4sp = l4_sched_param(CONFIG_L4_PRIO_SERVER_PROC, 0);
 	l4sp.affinity = l4_sched_cpu_set(l4x_cpu_physmap_get_id(vcpu), 0, 1);
@@ -61,18 +62,18 @@ int l4lx_task_create_thread_in_task(l4_cap_idx_t thread, l4_cap_idx_t task,
 	l4_thread_control_exc_handler_u(pager, u);
 	l4_thread_control_alien_u(u, 1);
 	t = l4_thread_control_commit_u(thread, u);
-	if (unlikely(l4_error_u(t, u)))
-		printk("l4_thread_control_error\n");
+	if (unlikely(e = l4_error_u(t, u)))
+		printk("l4_thread_control_error %d\n", e);
 
 	t = l4_thread_ex_regs_u(thread, ~0UL, ~0UL,
 	                        L4_THREAD_EX_REGS_TRIGGER_EXCEPTION, u);
-	if (unlikely(l4_error_u(t, u)))
-		printk("l4_thread_ex_regs error\n");
+	if (unlikely(e = l4_error_u(t, u)))
+		printk("l4_thread_ex_regs error %d\n", e);
 
 	t = l4_scheduler_run_thread(l4re_env()->scheduler,
 	                            thread, &l4sp);
-	if (unlikely(l4_error_u(t, u)))
-		printk("l4_scheduler_run_thread error\n");
+	if (unlikely(e = l4_error_u(t, u)))
+		printk("l4_scheduler_run_thread error %d\n", e);
 
 	return 1;
 }

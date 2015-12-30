@@ -50,5 +50,8 @@ int l4x_event_source_register_stream(struct l4x_event_source *source,
 
 int l4x_event_source_unregister_stream(struct l4x_event_source *source,
                                        struct l4x_event_stream *stream);
+void l4x_event_poll_source(struct l4x_event_source *source);
 
+int l4x_event_source_enable_wakeup(struct l4x_event_source *source,
+                                   bool enable);
 #endif

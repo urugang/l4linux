@@ -1628,9 +1628,16 @@ static int fsl_diu_suspend(struct platform_device *ofdev, pm_message_t state)
 static int fsl_diu_resume(struct platform_device *ofdev)
 {
 	struct fsl_diu_data *data;
+	unsigned int i;
 
 	data = dev_get_drvdata(&ofdev->dev);
-	enable_lcdc(data->fsl_diu_info);
+
+	fsl_diu_enable_interrupts(data);
+	update_lcdc(data->fsl_diu_info);
+	for (i = 0; i < NUM_AOIS; i++) {
+		if (data->mfb[i].count)
+			fsl_diu_enable_panel(&data->fsl_diu_info[i]);
+	}
 
 	return 0;
 }
@@ -1881,7 +1888,6 @@ MODULE_DEVICE_TABLE(of, fsl_diu_match);
 static struct platform_driver fsl_diu_driver = {
 	.driver = {
 		.name = "fsl-diu-fb",
-		.owner = THIS_MODULE,
 		.of_match_table = fsl_diu_match,
 	},
 	.probe  	= fsl_diu_probe,

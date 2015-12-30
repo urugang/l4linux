@@ -232,7 +232,7 @@ static int xenkbd_connect_backend(struct xenbus_device *dev,
 	struct xenbus_transaction xbt;
 
 	ret = gnttab_grant_foreign_access(dev->otherend_id,
-	                                  virt_to_mfn(info->page), 0);
+	                                  virt_to_gfn(info->page), 0);
 	if (ret < 0)
 		return ret;
 	info->gref = ret;
@@ -255,7 +255,7 @@ static int xenkbd_connect_backend(struct xenbus_device *dev,
 		goto error_irqh;
 	}
 	ret = xenbus_printf(xbt, dev->nodename, "page-ref", "%lu",
-			    virt_to_mfn(info->page));
+			    virt_to_gfn(info->page));
 	if (ret)
 		goto error_xenbus;
 	ret = xenbus_printf(xbt, dev->nodename, "page-gref", "%u", info->gref);
@@ -285,7 +285,7 @@ static int xenkbd_connect_backend(struct xenbus_device *dev,
  error_evtchan:
 	xenbus_free_evtchn(dev, evtchn);
  error_grant:
-	gnttab_end_foreign_access_ref(info->gref, 0);
+	gnttab_end_foreign_access(info->gref, 0, 0UL);
 	info->gref = -1;
 	return ret;
 }
@@ -296,7 +296,7 @@ static void xenkbd_disconnect_backend(struct xenkbd_info *info)
 		unbind_from_irqhandler(info->irq, info);
 	info->irq = -1;
 	if (info->gref >= 0)
-		gnttab_end_foreign_access_ref(info->gref, 0);
+		gnttab_end_foreign_access(info->gref, 0, 0UL);
 	info->gref = -1;
 }
 
@@ -365,12 +365,13 @@ static const struct xenbus_device_id xenkbd_ids[] = {
 	{ "" }
 };
 
-static DEFINE_XENBUS_DRIVER(xenkbd, ,
+static struct xenbus_driver xenkbd_driver = {
+	.ids = xenkbd_ids,
 	.probe = xenkbd_probe,
 	.remove = xenkbd_remove,
 	.resume = xenkbd_resume,
 	.otherend_changed = xenkbd_backend_changed,
-);
+};
 
 static int __init xenkbd_init(void)
 {

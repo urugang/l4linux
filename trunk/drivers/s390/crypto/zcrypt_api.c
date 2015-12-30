@@ -54,6 +54,10 @@ MODULE_DESCRIPTION("Cryptographic Coprocessor interface, " \
 		   "Copyright IBM Corp. 2001, 2012");
 MODULE_LICENSE("GPL");
 
+static int zcrypt_hwrng_seed = 1;
+module_param_named(hwrng_seed, zcrypt_hwrng_seed, int, S_IRUSR|S_IRGRP);
+MODULE_PARM_DESC(hwrng_seed, "Turn on/off hwrng auto seed, default is 1 (on).");
+
 static DEFINE_SPINLOCK(zcrypt_device_lock);
 static LIST_HEAD(zcrypt_device_list);
 static int zcrypt_device_count = 0;
@@ -343,10 +347,11 @@ struct zcrypt_ops *__ops_lookup(unsigned char *name, int variant)
 			break;
 		}
 	}
+	if (!found || !try_module_get(zops->owner))
+		zops = NULL;
+
 	spin_unlock_bh(&zcrypt_ops_list_lock);
 
-	if (!found)
-		return NULL;
 	return zops;
 }
 
@@ -359,8 +364,6 @@ struct zcrypt_ops *zcrypt_msgtype_request(unsigned char *name, int variant)
 		request_module("%s", name);
 		zops = __ops_lookup(name, variant);
 	}
-	if ((!zops) || (!try_module_get(zops->owner)))
-		return NULL;
 	return zops;
 }
 EXPORT_SYMBOL(zcrypt_msgtype_request);
@@ -1203,16 +1206,8 @@ static void sprinthx(unsigned char *title, struct seq_file *m,
 static void sprinthx4(unsigned char *title, struct seq_file *m,
 		      unsigned int *array, unsigned int len)
 {
-	int r;
-
 	seq_printf(m, "\n%s\n", title);
-	for (r = 0; r < len; r++) {
-		if ((r % 8) == 0)
-			seq_printf(m, "    ");
-		seq_printf(m, "%08X ", array[r]);
-		if ((r % 8) == 7)
-			seq_putc(m, '\n');
-	}
+	seq_hex_dump(m, "    ", DUMP_PREFIX_NONE, 32, 4, array, len, false);
 	seq_putc(m, '\n');
 }
 
@@ -1374,6 +1369,7 @@ static int zcrypt_rng_data_read(struct hwrng *rng, u32 *data)
 static struct hwrng zcrypt_rng_dev = {
 	.name		= "zcrypt",
 	.data_read	= zcrypt_rng_data_read,
+	.quality	= 990,
 };
 
 static int zcrypt_rng_device_add(void)
@@ -1388,6 +1384,8 @@ static int zcrypt_rng_device_add(void)
 			goto out;
 		}
 		zcrypt_rng_buffer_index = 0;
+		if (!zcrypt_hwrng_seed)
+			zcrypt_rng_dev.quality = 0;
 		rc = hwrng_register(&zcrypt_rng_dev);
 		if (rc)
 			goto out_free;

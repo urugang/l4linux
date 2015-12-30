@@ -8,9 +8,8 @@
 #include "evsel.h"
 #include "thread_map.h"
 #include "cpumap.h"
+#include "tsc.h"
 #include "tests.h"
-
-#include "../arch/x86/util/tsc.h"
 
 #define CHECK__(x) {				\
 	while ((x) < 0) {			\
@@ -24,15 +23,6 @@
 		pr_debug(#x " failed!\n");	\
 		goto out_err;			\
 	}					\
-}
-
-static u64 rdtsc(void)
-{
-	unsigned int low, high;
-
-	asm volatile("rdtsc" : "=a" (low), "=d" (high));
-
-	return low | ((u64)high) << 32;
 }
 
 /**
@@ -78,7 +68,7 @@ int test__perf_time_to_tsc(void)
 
 	perf_evlist__set_maps(evlist, cpus, threads);
 
-	CHECK__(parse_events(evlist, "cycles:u"));
+	CHECK__(parse_events(evlist, "cycles:u", NULL));
 
 	perf_evlist__config(evlist, &opts);
 

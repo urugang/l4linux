@@ -443,12 +443,13 @@ static struct irq_chip pca953x_irq_chip = {
 	.irq_set_type		= pca953x_irq_set_type,
 };
 
-static u8 pca953x_irq_pending(struct pca953x_chip *chip, u8 *pending)
+static bool pca953x_irq_pending(struct pca953x_chip *chip, u8 *pending)
 {
 	u8 cur_stat[MAX_BANK];
 	u8 old_stat[MAX_BANK];
-	u8 pendings = 0;
-	u8 trigger[MAX_BANK], triggers = 0;
+	bool pending_seen = false;
+	bool trigger_seen = false;
+	u8 trigger[MAX_BANK];
 	int ret, i, offset = 0;
 
 	switch (chip->chip_type) {
@@ -461,7 +462,7 @@ static u8 pca953x_irq_pending(struct pca953x_chip *chip, u8 *pending)
 	}
 	ret = pca953x_read_regs(chip, offset, cur_stat);
 	if (ret)
-		return 0;
+		return false;
 
 	/* Remove output pins from the equation */
 	for (i = 0; i < NBANK(chip); i++)
@@ -471,11 +472,12 @@ static u8 pca953x_irq_pending(struct pca953x_chip *chip, u8 *pending)
 
 	for (i = 0; i < NBANK(chip); i++) {
 		trigger[i] = (cur_stat[i] ^ old_stat[i]) & chip->irq_mask[i];
-		triggers += trigger[i];
+		if (trigger[i])
+			trigger_seen = true;
 	}
 
-	if (!triggers)
-		return 0;
+	if (!trigger_seen)
+		return false;
 
 	memcpy(chip->irq_stat, cur_stat, NBANK(chip));
 
@@ -483,10 +485,11 @@ static u8 pca953x_irq_pending(struct pca953x_chip *chip, u8 *pending)
 		pending[i] = (old_stat[i] & chip->irq_trig_fall[i]) |
 			(cur_stat[i] & chip->irq_trig_raise[i]);
 		pending[i] &= trigger[i];
-		pendings += pending[i];
+		if (pending[i])
+			pending_seen = true;
 	}
 
-	return pendings;
+	return pending_seen;
 }
 
 static irqreturn_t pca953x_irq_handler(int irq, void *devid)
@@ -520,7 +523,7 @@ static int pca953x_irq_setup(struct pca953x_chip *chip,
 	struct i2c_client *client = chip->client;
 	int ret, i, offset = 0;
 
-	if (irq_base != -1
+	if (client->irq && irq_base != -1
 			&& (id->driver_data & PCA_INT)) {
 
 		switch (chip->chip_type) {
@@ -567,6 +570,10 @@ static int pca953x_irq_setup(struct pca953x_chip *chip,
 				"could not connect irqchip to gpiochip\n");
 			return ret;
 		}
+
+		gpiochip_set_chained_irqchip(&chip->gpio_chip,
+					     &pca953x_irq_chip,
+					     client->irq, NULL);
 	}
 
 	return 0;
@@ -583,50 +590,6 @@ static int pca953x_irq_setup(struct pca953x_chip *chip,
 		dev_warn(&client->dev, "interrupt support not compiled in\n");
 
 	return 0;
-}
-#endif
-
-/*
- * Handlers for alternative sources of platform_data
- */
-#ifdef CONFIG_OF_GPIO
-/*
- * Translate OpenFirmware node properties into platform_data
- * WARNING: This is DEPRECATED and will be removed eventually!
- */
-static void
-pca953x_get_alt_pdata(struct i2c_client *client, int *gpio_base, u32 *invert)
-{
-	struct device_node *node;
-	const __be32 *val;
-	int size;
-
-	*gpio_base = -1;
-
-	node = client->dev.of_node;
-	if (node == NULL)
-		return;
-
-	val = of_get_property(node, "linux,gpio-base", &size);
-	WARN(val, "%s: device-tree property 'linux,gpio-base' is deprecated!", __func__);
-	if (val) {
-		if (size != sizeof(*val))
-			dev_warn(&client->dev, "%s: wrong linux,gpio-base\n",
-				 node->full_name);
-		else
-			*gpio_base = be32_to_cpup(val);
-	}
-
-	val = of_get_property(node, "polarity", NULL);
-	WARN(val, "%s: device-tree property 'polarity' is deprecated!", __func__);
-	if (val)
-		*invert = *val;
-}
-#else
-static void
-pca953x_get_alt_pdata(struct i2c_client *client, int *gpio_base, u32 *invert)
-{
-	*gpio_base = -1;
 }
 #endif
 
@@ -674,7 +637,7 @@ static int device_pca957x_init(struct pca953x_chip *chip, u32 invert)
 		memset(val, 0, NBANK(chip));
 	pca953x_write_regs(chip, PCA957X_INVRT, val);
 
-	/* To enable register 6, 7 to controll pull up and pull down */
+	/* To enable register 6, 7 to control pull up and pull down */
 	memset(val, 0x02, NBANK(chip));
 	pca953x_write_regs(chip, PCA957X_BKEN, val);
 
@@ -704,12 +667,8 @@ static int pca953x_probe(struct i2c_client *client,
 		invert = pdata->invert;
 		chip->names = pdata->names;
 	} else {
-		pca953x_get_alt_pdata(client, &chip->gpio_start, &invert);
-#ifdef CONFIG_OF_GPIO
-		/* If I2C node has no interrupts property, disable GPIO interrupts */
-		if (of_find_property(client->dev.of_node, "interrupts", NULL) == NULL)
-			irq_base = -1;
-#endif
+		chip->gpio_start = -1;
+		irq_base = 0;
 	}
 
 	chip->client = client;
@@ -765,12 +724,7 @@ static int pca953x_remove(struct i2c_client *client)
 		}
 	}
 
-	ret = gpiochip_remove(&chip->gpio_chip);
-	if (ret) {
-		dev_err(&client->dev, "%s failed, %d\n",
-				"gpiochip_remove()", ret);
-		return ret;
-	}
+	gpiochip_remove(&chip->gpio_chip);
 
 	return 0;
 }

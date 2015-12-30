@@ -23,7 +23,8 @@ extern l4_utcb_t *l4x_cpu_threads[NR_CPUS];
 static inline
 struct l4x_stack_struct * l4x_stack_struct_get(struct thread_info *ti)
 {
-	return (struct l4x_stack_struct *)(ti + 1);
+	/* Also skip STACK_END_MAGIC: end_of_task(tsk) + 1 */
+	return (struct l4x_stack_struct *)((unsigned long *)(ti + 1) + 1);
 }
 
 static inline void l4x_stack_set(struct thread_info *ti, l4_utcb_t *u)
@@ -73,12 +74,12 @@ static inline unsigned int l4x_prio_current_utcb(l4_utcb_t *utcb)
 
 static inline l4_cap_idx_t l4x_cap_current(void)
 {
-	return l4x_cap_current_utcb(l4x_utcb_current(current_thread_info()));
+	return l4x_cap_current_utcb(l4x_utcb_current(current_thread_info_stack()));
 }
 
 static inline unsigned int l4x_prio_current(void)
 {
-	return l4x_prio_current_utcb(l4x_utcb_current(current_thread_info()));
+	return l4x_prio_current_utcb(l4x_utcb_current(current_thread_info_stack()));
 }
 
 #endif /* ! __ASM_L4__GENERIC__STACK_ID_H__ */

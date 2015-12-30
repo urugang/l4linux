@@ -23,21 +23,12 @@
 #include <asm/generic/cap_alloc.h>
 #include <asm/api/macros.h>
 
+#include <l4/sys/kdebug.h>
+
 #ifdef CONFIG_L4_VCPU
 #include <asm/server/server.h>
 #include <l4/vcpu/vcpu.h>
 #else
-
-#ifdef CONFIG_L4_FERRET_TAMER_ATOMIC
-#include <l4/ferret/sensors/list_producer_wrap.h>
-#include <asm/generic/ferret.h>
-
-#define FERRET_EVENT(m) ferret_list_post_1t(l4x_ferret_kernel,    \
-                                            FERRET_L4LX_MAJOR, m, \
-                                            0, __myself)
-#else
-#define FERRET_EVENT(m) do { } while (0)
-#endif /* CONFIG_L4_FERRET_TAMER_ATOMIC */
 
 #define L4X_TAMED_LABEL
 
@@ -193,9 +184,6 @@ static L4_CV void cli_sem_thread(void *data)
 	l4_umword_t src;
 	l4_msgtag_t ret;
 	l4_utcb_t *utcb = l4_utcb();
-#ifdef CONFIG_L4_FERRET_TAMER_ATOMIC
-	l4_threadid_t __myself = l4_myself();
-#endif
 
 	/* setup wait queue entry allocation */
 	for (i = 0; i < MAX_WQ_ENTRIES; i++)
@@ -218,10 +206,12 @@ no_reply:
 		operation = (ret.raw >> 16) & 3;
 		prio      = (ret.raw >> 20) & 0xff;
 
-		//l4_kprintf("tamer%d-REQ %lx %lx src=%lx sem=%lx\n",
-		//           nr, operation, prio, src, tamed_per_nr(cli_lock, nr).sem.counter);
-
-		FERRET_EVENT(FERRET_L4LX_ATOMIC_BEGIN);
+		if (0)
+			l4_kprintf("tamer%d-REQ %s prio=%lx src=%lx sem=%lx q=%p\n",
+			           nr, operation == 1 ? "DOWN" : "UP",
+			           prio, src,
+			           tamed_per_nr(cli_lock, nr).sem.counter,
+				   tamed_per_nr(cli_lock, nr).sem.queue);
 
 		dw0 = 0;    /* return 0 in dw0 per default */
 		switch (operation) {
@@ -230,11 +220,9 @@ no_reply:
 				/* Insert fancy explanation for this if: fixme MLP*/
 				if (tamed_per_nr(wq_len, nr) == -1 * tamed_per_nr(cli_lock, nr).sem.counter) {
 					dw0 = 1;
-					FERRET_EVENT(FERRET_L4LX_ATOMIC_END2);
 					break;
 				} else {
 					__enqueue_thread(src, prio, nr);
-					FERRET_EVENT(FERRET_L4LX_ATOMIC_END1);
 					goto no_reply;
 				}
 				break;
@@ -271,7 +259,11 @@ no_reply:
 			default:
 				LOG_printf("cli thread: invalid request\n");
 		}
-		FERRET_EVENT(FERRET_L4LX_ATOMIC_END2);
+		if (0)
+			l4_kprintf("tamer%d-ANS to=%lx sem=%lx q=%p dw0=%ld\n",
+			           nr, src,
+			           tamed_per_nr(cli_lock, nr).sem.counter,
+			           tamed_per_nr(cli_lock, nr).sem.queue, dw0);
 		ret = l4_ipc_send_and_wait(src, utcb,
 		                           l4_msgtag(dw0, 0, 0, 0), &src,
 		                           L4_IPC_SEND_TIMEOUT_0);
@@ -320,7 +312,7 @@ static void do_vcpu_irq(l4_vcpu_state_t *v)
 #ifdef CONFIG_X86
 	regs.cs = get_kernel_rpl(); // in-kernel
 	regs.flags = 0;
-#elif defined(ARCH_arm)
+#elif defined(CONFIG_ARM)
 	regs.ARM_cpsr = SVC_MODE; // in-kernel
 #else
 #error What arch?
@@ -380,8 +372,7 @@ EXPORT_SYMBOL(l4x_global_halt);
 
 struct l4x_pm_event_data {
 	unsigned valid;
-	l4_vcpu_state_t vcpu;
-	l4_buf_regs_t utcb_buf_regs;
+	l4_vcpu_ipc_regs_t vcpu;
 	l4_msg_regs_t utcb_msg_regs;
 };
 
@@ -389,17 +380,15 @@ static struct l4x_pm_event_data pm_event;
 
 void l4x_global_wait_save(void)
 {
-	l4_vcpu_state_t *vcpu = l4x_vcpu_state_current();
+	l4_vcpu_ipc_regs_t *vcpu = &l4x_vcpu_state_current()->i;
 	l4_utcb_t *utcb = l4x_utcb_current(current_thread_info());
 
 	BUG_ON(!irqs_disabled());
 
 	l4x_srv_setup_recv_wrap(utcb);
-	vcpu->i.tag = l4_ipc_wait(utcb, &vcpu->i.label, L4_IPC_NEVER);
+	vcpu->tag = l4_ipc_wait(utcb, &vcpu->label, L4_IPC_NEVER);
 
 	memcpy(&pm_event.vcpu, vcpu, sizeof(*vcpu));
-	memcpy(&pm_event.utcb_buf_regs, l4_utcb_br_u(utcb),
-	       L4_UTCB_GENERIC_BUFFERS_SIZE);
 	memcpy(&pm_event.utcb_msg_regs, l4_utcb_mr_u(utcb),
 	       L4_UTCB_GENERIC_DATA_SIZE);
 	pm_event.valid = 1;
@@ -408,6 +397,7 @@ void l4x_global_wait_save(void)
 void l4x_global_saved_event_inject(void)
 {
 	l4_vcpu_state_t *vcpu = l4x_vcpu_state_current();
+	l4_vcpu_ipc_regs_t *vcpu_ipc = &vcpu->i;
 	l4_utcb_t *utcb = l4x_utcb_current(current_thread_info());
 	unsigned long flags;
 
@@ -415,15 +405,13 @@ void l4x_global_saved_event_inject(void)
 		return;
 
 	pr_info("Resume event replay: Wakeup source label=%lx\n",
-	        pm_event.vcpu.i.label);
+	        pm_event.vcpu.label);
 
 	local_irq_save(flags);
 
-	memcpy(vcpu, &pm_event.vcpu, sizeof(*vcpu));
+	memcpy(vcpu_ipc, &pm_event.vcpu, sizeof(*vcpu_ipc));
 	/* Might be called from different CPU than saved, so leave TCR
 	 * intact */
-	memcpy(l4_utcb_br_u(utcb), &pm_event.utcb_buf_regs,
-	       L4_UTCB_GENERIC_BUFFERS_SIZE);
 	memcpy(l4_utcb_mr_u(utcb), &pm_event.utcb_msg_regs,
 	       L4_UTCB_GENERIC_DATA_SIZE);
 	pm_event.valid = 0;
@@ -438,10 +426,10 @@ void l4x_global_saved_event_inject(void)
 unsigned long l4x_global_save_flags(void)
 {
 #ifdef CONFIG_L4_VCPU
-	return l4vcpu_state(l4x_vcpu_state_current());
+	return l4x_vcpu_state_current()->state;
 #else
 	return l4_capability_equal(tamed_per_nr(cli_lock,
-	                           get_tamer_nr(current_thread_info_stack()->cpu)).owner,
+	                                        get_tamer_nr(current_thread_info_stack()->cpu)).owner,
 	                           l4x_cap_current()) ? L4_IRQ_DISABLED : L4_IRQ_ENABLED;
 #endif
 }

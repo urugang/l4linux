@@ -67,7 +67,7 @@ static void lovsub_req_completion(const struct lu_env *env,
 static void lovsub_req_attr_set(const struct lu_env *env,
 				const struct cl_req_slice *slice,
 				const struct cl_object *obj,
-				struct cl_req_attr *attr, obd_valid flags)
+				struct cl_req_attr *attr, u64 flags)
 {
 	struct lovsub_object *subobj;
 
@@ -136,7 +136,7 @@ static struct lu_device *lovsub_device_free(const struct lu_env *env,
 		lu_site_print(env, d->ld_site, &msgdata, lu_cdebug_printer);
 	}
 	cl_device_fini(lu2cl_dev(d));
-	OBD_FREE_PTR(lsd);
+	kfree(lsd);
 	return next;
 }
 
@@ -172,7 +172,7 @@ static struct lu_device *lovsub_device_alloc(const struct lu_env *env,
 	struct lu_device     *d;
 	struct lovsub_device *lsd;
 
-	OBD_ALLOC_PTR(lsd);
+	lsd = kzalloc(sizeof(*lsd), GFP_NOFS);
 	if (lsd != NULL) {
 		int result;
 

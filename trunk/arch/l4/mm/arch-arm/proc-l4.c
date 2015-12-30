@@ -15,6 +15,7 @@
 #include <asm/page.h>
 #include <asm/procinfo.h>
 #include <asm/tlbflush.h>
+#include <asm/smp_plat.h>
 
 #include <l4/sys/kdebug.h>
 #include <l4/sys/cache.h>
@@ -26,16 +27,18 @@
 #include <asm/generic/tlb.h>
 #endif
 
-void cpu_dcache_clean_area(void *addr, int sz)
+void __glue(CPU_NAME, _dcache_clean_area)(void *addr, int sz)
 { l4_cache_clean_data((unsigned long)addr, (unsigned long)addr + sz - 1); }
 
-void cpu_do_switch_mm(phys_addr_t pgd_phys, struct mm_struct *mm) {}
+void __glue(CPU_NAME, _switch_mm)(phys_addr_t pgd_phys,
+                                  struct mm_struct *mm)
+{}
 
 extern unsigned long l4x_set_pte(struct mm_struct *mm, unsigned long addr, pte_t pteptr, pte_t pteval);
 extern void          l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte_t ptep);
 
-static inline void l4x_cpu_set_pte_ext(pte_t *pteptr, pte_t pteval,
-                                       unsigned int ext)
+void __glue(CPU_NAME, _set_pte_ext)(pte_t *pteptr, pte_t pteval,
+                                   unsigned int ext)
 {
 	if (pte_present(*pteptr)) {
 		if (pteval == __pte(0))
@@ -46,15 +49,11 @@ static inline void l4x_cpu_set_pte_ext(pte_t *pteptr, pte_t pteval,
 	*pteptr = pteval;
 }
 
-void cpu_set_pte_ext(pte_t *pteptr, pte_t pteval, unsigned int ext)
-{ l4x_cpu_set_pte_ext(pteptr, pteval, ext); }
-
-
 /*
  * cpu_do_idle()
  * Cause the processor to idle
  */
-int cpu_do_idle(void)
+int __glue(CPU_NAME, _do_idle)(void)
 {
 #ifdef CONFIG_L4_VCPU
 	l4x_global_halt();
@@ -62,7 +61,8 @@ int cpu_do_idle(void)
 	return 0;
 }
 
-void cpu_proc_init(void) { printk("%s\n", __func__); }
+void __glue(CPU_NAME, _proc_init)(void)
+{}
 
 /*
  * cpu_proc_fin()
@@ -71,12 +71,12 @@ void cpu_proc_init(void) { printk("%s\n", __func__); }
  *  - Disable interrupts
  *  - Clean and turn off caches.
  */
-void cpu_proc_fin(void) { }
+void __glue(CPU_NAME, _proc_fin)(void) { }
 
-void  __attribute__((noreturn)) cpu_reset(unsigned long addr)
+void  __attribute__((noreturn))
+__glue(CPU_NAME, _reset)(unsigned long addr)
 {
-	printk("%s called.\n", __func__);
-	l4x_exit_l4linux();
+	l4x_exit_l4linux_msg("%s called.\n", __func__);
 	while (1)
 		;
 }
@@ -125,6 +125,7 @@ void __glue(_CACHE, _flush_user_cache_range)(unsigned long start, unsigned long 
                                             unsigned int flags)
 {
 	struct mm_struct *mm;
+	unsigned page_shift = 0;
 
 	if (current->mm)
 		mm = current->mm;
@@ -136,7 +137,7 @@ void __glue(_CACHE, _flush_user_cache_range)(unsigned long start, unsigned long 
 	}
 
 	for (start &= PAGE_MASK; start < end; start += PAGE_SIZE) {
-		pte_t *ptep = lookup_pte(mm, start);
+		pte_t *ptep = lookup_pte(mm, start, &page_shift);
 		if (ptep && pte_present(*ptep)) {
 			unsigned long k = pte_pfn(*ptep) << PAGE_SHIFT;
 			unsigned long e = k + PAGE_SIZE;
@@ -171,6 +172,7 @@ void __glue(_CACHE, _coherent_kern_range)(unsigned long start, unsigned long end
 int __glue(_CACHE, _coherent_user_range)(unsigned long start, unsigned long end)
 {
 	struct mm_struct *mm;
+	unsigned page_shift = 0;
 
 	if (current->mm)
 		mm = current->mm;
@@ -182,7 +184,7 @@ int __glue(_CACHE, _coherent_user_range)(unsigned long start, unsigned long end)
 	}
 
 	for (start &= PAGE_MASK; start < end; start += PAGE_SIZE) {
-		pte_t *ptep = lookup_pte(mm, start);
+		pte_t *ptep = lookup_pte(mm, start, &page_shift);
 		if (ptep && pte_present(*ptep)) {
 			unsigned long k = pte_pfn(*ptep) << PAGE_SHIFT;
 			unsigned long e = k + PAGE_SIZE;
@@ -237,13 +239,13 @@ void __glue(_CACHE, _dma_unmap_area)(const void *start, size_t sz, int direction
 
 static struct processor l4_proc_fns = {
 	._data_abort         = __data_abort,
-	._proc_init          = cpu_proc_init,
-	._proc_fin           = cpu_proc_fin,
-	.reset               = cpu_reset,
-	._do_idle            = cpu_do_idle,
-	.dcache_clean_area   = cpu_dcache_clean_area,
-	.switch_mm           = cpu_do_switch_mm,
-	.set_pte_ext         = cpu_set_pte_ext,
+	._proc_init          = __glue(CPU_NAME, _proc_init),
+	._proc_fin           = __glue(CPU_NAME, _proc_fin),
+	.reset               = __glue(CPU_NAME, _reset),
+	._do_idle            = __glue(CPU_NAME, _do_idle),
+	.dcache_clean_area   = __glue(CPU_NAME, _dcache_clean_area),
+	.switch_mm           = __glue(CPU_NAME, _switch_mm),
+	.set_pte_ext         = __glue(CPU_NAME, _set_pte_ext),
 	//.suspend_size = ...,
 	//.do_suspend = ...,
 	//.do_resume = ...,
@@ -277,7 +279,7 @@ static struct cpu_cache_fns l4_cpu_cache_fns = {
 static struct proc_info_list l4_proc_info __attribute__((__section__(".proc.info.init"))) = {
 	.cpu_val         = 0,
 	.cpu_mask        = 0,
-	.__cpu_mm_mmu_flags = 0,
+	.__cpu_mm_mmu_flags = PMD_SECT_WBWA,
 	.__cpu_io_mmu_flags = 0,
 	.__cpu_flush     = 0,
 #ifdef CONFIG_CPU_V7
@@ -308,5 +310,9 @@ struct proc_info_list *lookup_processor_type(void)
 	BUILD_BUG_ON(sizeof(l4_cpu_cache_fns) != 44);
 	BUILD_BUG_ON(sizeof(l4_tlb_fns) != 12);
 	BUILD_BUG_ON(sizeof(l4_cpu_user_fns) != 8);
+
+	if (is_smp())
+		l4_proc_info.__cpu_mm_mmu_flags |= PMD_SECT_S;
+
 	return &l4_proc_info;
 }

@@ -27,7 +27,9 @@
 #include <asm/bios_ebda.h>
 #include <asm/bootparam_utils.h>
 #include <asm/microcode.h>
+#include <asm/kasan.h>
 
+#ifndef CONFIG_L4
 /*
  * Manage page tables very early on.
  */
@@ -46,7 +48,7 @@ static void __init reset_early_page_tables(void)
 
 	next_early_pgt = 0;
 
-	write_cr3(__pa(early_level4_pgt));
+	write_cr3(__pa_nodebug(early_level4_pgt));
 }
 
 /* Create a new PMD entry */
@@ -59,7 +61,7 @@ int __init early_make_pgtable(unsigned long address)
 	pmdval_t pmd, *pmd_p;
 
 	/* Invalid address or early pgt is done ?  */
-	if (physaddr >= MAXMEM || read_cr3() != __pa(early_level4_pgt))
+	if (physaddr >= MAXMEM || read_cr3() != __pa_nodebug(early_level4_pgt))
 		return -1;
 
 again:
@@ -110,10 +112,8 @@ again:
    yet. */
 static void __init clear_bss(void)
 {
-#ifndef CONFIG_L4
 	memset(__bss_start, 0,
 	       (unsigned long) __bss_stop - (unsigned long) __bss_start);
-#endif
 }
 
 static unsigned long get_cmd_line_ptr(void)
@@ -127,7 +127,6 @@ static unsigned long get_cmd_line_ptr(void)
 
 static void __init copy_bootdata(char *real_mode_data)
 {
-#ifndef CONFIG_L4
 	char * command_line;
 	unsigned long cmd_line_ptr;
 
@@ -138,12 +137,17 @@ static void __init copy_bootdata(char *real_mode_data)
 		command_line = __va(cmd_line_ptr);
 		memcpy(boot_command_line, command_line, COMMAND_LINE_SIZE);
 	}
-#endif /* L4 */
 }
+#endif /* L4 */
 
 asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
 {
+#ifndef CONFIG_L4
 	int i;
+#else
+	if (0)
+		sanitize_boot_params(&boot_params);
+#endif /* L4 */
 
 	/*
 	 * Build-time sanity checks on the kernel image and module
@@ -155,46 +159,49 @@ asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
 	BUILD_BUG_ON((__START_KERNEL_map & ~PMD_MASK) != 0);
 	BUILD_BUG_ON((MODULES_VADDR & ~PMD_MASK) != 0);
 	BUILD_BUG_ON(!(MODULES_VADDR > __START_KERNEL));
+#ifndef CONFIG_L4
 	BUILD_BUG_ON(!(((MODULES_END - 1) & PGDIR_MASK) ==
 				(__START_KERNEL & PGDIR_MASK)));
 	BUILD_BUG_ON(__fix_to_virt(__end_of_fixed_addresses) <= MODULES_END);
 
+	cr4_init_shadow();
+
 	/* Kill off the identity-map trampoline */
 	reset_early_page_tables();
 
-	/* clear bss before set_intr_gate with early_idt_handler */
 	clear_bss();
 
-#ifndef CONFIG_L4
+	clear_page(init_level4_pgt);
+
+	kasan_early_init();
+
 	for (i = 0; i < NUM_EXCEPTION_VECTORS; i++)
-		set_intr_gate(i, early_idt_handlers[i]);
+		set_intr_gate(i, early_idt_handler_array[i]);
 	load_idt((const struct desc_ptr *)&idt_descr);
-#endif /* L4 */
 
 	copy_bootdata(__va(real_mode_data));
+#endif /* L4 */
 
 	/*
 	 * Load microcode early on BSP.
 	 */
 	load_ucode_bsp();
 
-	if (console_loglevel >= CONSOLE_LOGLEVEL_DEBUG)
-		early_printk("Kernel alive\n");
-
-	clear_page(init_level4_pgt);
+#ifndef CONFIG_L4
 	/* set init_level4_pgt kernel high mapping*/
 	init_level4_pgt[511] = early_level4_pgt[511];
+#endif /* L4 */
 
 	x86_64_start_reservations(real_mode_data);
 }
 
 void __init x86_64_start_reservations(char *real_mode_data)
 {
+#ifndef CONFIG_L4
 	/* version is always not zero if it is copied */
 	if (!boot_params.hdr.version)
 		copy_bootdata(__va(real_mode_data));
 
-#ifndef CONFIG_L4
 	reserve_ebda_region();
 #endif
 

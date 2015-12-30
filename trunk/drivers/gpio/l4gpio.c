@@ -18,6 +18,7 @@ MODULE_DESCRIPTION("L4 GPIO driver");
 MODULE_LICENSE("GPL");
 
 L4_EXTERNAL_FUNC(l4vbus_gpio_config_pad);
+L4_EXTERNAL_FUNC(l4vbus_gpio_config_get);
 L4_EXTERNAL_FUNC(l4vbus_gpio_multi_config_pad);
 L4_EXTERNAL_FUNC(l4vbus_gpio_setup);
 L4_EXTERNAL_FUNC(l4vbus_gpio_set);
@@ -38,27 +39,69 @@ static inline struct l4gpio_gpio *gc_to_l4gpio(struct gpio_chip *gc)
 	return container_of(gc, struct l4gpio_gpio, gc);;
 }
 
+static void print_pininfo(unsigned pin, unsigned chip,
+                          const char *funcname, const char *info)
+{
+	pr_warn("l4gpio: %s: GPIO (pin=%d, chip=%d) %s\n",
+	        funcname, pin, chip, info);
+}
+
+static int check_globalpin(unsigned pin, unsigned chip, const char *funcname)
+{
+	if (chip >= L4GPIO_MAX)
+		return -EINVAL;
+
+	if (!dhandles || !dhandles[chip]) {
+		print_pininfo(pin, chip, funcname, "not available");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 /* Public function */
 int l4gpio_config_pin(unsigned globalpin, unsigned func, unsigned value)
+{
+	unsigned gpiopin = globalpin % L4GPIO_GROUP_SIZE;
+	unsigned gpiochip = globalpin / L4GPIO_GROUP_SIZE;
+	int r;
+
+	if ((r = check_globalpin(gpiopin, gpiochip, "config-pin")))
+		return r;
+
+	if (0)
+		printk("%s: gpin=%u func=%u value=%u\n", __func__,
+		       globalpin, func, value);
+
+	r = L4XV_FN_i(l4vbus_gpio_config_pad(vbus, dhandles[gpiochip],
+	                                     gpiopin, func, value));
+	if (r < 0)
+		print_pininfo(globalpin, gpiochip, "config-pin", "failed");
+	return r;
+}
+EXPORT_SYMBOL(l4gpio_config_pin);
+
+/* Public function */
+int l4gpio_config_get(unsigned globalpin, unsigned func, unsigned *value)
 {
 	int r;
 	unsigned gpiopin = globalpin % L4GPIO_GROUP_SIZE;
 	unsigned gpiochip = globalpin / L4GPIO_GROUP_SIZE;
 
-	if (gpiochip >= L4GPIO_MAX)
-		return -EINVAL;
+	if ((r = check_globalpin(gpiopin, gpiochip, "config-get")))
+		return r;
 
-	if (!dhandles || !dhandles[gpiochip])
-		return -EINVAL;
+	if (0)
+		printk("%s: gpin=%u func=%u\n", __func__,
+		       globalpin, func);
 
-	r = L4XV_FN_i(l4vbus_gpio_config_pad(vbus, dhandles[gpiochip],
+	r = L4XV_FN_i(l4vbus_gpio_config_get(vbus, dhandles[gpiochip],
 	                                     gpiopin, func, value));
 	if (r < 0)
-		pr_warn("l4gpio: Config-pin GPIO(%d/%d) failed\n",
-		        globalpin, gpiochip);
+		print_pininfo(globalpin, gpiochip, "config-get", "failed");
 	return r;
 }
-EXPORT_SYMBOL(l4gpio_config_pin);
+EXPORT_SYMBOL(l4gpio_config_get);
 
 /* Public function */
 int l4gpio_multi_config_pin(unsigned gpiochip, unsigned pinmask,
@@ -69,13 +112,20 @@ int l4gpio_multi_config_pin(unsigned gpiochip, unsigned pinmask,
 	if (gpiochip >= L4GPIO_MAX)
 		return -EINVAL;
 
-	if (!dhandles || !dhandles[gpiochip])
+	if (!dhandles || !dhandles[gpiochip]) {
+		pr_warn("l4gpio: Config-config-pin GPIO(pin=%d, chip=%d) not available\n",
+		        gpiochip, 0);
 		return -EINVAL;
+	}
+
+	if (0)
+		printk("%s: chip=%x m=%x func=%u v=%u\n", __func__,
+		       gpiochip, pinmask, func, value);
 
 	r = L4XV_FN_i(l4vbus_gpio_multi_config_pad(vbus, dhandles[gpiochip],
 	                                           0, pinmask, func, value));
 	if (r < 0)
-		pr_warn("l4gpio: Multi-config-pin GPIO(%d*%d) failed\n",
+		pr_warn("l4gpio: Multi-config-pin GPIO(pin=%d, chip=%d) failed\n",
 		        gpiochip, L4GPIO_GROUP_SIZE);
 	return r;
 }
@@ -89,10 +139,14 @@ static int l4gpio_direction_input(struct gpio_chip *gc, unsigned offset)
 	if (offset >= gc->ngpio)
 		return -EINVAL;
 
+	if (0)
+		printk("%s: %u\n", __func__, gc->base + offset);
+
 	r = L4XV_FN_i(l4vbus_gpio_setup(vbus, chip->dh, offset,
 	                                L4VBUS_GPIO_SETUP_INPUT, 0));
 	if (r < 0)
-		pr_warn("l4gpio: Config-input GPIO(%d) failed\n", offset);
+		pr_warn("l4gpio: Config-input GPIO(%s/%d) failed\n",
+		        gc->label, offset);
 	return r;
 }
 
@@ -105,10 +159,14 @@ static int l4gpio_direction_output(struct gpio_chip *gc, unsigned offset,
 	if (offset >= gc->ngpio)
 		return -EINVAL;
 
+	if (0)
+		printk("%s: %u -> %d\n", __func__, gc->base + offset, value);
+
 	r = L4XV_FN_i(l4vbus_gpio_setup(vbus, chip->dh, offset,
 	                                L4VBUS_GPIO_SETUP_OUTPUT, value));
 	if (r < 0)
-		pr_warn("l4gpio: Config-output GPIO(%d) failed\n", offset);
+		pr_warn("l4gpio: Config-output GPIO(%s/%d) failed\n",
+		        gc->label, offset);
 	return r;
 }
 
@@ -122,7 +180,10 @@ static int l4gpio_get_value(struct gpio_chip *gc, unsigned offset)
 
 	r = L4XV_FN_i(l4vbus_gpio_get(vbus, chip->dh, offset));
 	if (r < 0)
-		pr_warn("l4gpio: Getting GPIO(%d) failed\n", offset);
+		pr_warn("l4gpio: Getting GPIO(%s/%d) failed\n",
+		        gc->label, offset);
+
+	if (0)printk("%s: %u -> %d\n", __func__, gc->base + offset, r);
 	return r;
 }
 
@@ -134,9 +195,13 @@ static void l4gpio_set_value(struct gpio_chip *gc, unsigned offset, int value)
 	if (offset >= gc->ngpio)
 		return;
 
+	if (0)
+		printk("%s: %u -> %d\n", __func__, gc->base + offset, value);
+
 	r = L4XV_FN_i(l4vbus_gpio_set(vbus, chip->dh, offset, value));
 	if (r < 0)
-		pr_warn("l4gpio: Setting GPIO(%d) failed\n", offset);
+		pr_warn("l4gpio: Setting GPIO(%s/%d) failed\n",
+		        gc->label, offset);
 }
 
 static int l4gpio_to_irq(struct gpio_chip *gc, unsigned offset)
@@ -146,6 +211,9 @@ static int l4gpio_to_irq(struct gpio_chip *gc, unsigned offset)
 
 	if (offset >= gc->ngpio)
 		return -EINVAL;
+
+	if (0)
+		printk("%s: %u\n", __func__, gc->base + offset);
 
 	irqnum = L4XV_FN_i(l4vbus_gpio_to_irq(vbus, chip->dh, offset));
 	if (irqnum >= L4X_IRQS_V_DYN_BASE) {
@@ -177,6 +245,11 @@ static int add_chip(unsigned gpio, l4io_device_handle_t dh,
 	chip->gc.label            = l4gpio_dev_name(gpio);
 	chip->gc.dev              = pdev ? &pdev->dev : NULL;
 	chip->gc.owner            = THIS_MODULE;
+
+	if (dh)
+		pr_info("l4gpio: Added GPIO chip %d/%s: %4d - %4d\n",
+		        gpio, chip->gc.label, chip->gc.base,
+		        chip->gc.base + chip->gc.ngpio - 1);
 
 	ret = gpiochip_add(&chip->gc);
 	if (ret) {

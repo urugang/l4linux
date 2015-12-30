@@ -13,7 +13,7 @@
 #include <asm/generic/cap_alloc.h>
 #include <asm/generic/vcpu.h>
 
-#include <l4/re/c/namespace.h>
+#include <l4/re/env.h>
 
 L4_EXTERNAL_FUNC(l4vbus_pci_irq_enable);
 L4_EXTERNAL_FUNC(l4vbus_pci_cfg_read);
@@ -29,6 +29,7 @@ unsigned int pci_early_dump_regs;
 int noioapicquirk;
 int noioapicreroute = 0;
 int pci_routeirq;
+int pcibios_last_bus = -1;
 #endif
 
 /*
@@ -47,6 +48,9 @@ static int l4vpci_irq_enable(struct pci_dev *dev)
 
 	if (!dev)
 		return -EINVAL;
+
+	if (dev->msi_enabled || dev->msix_enabled)
+		return 0;
 
 	pin = dev->pin;
 	if (!pin) {
@@ -93,7 +97,7 @@ static int l4vpci_irq_enable(struct pci_dev *dev)
 
 void l4vpci_irq_disable(struct pci_dev *dev)
 {
-	printk("%s: implement me\n", __func__);
+	dev_info(&dev->dev, "%s: implement me\n", __func__);
 }
 
 /*
@@ -102,16 +106,16 @@ void l4vpci_irq_disable(struct pci_dev *dev)
  * accesses.
  */
 
-static int pci_conf1_read(unsigned int seg, unsigned int bus,
-                         unsigned int devfn, int reg, int len, u32 *value)
+int raw_pci_read(unsigned int domain, unsigned int bus,
+                 unsigned int devfn, int reg, int len, u32 *value)
 {
 	l4_uint32_t df = (PCI_SLOT(devfn) << 16) | PCI_FUNC(devfn);
 	return L4XV_FN_i(l4vbus_pci_cfg_read(vbus, root_bridge,
 	                                     bus, df, reg, value, len * 8));
 }
 
-static int pci_conf1_write(unsigned int seg, unsigned int bus,
-                           unsigned int devfn, int reg, int len, u32 value)
+int raw_pci_write(unsigned int domain, unsigned int bus,
+                  unsigned int devfn, int reg, int len, u32 value)
 {
 	l4_uint32_t df = (PCI_SLOT(devfn) << 16) | PCI_FUNC(devfn);
 	return L4XV_FN_i(l4vbus_pci_cfg_write(vbus, root_bridge,
@@ -120,14 +124,14 @@ static int pci_conf1_write(unsigned int seg, unsigned int bus,
 
 static int pci_read(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 *value)
 {
-	return pci_conf1_read(pci_domain_nr(bus), bus->number,
-	                      devfn, where, size, value);
+	return raw_pci_read(pci_domain_nr(bus), bus->number,
+	                    devfn, where, size, value);
 }
 
 static int pci_write(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 value)
 {
-	return pci_conf1_write(pci_domain_nr(bus), bus->number,
-	                       devfn, where, size, value);
+	return raw_pci_write(pci_domain_nr(bus), bus->number,
+	                     devfn, where, size, value);
 }
 
 static struct pci_ops l4vpci_ops = {
@@ -161,6 +165,9 @@ struct pci_bus * __init l4vpci_scan_bus(int nr, struct pci_sys_data *sys)
 	                      &sys->resources);
 	for_each_pci_dev(dev)
 		l4vpci_irq_enable(dev);
+
+	pci_bus_add_devices(b);
+
 	return b;
 }
 
@@ -176,13 +183,20 @@ static struct hw_pci l4vpci_pci __initdata = {
 static int __init l4vpci_x86_init(void)
 {
 	struct pci_dev *dev = NULL;
+	struct pci_bus *bus;
 	struct pci_sysdata *sd = kzalloc(sizeof(*sd), GFP_KERNEL);
 	if (!sd)
 		return -ENOMEM;
 
-	pci_scan_bus(0, &l4vpci_ops, sd);
+	bus = pci_scan_bus(0, &l4vpci_ops, sd);
+	if (!bus) {
+		pr_err("Failed to scan PCI bus\n");
+		return -ENODEV;
+	}
 
-	printk(KERN_INFO "l4vPCI: Using L4-IO for IRQ routing\n");
+	pci_bus_add_devices(bus);
+
+	pr_info("l4vPCI: Using L4-IO for IRQ routing\n");
 
 	for_each_pci_dev(dev)
 		l4vpci_irq_enable(dev);
@@ -198,11 +212,11 @@ unsigned int pcibios_assign_all_busses(void)
 }
 #endif
 
-int pcibios_enable_device(struct pci_dev *dev, int mask)
+int pcibios_enable_device(struct pci_dev *dev, int bars)
 {
 	int err;
 
-	if ((err = pci_enable_resources(dev, mask)) < 0)
+	if ((err = pci_enable_resources(dev, bars)) < 0)
 		return err;
 
 	return l4vpci_irq_enable(dev);
@@ -274,6 +288,10 @@ void pcibios_disable_device(struct pci_dev *dev)
 void pcibios_fixup_bus(struct pci_bus *b)
 {
 	pci_read_bridge_bases(b);
+}
+
+void pcibios_scan_root(int busnum)
+{
 }
 
 int __init pci_legacy_init(void)

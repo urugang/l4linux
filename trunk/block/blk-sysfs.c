@@ -6,11 +6,12 @@
 #include <linux/module.h>
 #include <linux/bio.h>
 #include <linux/blkdev.h>
+#include <linux/backing-dev.h>
 #include <linux/blktrace_api.h>
 #include <linux/blk-mq.h>
+#include <linux/blk-cgroup.h>
 
 #include "blk.h"
-#include "blk-cgroup.h"
 #include "blk-mq.h"
 
 struct queue_sysfs_entry {
@@ -144,10 +145,41 @@ static ssize_t queue_discard_granularity_show(struct request_queue *q, char *pag
 	return queue_var_show(q->limits.discard_granularity, page);
 }
 
+static ssize_t queue_discard_max_hw_show(struct request_queue *q, char *page)
+{
+	unsigned long long val;
+
+	val = q->limits.max_hw_discard_sectors << 9;
+	return sprintf(page, "%llu\n", val);
+}
+
 static ssize_t queue_discard_max_show(struct request_queue *q, char *page)
 {
 	return sprintf(page, "%llu\n",
 		       (unsigned long long)q->limits.max_discard_sectors << 9);
+}
+
+static ssize_t queue_discard_max_store(struct request_queue *q,
+				       const char *page, size_t count)
+{
+	unsigned long max_discard;
+	ssize_t ret = queue_var_store(&max_discard, page, count);
+
+	if (ret < 0)
+		return ret;
+
+	if (max_discard & (q->limits.discard_granularity - 1))
+		return -EINVAL;
+
+	max_discard >>= 9;
+	if (max_discard > UINT_MAX)
+		return -EINVAL;
+
+	if (max_discard > q->limits.max_hw_discard_sectors)
+		max_discard = q->limits.max_hw_discard_sectors;
+
+	q->limits.max_discard_sectors = max_discard;
+	return ret;
 }
 
 static ssize_t queue_discard_zeroes_data_show(struct request_queue *q, char *page)
@@ -359,9 +391,15 @@ static struct queue_sysfs_entry queue_discard_granularity_entry = {
 	.show = queue_discard_granularity_show,
 };
 
+static struct queue_sysfs_entry queue_discard_max_hw_entry = {
+	.attr = {.name = "discard_max_hw_bytes", .mode = S_IRUGO },
+	.show = queue_discard_max_hw_show,
+};
+
 static struct queue_sysfs_entry queue_discard_max_entry = {
-	.attr = {.name = "discard_max_bytes", .mode = S_IRUGO },
+	.attr = {.name = "discard_max_bytes", .mode = S_IRUGO | S_IWUSR },
 	.show = queue_discard_max_show,
+	.store = queue_discard_max_store,
 };
 
 static struct queue_sysfs_entry queue_discard_zeroes_data_entry = {
@@ -420,6 +458,7 @@ static struct attribute *default_attrs[] = {
 	&queue_io_opt_entry.attr,
 	&queue_discard_granularity_entry.attr,
 	&queue_discard_max_entry.attr,
+	&queue_discard_max_hw_entry.attr,
 	&queue_discard_zeroes_data_entry.attr,
 	&queue_write_same_max_entry.attr,
 	&queue_nonrot_entry.attr,
@@ -492,17 +531,16 @@ static void blk_free_queue_rcu(struct rcu_head *rcu_head)
  *     Currently, its primary task it to free all the &struct request
  *     structures that were allocated to the queue and the queue itself.
  *
- * Caveat:
- *     Hopefully the low level driver will have finished any
- *     outstanding requests first...
+ * Note:
+ *     The low level driver must have finished any outstanding requests first
+ *     via blk_cleanup_queue().
  **/
 static void blk_release_queue(struct kobject *kobj)
 {
 	struct request_queue *q =
 		container_of(kobj, struct request_queue, kobj);
 
-	blk_sync_queue(q);
-
+	bdi_exit(&q->backing_dev_info);
 	blkcg_exit_queue(q);
 
 	if (q->elevator) {
@@ -517,14 +555,15 @@ static void blk_release_queue(struct kobject *kobj)
 	if (q->queue_tags)
 		__blk_queue_free_tags(q);
 
-	if (q->mq_ops)
-		blk_mq_free_queue(q);
-
-	kfree(q->flush_rq);
+	if (!q->mq_ops)
+		blk_free_flush_queue(q->fq);
+	else
+		blk_mq_release(q);
 
 	blk_trace_shutdown(q);
 
-	bdi_destroy(&q->backing_dev_info);
+	if (q->bio_split)
+		bioset_free(q->bio_split);
 
 	ida_simple_remove(&blk_queue_ida, q->id);
 	call_rcu(&q->rcu_head, blk_free_queue_rcu);
@@ -551,11 +590,20 @@ int blk_register_queue(struct gendisk *disk)
 		return -ENXIO;
 
 	/*
-	 * Initialization must be complete by now.  Finish the initial
-	 * bypass from queue allocation.
+	 * SCSI probing may synchronously create and destroy a lot of
+	 * request_queues for non-existent devices.  Shutting down a fully
+	 * functional queue takes measureable wallclock time as RCU grace
+	 * periods are involved.  To avoid excessive latency in these
+	 * cases, a request_queue starts out in a degraded mode which is
+	 * faster to shut down and is made fully functional here as
+	 * request_queues for non-existent devices never get registered.
 	 */
-	blk_queue_bypass_end(q);
-	queue_flag_set_unlocked(QUEUE_FLAG_INIT_DONE, q);
+	if (!blk_queue_init_done(q)) {
+		queue_flag_set_unlocked(QUEUE_FLAG_INIT_DONE, q);
+		blk_queue_bypass_end(q);
+		if (q->mq_ops)
+			blk_mq_finish_init(q);
+	}
 
 	ret = blk_trace_init_sysfs(dev);
 	if (ret)

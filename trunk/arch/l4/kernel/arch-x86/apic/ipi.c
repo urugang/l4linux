@@ -20,9 +20,7 @@
 #include <asm/ipi.h>
 
 #include <asm/generic/smp.h>
-#include <l4/log/log.h>
-#include <l4/sys/kdebug.h>
-
+#include <asm/generic/smp_ipi.h>
 
 void default_send_IPI_mask_sequence_phys(const struct cpumask *mask, int vector)
 {
@@ -124,22 +122,9 @@ void default_send_IPI_mask_logical(const struct cpumask *cpumask, int vector)
 	local_irq_restore(flags);
 }
 
-void __l4x_send_IPI_shortcut(unsigned int shortcut, int vector)
+static inline void l4x_send_IPI_mask(const struct cpumask *cpumask, int vector)
 {
-	if (shortcut == APIC_DEST_ALLBUT) {
-		struct cpumask mask = *cpu_online_mask;
-		cpumask_clear_cpu(smp_processor_id(), &mask);
-		default_send_IPI_mask_logical(&mask, vector);
-	} else if (shortcut == APIC_DEST_ALLINC) {
-		default_send_IPI_mask_logical(cpu_online_mask, vector);
-	} else if (shortcut == APIC_DEST_SELF) {
-		struct cpumask mask = CPU_MASK_NONE;
-		cpumask_set_cpu(smp_processor_id(), &mask);
-		default_send_IPI_mask_logical(&mask, vector);
-	} else {
-		LOG_printf("Unknown IPI shortcut %x\n", shortcut);
-		enter_kdebug("Unknown IPI shortcut");
-	}
+	default_send_IPI_mask_logical(cpumask, vector);
 }
 
 void default_send_IPI_allbutself(int vector)
@@ -194,5 +179,25 @@ int safe_smp_processor_id(void)
 	cpuid = convert_apicid_to_cpu(apicid);
 
 	return cpuid >= 0 ? cpuid : 0;
+}
+#endif
+
+#ifdef CONFIG_L4
+void __l4x_send_IPI_shortcut(unsigned int shortcut, int vector)
+{
+	if (shortcut == APIC_DEST_ALLBUT) {
+		struct cpumask mask = *cpu_online_mask;
+		cpumask_clear_cpu(smp_processor_id(), &mask);
+		l4x_send_IPI_mask(&mask, vector);
+	} else if (shortcut == APIC_DEST_ALLINC) {
+		l4x_send_IPI_mask(cpu_online_mask, vector);
+	} else if (shortcut == APIC_DEST_SELF) {
+		struct cpumask mask = CPU_MASK_NONE;
+		cpumask_set_cpu(smp_processor_id(), &mask);
+		l4x_send_IPI_mask(&mask, vector);
+	} else {
+		// Unknown IPI shortcut
+		BUG();
+	}
 }
 #endif

@@ -3,7 +3,9 @@
 
 #ifdef CONFIG_MMU
 
+#ifdef CONFIG_L4
 #include <asm/generic/mmu.h>
+#endif
 
 typedef struct {
 #ifdef CONFIG_CPU_HAS_ASID
@@ -13,9 +15,14 @@ typedef struct {
 #endif
 	unsigned int	vmalloc_seq;
 	unsigned long	sigpage;
+#ifdef CONFIG_VDSO
+	unsigned long	vdso;
+#endif
 
+#ifdef CONFIG_L4
 	l4_cap_idx_t task;
 	enum l4x_unmap_mode_enum l4x_unmap_mode;
+#endif
 } mm_context_t;
 
 #ifdef CONFIG_CPU_HAS_ASID

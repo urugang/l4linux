@@ -6,6 +6,8 @@
 
 extern l4_vcpu_state_t *l4x_vcpu_ptr[NR_CPUS];
 
+#define l4x_current_vcpu() (l4x_vcpu_ptr[smp_processor_id()])
+
 #ifdef CONFIG_L4_VCPU
 
 #include <linux/irqflags.h>
@@ -48,15 +50,20 @@ int l4x_is_vcpu(void)
 
 #endif
 
+/* Generic variant */
 #define  L4XV_FN(rettype, fn) \
-	 ({ rettype r; L4XV_V(f); L4XV_L(f); r = fn; L4XV_U(f); r; })
+	 ({ rettype __r; L4XV_V(__f); L4XV_L(__f); \
+	  __r = fn; L4XV_U(__f); __r; })
 
+/* Often used: */
 #define  L4XV_FN_i(fn) L4XV_FN(int, fn)
 #define  L4XV_FN_l(fn) L4XV_FN(long, fn)
 #define  L4XV_FN_ui(fn) L4XV_FN(unsigned int, fn)
 #define  L4XV_FN_ul(fn) L4XV_FN(unsigned long, fn)
 
 #define  L4XV_FN_v(fn) \
-	 ({ L4XV_V(f); L4XV_L(f); fn; L4XV_U(f); })
+	 ({ L4XV_V(__f); L4XV_L(__f); fn; L4XV_U(__f); })
+
+#define  L4XV_FN_e(fn) L4XV_FN_l(l4_error(fn))
 
 #endif /* ! __ASM_L4__GENERIC__VCPU_H__ */

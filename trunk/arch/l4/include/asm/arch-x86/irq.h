@@ -1,5 +1,5 @@
-#ifndef __ASM_L4__ARCH_X86__IRQ_H__
-#define __ASM_L4__ARCH_X86__IRQ_H__
+#ifndef _ASM_X86_IRQ_H
+#define _ASM_X86_IRQ_H
 /*
  *	(C) 1992, 1993 Linus Torvalds, (C) 1997 Ingo Molnar
  *
@@ -30,11 +30,21 @@ extern void fixup_irqs(void);
 extern void irq_force_complete_move(int);
 #endif
 
+#ifdef CONFIG_HAVE_KVM
+extern void kvm_set_posted_intr_wakeup_handler(void (*handler)(void));
+#endif
+
 extern void (*x86_platform_ipi_callback)(void);
 extern void native_init_IRQ(void);
-extern bool handle_irq(unsigned irq, struct pt_regs *regs);
 
+struct irq_desc;
+extern bool handle_irq(struct irq_desc *desc, struct pt_regs *regs);
+
+#ifdef CONFIG_L4
 extern __visible unsigned int do_IRQ(int irq, struct pt_regs *regs);
+#else
+extern __visible unsigned int do_IRQ(struct pt_regs *regs);
+#endif /* L4 */
 
 /* Interrupt vector management */
 extern DECLARE_BITMAP(used_vectors, NR_VECTORS);
@@ -47,4 +57,4 @@ void arch_trigger_all_cpu_backtrace(bool);
 #define arch_trigger_all_cpu_backtrace arch_trigger_all_cpu_backtrace
 #endif
 
-#endif /* __ASM_L4__ARCH_X86__IRQ_H__ */
+#endif /* _ASM_X86_IRQ_H */

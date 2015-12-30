@@ -167,8 +167,7 @@ static void mic_x100_send_intr(struct mic_device *mdev, int doorbell)
 	if (doorbell < MIC_X100_NUM_SBOX_IRQ) {
 		mic_x100_send_sbox_intr(mdev, doorbell);
 	} else {
-		rdmasr_db = doorbell - MIC_X100_NUM_SBOX_IRQ +
-			MIC_X100_RDMASR_IRQ_BASE;
+		rdmasr_db = doorbell - MIC_X100_NUM_SBOX_IRQ;
 		mic_x100_send_rdmasr_intr(mdev, rdmasr_db);
 	}
 }
@@ -549,6 +548,13 @@ struct mic_smpt_ops mic_x100_smpt_ops = {
 	.set = mic_x100_smpt_set,
 };
 
+static bool mic_x100_dma_filter(struct dma_chan *chan, void *param)
+{
+	if (chan->device->dev->parent == (struct device *)param)
+		return true;
+	return false;
+}
+
 struct mic_hw_ops mic_x100_ops = {
 	.aper_bar = MIC_X100_APER_BAR,
 	.mmio_bar = MIC_X100_MMIO_BAR,
@@ -563,6 +569,7 @@ struct mic_hw_ops mic_x100_ops = {
 	.send_firmware_intr = mic_x100_send_firmware_intr,
 	.load_mic_fw = mic_x100_load_firmware,
 	.get_postcode = mic_x100_get_postcode,
+	.dma_filter = mic_x100_dma_filter,
 };
 
 struct mic_hw_intr_ops mic_x100_intr_ops = {

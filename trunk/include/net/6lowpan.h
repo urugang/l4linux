@@ -75,20 +75,6 @@
 	 (((a)->s6_addr[14]) == (m)[6]) &&		\
 	 (((a)->s6_addr[15]) == (m)[7]))
 
-/* ipv6 address is unspecified */
-#define is_addr_unspecified(a)		\
-	((((a)->s6_addr32[0]) == 0) &&	\
-	 (((a)->s6_addr32[1]) == 0) &&	\
-	 (((a)->s6_addr32[2]) == 0) &&	\
-	 (((a)->s6_addr32[3]) == 0))
-
-/* compare ipv6 addresses prefixes */
-#define ipaddr_prefixcmp(addr1, addr2, length) \
-	(memcmp(addr1, addr2, length >> 3) == 0)
-
-/* local link, i.e. FE80::/10 */
-#define is_addr_link_local(a) (((a)->s6_addr16[0]) == htons(0xFE80))
-
 /*
  * check whether we can compress the IID to 16 bits,
  * it's possible for unicast adresses with first 49 bits are zero only.
@@ -100,21 +86,7 @@
 	 (((a)->s6_addr[12]) == 0xfe) &&	\
 	 (((a)->s6_addr[13]) == 0))
 
-/* multicast address */
-#define is_addr_mcast(a) (((a)->s6_addr[0]) == 0xFF)
-
 /* check whether the 112-bit gid of the multicast address is mappable to: */
-
-/* 9 bits, for FF02::1 (all nodes) and FF02::2 (all routers) addresses only. */
-#define lowpan_is_mcast_addr_compressable(a)	\
-	((((a)->s6_addr16[1]) == 0) &&		\
-	 (((a)->s6_addr16[2]) == 0) &&		\
-	 (((a)->s6_addr16[3]) == 0) &&		\
-	 (((a)->s6_addr16[4]) == 0) &&		\
-	 (((a)->s6_addr16[5]) == 0) &&		\
-	 (((a)->s6_addr16[6]) == 0) &&		\
-	 (((a)->s6_addr[14])  == 0) &&		\
-	 ((((a)->s6_addr[15]) == 1) || (((a)->s6_addr[15]) == 2)))
 
 /* 48 bits, FFXX::00XX:XXXX:XXXX */
 #define lowpan_is_mcast_addr_compressable48(a)	\
@@ -166,17 +138,6 @@
 
 #define LOWPAN_FRAG1_HEAD_SIZE	0x4
 #define LOWPAN_FRAGN_HEAD_SIZE	0x5
-
-/*
- * According IEEE802.15.4 standard:
- *   - MTU is 127 octets
- *   - maximum MHR size is 37 octets
- *   - MFR size is 2 octets
- *
- * so minimal payload size that we may guarantee is:
- *   MTU - MHR - MFR = 88 octets
- */
-#define LOWPAN_FRAG_SIZE	88
 
 /*
  * Values of fields within the IPHC encoding first byte
@@ -236,6 +197,27 @@
 #define LOWPAN_NHC_UDP_CS_P_11	0xF3 /* source & dest = 0xF0B + 4bit inline */
 #define LOWPAN_NHC_UDP_CS_C	0x04 /* checksum elided */
 
+#define LOWPAN_PRIV_SIZE(llpriv_size)	\
+	(sizeof(struct lowpan_priv) + llpriv_size)
+
+enum lowpan_lltypes {
+	LOWPAN_LLTYPE_BTLE,
+	LOWPAN_LLTYPE_IEEE802154,
+};
+
+struct lowpan_priv {
+	enum lowpan_lltypes lltype;
+
+	/* must be last */
+	u8 priv[0] __aligned(sizeof(void *));
+};
+
+static inline
+struct lowpan_priv *lowpan_priv(const struct net_device *dev)
+{
+	return netdev_priv(dev);
+}
+
 #ifdef DEBUG
 /* print data in line */
 static inline void raw_dump_inline(const char *caller, char *msg,
@@ -275,17 +257,6 @@ static inline int lowpan_fetch_skb_u8(struct sk_buff *skb, u8 *val)
 
 	*val = skb->data[0];
 	skb_pull(skb, 1);
-
-	return 0;
-}
-
-static inline int lowpan_fetch_skb_u16(struct sk_buff *skb, u16 *val)
-{
-	if (unlikely(!pskb_may_pull(skb, 2)))
-		return -EINVAL;
-
-	*val = (skb->data[0] << 8) | skb->data[1];
-	skb_pull(skb, 2);
 
 	return 0;
 }
@@ -422,12 +393,14 @@ lowpan_uncompress_size(const struct sk_buff *skb, u16 *dgram_offset)
 	return skb->len + uncomp_header - ret;
 }
 
-typedef int (*skb_delivery_cb)(struct sk_buff *skb, struct net_device *dev);
+void lowpan_netdev_setup(struct net_device *dev, enum lowpan_lltypes lltype);
 
-int lowpan_process_data(struct sk_buff *skb, struct net_device *dev,
-		const u8 *saddr, const u8 saddr_type, const u8 saddr_len,
-		const u8 *daddr, const u8 daddr_type, const u8 daddr_len,
-		u8 iphc0, u8 iphc1, skb_delivery_cb skb_deliver);
+int
+lowpan_header_decompress(struct sk_buff *skb, struct net_device *dev,
+			 const u8 *saddr, const u8 saddr_type,
+			 const u8 saddr_len, const u8 *daddr,
+			 const u8 daddr_type, const u8 daddr_len,
+			 u8 iphc0, u8 iphc1);
 int lowpan_header_compress(struct sk_buff *skb, struct net_device *dev,
 			unsigned short type, const void *_daddr,
 			const void *_saddr, unsigned int len);

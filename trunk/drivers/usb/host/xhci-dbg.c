@@ -99,6 +99,10 @@ static void xhci_print_cap_regs(struct xhci_hcd *xhci)
 	xhci_dbg(xhci, "HCC PARAMS 0x%x:\n", (unsigned int) temp);
 	xhci_dbg(xhci, "  HC generates %s bit addresses\n",
 			HCC_64BIT_ADDR(temp) ? "64" : "32");
+	xhci_dbg(xhci, "  HC %s Contiguous Frame ID Capability\n",
+			HCC_CFC(temp) ? "has" : "hasn't");
+	xhci_dbg(xhci, "  HC %s generate Stopped - Short Package event\n",
+			HCC_SPC(temp) ? "can" : "can't");
 	/* FIXME */
 	xhci_dbg(xhci, "  FIXME: more HCCPARAMS debugging\n");
 
@@ -552,7 +556,7 @@ void xhci_dbg_ctx(struct xhci_hcd *xhci,
 
 	if (ctx->type == XHCI_CTX_TYPE_INPUT) {
 		struct xhci_input_control_ctx *ctrl_ctx =
-			xhci_get_input_control_ctx(xhci, ctx);
+			xhci_get_input_control_ctx(ctx);
 		if (!ctrl_ctx) {
 			xhci_warn(xhci, "Could not get input context, bad type.\n");
 			return;
@@ -594,3 +598,4 @@ void xhci_dbg_trace(struct xhci_hcd *xhci, void (*trace)(struct va_format *),
 	trace(&vaf);
 	va_end(args);
 }
+EXPORT_SYMBOL_GPL(xhci_dbg_trace);

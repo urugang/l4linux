@@ -34,17 +34,19 @@ static int devs_pos;
 static int major_num = 0;        /* kernel chooses */
 module_param(major_num, int, 0);
 
-#define KERNEL_SECTOR_SIZE 512
+enum {
+	KERNEL_SECTOR_SHIFT = 9,
+};
 
 /*
  * The internal representation of our device.
  */
 struct l4bdds_device {
-	unsigned long size; /* Size in Kbytes */
+	unsigned long ds_size; /* in bytes */
 	spinlock_t lock;
 	struct gendisk *gd;
 	l4_cap_idx_t dscap, memcap;
-	void *addr;
+	void *ds_addr;
 	struct request_queue *queue;
 	int read_write;
 	char name[40];
@@ -56,9 +58,9 @@ static void transfer(struct l4bdds_device *dev,
 		     char *ds_addr, unsigned long size,
 		     char *buffer, int write)
 {
-	if (((ds_addr - (char *)dev->addr + size) >> 10) > dev->size) {
-		printk(KERN_NOTICE "l4bdds: access beyond end of device (%p %ld)\n",
-		       ds_addr, size);
+	if ((ds_addr - (char *)dev->ds_addr + size) > dev->ds_size) {
+		pr_notice("l4bdds: access beyond end of device (%p %ld)\n",
+		          ds_addr, size);
 		return;
 	}
 
@@ -75,19 +77,18 @@ static void request(struct request_queue *q)
 	while ((req = blk_peek_request(q)) != NULL) {
 		struct req_iterator iter;
 		struct bio_vec bvec;
-		struct l4bdds_device *dev =
-			(struct l4bdds_device *)req->rq_disk->private_data;
-		char *ds_addr = dev->addr;
+		struct l4bdds_device *dev = req->rq_disk->private_data;
+		char *ds_addr = dev->ds_addr;
 
 		blk_start_request(req);
 
 		if (req->cmd_type != REQ_TYPE_FS) {
-			printk(KERN_NOTICE "Skip non-CMD request\n");
+			pr_notice("Skip non-CMD request\n");
 			__blk_end_request_all(req, -EIO);
 			continue;
 		}
 
-		ds_addr += blk_rq_pos(req) * KERNEL_SECTOR_SIZE;
+		ds_addr += blk_rq_pos(req) << KERNEL_SECTOR_SHIFT;
 
 		rq_for_each_segment(bvec, req, iter) {
 			transfer(req->rq_disk->private_data, ds_addr,
@@ -106,19 +107,31 @@ static void request(struct request_queue *q)
 static int getgeo(struct block_device *bdev, struct hd_geometry *geo)
 {
 	struct l4bdds_device *d = bdev->bd_disk->private_data;
-	geo->cylinders = d->size << 5;
+	geo->cylinders = d->ds_size >> 5;
 	geo->heads     = 4;
 	geo->sectors   = 32;
 	return 0;
 }
 
+static long l4bdds_direct_access(struct block_device *bdev, sector_t sector,
+                                 void __pmem **kaddr, unsigned long *pfn)
+{
+	struct l4bdds_device *dev = bdev->bd_disk->private_data;
+	loff_t off = sector << KERNEL_SECTOR_SHIFT;
+
+	*kaddr = dev->ds_addr + off;
+	*pfn = __pa(*kaddr) >> PAGE_SHIFT;
+
+	return dev->ds_size - off;
+}
 
 /*
  * The device operations structure.
  */
 static struct block_device_operations ops = {
-	.owner  = THIS_MODULE,
-	.getgeo = getgeo,
+	.owner         = THIS_MODULE,
+	.getgeo        = getgeo,
+	.direct_access = l4bdds_direct_access,
 };
 
 static int __init l4bdds_init_one(int nr)
@@ -130,31 +143,26 @@ static int __init l4bdds_init_one(int nr)
 		if ((ret = l4x_query_and_get_cow_ds(device[nr].name, "l4bdds",
 		                                    &device[nr].memcap,
 		                                    &device[nr].dscap,
-		                                    &device[nr].addr,
+		                                    &device[nr].ds_addr,
 		                                    &stat, 1))) {
-			printk(KERN_ERR "l4bdds: Failed to get file %s (rw): %s(%d)\n",
+			pr_err("l4bdds: Failed to get file %s (rw): %s(%d)\n",
 			       device[nr].name, l4sys_errtostr(ret), ret);
 			return ret;
 		}
 	} else {
 		if ((ret = l4x_query_and_get_ds(device[nr].name, "l4bdds",
 		                                &device[nr].dscap,
-		                                &device[nr].addr, &stat))) {
-			printk(KERN_ERR "l4bdds: Failed to get file %s (ro): %s(%d)\n",
+		                                &device[nr].ds_addr, &stat))) {
+			pr_err("l4bdds: Failed to get file %s (ro): %s(%d)\n",
 			       device[nr].name, l4sys_errtostr(ret), ret);
 			return ret;
 		}
 	}
 
 	ret = -ENODEV;
-	/* device[nr].size is unsigned and in KBytes */
-	device[nr].size = ALIGN(stat.size, 1 << 10) >> 10;
+	device[nr].ds_size = stat.size;
 
 	spin_lock_init(&device[nr].lock);
-
-	printk("l4bdds: Disk '%s' size = %lu KB (%lu MB) flags=%lx addr=%p\n",
-	       device[nr].name, device[nr].size, device[nr].size >> 10,
-	       stat.flags, device[nr].addr);
 
 	/* Get a request queue. */
 	device[nr].queue = blk_init_queue(request, &device[nr].lock);
@@ -173,7 +181,7 @@ static int __init l4bdds_init_one(int nr)
 	device[nr].gd->private_data = &device[nr];
 	snprintf(device[nr].gd->disk_name, sizeof(device[nr].gd->disk_name),
 	         "l4bdds%d", nr);
-	set_capacity(device[nr].gd, device[nr].size * 2 /* 2 * kb = 512b-sectors */);
+	set_capacity(device[nr].gd, device[nr].ds_size >> KERNEL_SECTOR_SHIFT);
 	if (!(stat.flags & L4RE_DS_MAP_FLAG_RW))
 		set_disk_ro(device[nr].gd, 1);
 
@@ -181,8 +189,9 @@ static int __init l4bdds_init_one(int nr)
 	add_disk(device[nr].gd);
 
 	pr_info("l4bdds: Disk '%s' size = %lu KB (%lu MB) flags=%lx addr=%p major=%d\n",
-	        device[nr].name, device[nr].size, device[nr].size >> 10,
-	        stat.flags, device[nr].addr, device[nr].gd->major);
+	        device[nr].name, device[nr].ds_size >> 10,
+	        device[nr].ds_size >> 20,
+	        stat.flags, device[nr].ds_addr, device[nr].gd->major);
 
 	return 0;
 
@@ -192,10 +201,10 @@ out1:
 	if (device[nr].read_write)
 		l4x_detach_and_free_cow_ds(device[nr].memcap,
 		                           device[nr].dscap,
-		                           device[nr].addr);
+		                           device[nr].ds_addr);
 	else
 		l4x_detach_and_free_ds(device[nr].dscap,
-		                       device[nr].addr);
+		                       device[nr].ds_addr);
 
 	return ret;
 }
@@ -205,14 +214,14 @@ static int __init l4bdds_init(void)
 	int i;
 
 	if (!devs_pos) {
-		printk("l4bdds: No name given, not starting.\n");
+		pr_info("l4bdds: No name given, not starting.\n");
 		return 0;
 	}
 
 	/* Register device */
 	major_num = register_blkdev(major_num, "l4bdds");
 	if (major_num <= 0) {
-		printk(KERN_WARNING "l4bdds: unable to get major number\n");
+		pr_warn("l4bdds: unable to get major number\n");
 		return -ENODEV;
 	}
 
@@ -231,10 +240,10 @@ static void __exit l4bdds_exit_one(int nr)
 	if (device[nr].read_write)
 		l4x_detach_and_free_cow_ds(device[nr].memcap,
 		                           device[nr].dscap,
-		                           device[nr].addr);
+		                           device[nr].ds_addr);
 	else
 		l4x_detach_and_free_ds(device[nr].dscap,
-		                       device[nr].addr);
+		                       device[nr].ds_addr);
 }
 
 static void __exit l4bdds_exit(void)
@@ -256,7 +265,7 @@ static int l4bdds_setup(const char *val, struct kernel_param *kp)
 	unsigned s, l = strlen(val);
 
 	if (devs_pos >= NR_DEVS) {
-		printk("l4bdds: Too many block devices specified\n");
+		pr_err("l4bdds: Too many block devices specified\n");
 		return 1;
 	}
 	if (l > 3 && !strcmp(val + l - 3, ",rw")) {

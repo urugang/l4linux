@@ -1,30 +1,27 @@
 #include <linux/percpu.h>
 #include <linux/slab.h>
 #include <asm/cacheflush.h>
-#include <asm/cpu_ops.h>
 #include <asm/debug-monitors.h>
 #include <asm/pgtable.h>
 #include <asm/memory.h>
+#include <asm/mmu_context.h>
 #include <asm/smp_plat.h>
 #include <asm/suspend.h>
 #include <asm/tlbflush.h>
 
-extern int __cpu_suspend(unsigned long);
+extern int __cpu_suspend_enter(unsigned long arg, int (*fn)(unsigned long));
 /*
- * This is called by __cpu_suspend() to save the state, and do whatever
+ * This is called by __cpu_suspend_enter() to save the state, and do whatever
  * flushing is required to ensure that when the CPU goes to sleep we have
  * the necessary data available when the caches are not searched.
  *
- * @arg: Argument to pass to suspend operations
- * @ptr: CPU context virtual address
- * @save_ptr: address of the location where the context physical address
- *            must be saved
+ * ptr: CPU context virtual address
+ * save_ptr: address of the location where the context physical address
+ *           must be saved
  */
-int __cpu_suspend_finisher(unsigned long arg, struct cpu_suspend_ctx *ptr,
-			   phys_addr_t *save_ptr)
+void notrace __cpu_suspend_save(struct cpu_suspend_ctx *ptr,
+				phys_addr_t *save_ptr)
 {
-	int cpu = smp_processor_id();
-
 	*save_ptr = virt_to_phys(ptr);
 
 	cpu_do_suspend(ptr);
@@ -35,8 +32,6 @@ int __cpu_suspend_finisher(unsigned long arg, struct cpu_suspend_ctx *ptr,
 	 */
 	__flush_dcache_area(ptr, sizeof(*ptr));
 	__flush_dcache_area(save_ptr, sizeof(*save_ptr));
-
-	return cpu_ops[cpu]->cpu_suspend(arg);
 }
 
 /*
@@ -55,23 +50,18 @@ void __init cpu_suspend_set_dbg_restorer(void (*hw_bp_restore)(void *))
 	hw_breakpoint_restore = hw_bp_restore;
 }
 
-/**
+/*
  * cpu_suspend
  *
- * @arg: argument to pass to the finisher function
+ * arg: argument to pass to the finisher function
+ * fn: finisher function pointer
+ *
  */
-int cpu_suspend(unsigned long arg)
+int cpu_suspend(unsigned long arg, int (*fn)(unsigned long))
 {
 	struct mm_struct *mm = current->active_mm;
-	int ret, cpu = smp_processor_id();
+	int ret;
 	unsigned long flags;
-
-	/*
-	 * If cpu_ops have not been registered or suspend
-	 * has not been initialized, cpu_suspend call fails early.
-	 */
-	if (!cpu_ops[cpu] || !cpu_ops[cpu]->cpu_suspend)
-		return -EOPNOTSUPP;
 
 	/*
 	 * From this point debug exceptions are disabled to prevent
@@ -86,16 +76,31 @@ int cpu_suspend(unsigned long arg)
 	 * page tables, so that the thread address space is properly
 	 * set-up on function return.
 	 */
-	ret = __cpu_suspend(arg);
+	ret = __cpu_suspend_enter(arg, fn);
 	if (ret == 0) {
-		cpu_switch_mm(mm->pgd, mm);
+		/*
+		 * We are resuming from reset with TTBR0_EL1 set to the
+		 * idmap to enable the MMU; set the TTBR0 to the reserved
+		 * page tables to prevent speculative TLB allocations, flush
+		 * the local tlb and set the default tcr_el1.t0sz so that
+		 * the TTBR0 address space set-up is properly restored.
+		 * If the current active_mm != &init_mm we entered cpu_suspend
+		 * with mappings in TTBR0 that must be restored, so we switch
+		 * them back to complete the address space configuration
+		 * restoration before returning.
+		 */
+		cpu_set_reserved_ttbr0();
 		flush_tlb_all();
+		cpu_set_default_tcr_t0sz();
+
+		if (mm != &init_mm)
+			cpu_switch_mm(mm->pgd, mm);
 
 		/*
 		 * Restore per-cpu offset before any kernel
 		 * subsystem relying on it has a chance to run.
 		 */
-		set_my_cpu_offset(per_cpu_offset(cpu));
+		set_my_cpu_offset(per_cpu_offset(smp_processor_id()));
 
 		/*
 		 * Restore HW breakpoint registers to sane values
@@ -116,10 +121,9 @@ int cpu_suspend(unsigned long arg)
 	return ret;
 }
 
-extern struct sleep_save_sp sleep_save_sp;
-extern phys_addr_t sleep_idmap_phys;
+struct sleep_save_sp sleep_save_sp;
 
-static int cpu_suspend_init(void)
+static int __init cpu_suspend_init(void)
 {
 	void *ctx_ptr;
 
@@ -131,9 +135,7 @@ static int cpu_suspend_init(void)
 
 	sleep_save_sp.save_ptr_stash = ctx_ptr;
 	sleep_save_sp.save_ptr_stash_phys = virt_to_phys(ctx_ptr);
-	sleep_idmap_phys = virt_to_phys(idmap_pg_dir);
 	__flush_dcache_area(&sleep_save_sp, sizeof(struct sleep_save_sp));
-	__flush_dcache_area(&sleep_idmap_phys, sizeof(sleep_idmap_phys));
 
 	return 0;
 }

@@ -17,6 +17,7 @@
 
 #include "cpufreq.h"
 #include "helpers/helpers.h"
+#include "helpers/sysfs.h"
 
 #define NORM_FREQ_LEN 32
 
@@ -318,14 +319,16 @@ int cmd_freq_set(int argc, char **argv)
 		    cpufreq_cpu_exists(cpu))
 			continue;
 
+		if (sysfs_is_cpu_online(cpu) != 1)
+			continue;
+
 		printf(_("Setting cpu: %d\n"), cpu);
 		ret = do_one_cpu(cpu, &new_pol, freq, policychange);
-		if (ret)
-			break;
+		if (ret) {
+			print_error();
+			return ret;
+		}
 	}
 
-	if (ret)
-		print_error();
-
-	return ret;
+	return 0;
 }

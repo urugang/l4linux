@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 - 2014 Emulex
+ * Copyright (C) 2005 - 2015 Emulex
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -62,7 +62,8 @@ struct ocrdma_driver {
 
 enum {
 	BE_DEV_UP	= 0,
-	BE_DEV_DOWN	= 1
+	BE_DEV_DOWN	= 1,
+	BE_DEV_SHUTDOWN = 2
 };
 
 /* APIs for RoCE driver to register callback handlers,

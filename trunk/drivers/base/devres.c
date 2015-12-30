@@ -297,10 +297,10 @@ void * devres_get(struct device *dev, void *new_res,
 	if (!dr) {
 		add_dr(dev, &new_dr->node);
 		dr = new_dr;
-		new_dr = NULL;
+		new_res = NULL;
 	}
 	spin_unlock_irqrestore(&dev->devres_lock, flags);
-	devres_free(new_dr);
+	devres_free(new_res);
 
 	return dr->data;
 }
@@ -815,6 +815,62 @@ char *devm_kstrdup(struct device *dev, const char *s, gfp_t gfp)
 	return buf;
 }
 EXPORT_SYMBOL_GPL(devm_kstrdup);
+
+/**
+ * devm_kvasprintf - Allocate resource managed space and format a string
+ *		     into that.
+ * @dev: Device to allocate memory for
+ * @gfp: the GFP mask used in the devm_kmalloc() call when
+ *       allocating memory
+ * @fmt: The printf()-style format string
+ * @ap: Arguments for the format string
+ * RETURNS:
+ * Pointer to allocated string on success, NULL on failure.
+ */
+char *devm_kvasprintf(struct device *dev, gfp_t gfp, const char *fmt,
+		      va_list ap)
+{
+	unsigned int len;
+	char *p;
+	va_list aq;
+
+	va_copy(aq, ap);
+	len = vsnprintf(NULL, 0, fmt, aq);
+	va_end(aq);
+
+	p = devm_kmalloc(dev, len+1, gfp);
+	if (!p)
+		return NULL;
+
+	vsnprintf(p, len+1, fmt, ap);
+
+	return p;
+}
+EXPORT_SYMBOL(devm_kvasprintf);
+
+/**
+ * devm_kasprintf - Allocate resource managed space and format a string
+ *		    into that.
+ * @dev: Device to allocate memory for
+ * @gfp: the GFP mask used in the devm_kmalloc() call when
+ *       allocating memory
+ * @fmt: The printf()-style format string
+ * @...: Arguments for the format string
+ * RETURNS:
+ * Pointer to allocated string on success, NULL on failure.
+ */
+char *devm_kasprintf(struct device *dev, gfp_t gfp, const char *fmt, ...)
+{
+	va_list ap;
+	char *p;
+
+	va_start(ap, fmt);
+	p = devm_kvasprintf(dev, gfp, fmt, ap);
+	va_end(ap);
+
+	return p;
+}
+EXPORT_SYMBOL_GPL(devm_kasprintf);
 
 /**
  * devm_kfree - Resource-managed kfree

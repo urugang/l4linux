@@ -72,16 +72,14 @@ module_param(carrier_timeout, uint, 0644);
 static int netpoll_start_xmit(struct sk_buff *skb, struct net_device *dev,
 			      struct netdev_queue *txq)
 {
-	const struct net_device_ops *ops = dev->netdev_ops;
 	int status = NETDEV_TX_OK;
 	netdev_features_t features;
 
 	features = netif_skb_features(skb);
 
-	if (vlan_tx_tag_present(skb) &&
+	if (skb_vlan_tag_present(skb) &&
 	    !vlan_hw_offload_capable(features, skb->vlan_proto)) {
-		skb = __vlan_put_tag(skb, skb->vlan_proto,
-				     vlan_tx_tag_get(skb));
+		skb = __vlan_hwaccel_push_inside(skb);
 		if (unlikely(!skb)) {
 			/* This is actually a packet drop, but we
 			 * don't want the code that calls this
@@ -89,12 +87,9 @@ static int netpoll_start_xmit(struct sk_buff *skb, struct net_device *dev,
 			 */
 			goto out;
 		}
-		skb->vlan_tci = 0;
 	}
 
-	status = ops->ndo_start_xmit(skb, dev);
-	if (status == NETDEV_TX_OK)
-		txq_trans_update(txq);
+	status = netdev_start_xmit(skb, dev, txq, false);
 
 out:
 	return status;
@@ -116,7 +111,7 @@ static void queue_process(struct work_struct *work)
 			continue;
 		}
 
-		txq = netdev_get_tx_queue(dev, skb_get_queue_mapping(skb));
+		txq = skb_get_tx_queue(dev, skb);
 
 		local_irq_save(flags);
 		HARD_TX_LOCK(dev, txq, smp_processor_id());
@@ -147,7 +142,7 @@ static void queue_process(struct work_struct *work)
  */
 static int poll_one_napi(struct napi_struct *napi, int budget)
 {
-	int work;
+	int work = 0;
 
 	/* net_rx_action's ->poll() invocations and our's are
 	 * synchronized by this test which is only made while
@@ -156,7 +151,12 @@ static int poll_one_napi(struct napi_struct *napi, int budget)
 	if (!test_bit(NAPI_STATE_SCHED, &napi->state))
 		return budget;
 
-	set_bit(NAPI_STATE_NPSVC, &napi->state);
+	/* If we set this bit but see that it has already been set,
+	 * that indicates that napi has been disabled and we need
+	 * to abort this operation
+	 */
+	if (test_and_set_bit(NAPI_STATE_NPSVC, &napi->state))
+		goto out;
 
 	work = napi->poll(napi, budget);
 	WARN_ONCE(work > budget, "%pF exceeded budget in poll\n", napi->poll);
@@ -164,6 +164,7 @@ static int poll_one_napi(struct napi_struct *napi, int budget)
 
 	clear_bit(NAPI_STATE_NPSVC, &napi->state);
 
+out:
 	return budget - work;
 }
 
@@ -384,6 +385,8 @@ void netpoll_send_udp(struct netpoll *np, const char *msg, int len)
 	struct ethhdr *eth;
 	static atomic_t ip_ident;
 	struct ipv6hdr *ip6h;
+
+	WARN_ON_ONCE(!irqs_disabled());
 
 	udp_len = len + sizeof(*udph);
 	if (np->ipv6)
@@ -822,7 +825,8 @@ void __netpoll_cleanup(struct netpoll *np)
 
 		RCU_INIT_POINTER(np->dev->npinfo, NULL);
 		call_rcu_bh(&npinfo->rcu, rcu_cleanup_netpoll_info);
-	}
+	} else
+		RCU_INIT_POINTER(np->dev->npinfo, NULL);
 }
 EXPORT_SYMBOL_GPL(__netpoll_cleanup);
 

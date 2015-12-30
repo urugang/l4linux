@@ -34,9 +34,9 @@ static inline void l4x_wakeup_idle_if_needed(void)
 		t = per_cpu(l4x_current_proc_run, cpu);
 		/* Check if server is waiting and we have work to do */
 		if (t
-#ifdef ARCH_x86
+#ifdef CONFIG_X86
 		    && (_TIF_ALLWORK_MASK & t->flags)
-#elif defined(ARCH_arm)
+#elif defined(CONFIG_ARM)
 		    && (_TIF_WORK_MASK & t->flags)
 #else
 #error Unknown arch

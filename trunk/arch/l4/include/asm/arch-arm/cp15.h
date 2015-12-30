@@ -54,7 +54,11 @@ extern unsigned long cr_alignment;	/* defined in entry-armv.S */
 static inline unsigned long get_cr(void)
 {
 #ifdef CONFIG_L4
+#if __LINUX_ARM_ARCH__ >= 6
+	return CR_U;
+#else
 	return 0;
+#endif
 #else
 	unsigned long val;
 	asm("mrc p15, 0, %0, c1, c0, 0	@ get CR" : "=r" (val) : : "cc");

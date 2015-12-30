@@ -5,10 +5,12 @@
 #include <linux/clk.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/of_platform.h>
 #include <linux/err.h>
 
 #include <asm/mach-types.h>
 #include <asm/delay.h>
+#include <asm/outercache.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/irq.h>
@@ -26,6 +28,8 @@
 
 #include <l4/sys/icu.h>
 #include <l4/sys/cache.h>
+
+enum { L4X_PLATFORM_INIT_GENERIC = 1 };
 
 static void __init l4x_mach_map_io(void)
 {
@@ -45,28 +49,86 @@ void printascii(const char *buf)
 #endif
 
 static void init_irq(unsigned int irq, struct irq_chip *chip,
-                          l4_cap_idx_t icu)
+                     l4_cap_idx_t icu)
 {
+	struct l4x_irq_desc_private *p;
+
 	irq_set_chip_and_handler(irq, chip, handle_level_irq);
-	set_irq_flags(irq, IRQF_VALID);
-	l4x_alloc_irq_desc_data(irq, icu);
+	irq_clear_status_flags(irq, IRQ_NOREQUEST);
+	p = l4x_alloc_irq_desc_data(irq, icu, irq);
+	irq_set_chip_data(irq, p);
 }
 
-#ifdef CONFIG_OF
 static int l4x_of_found_l4icu;
 
-static int domain_map(struct irq_domain *d, unsigned int irq,
-                      irq_hw_number_t hw)
+static int domain_map_icu_chip(struct irq_domain *d, unsigned int irq,
+                               irq_hw_number_t hw)
 {
 	init_irq(irq, &l4x_irq_icu_chip, (l4_cap_idx_t)d->host_data);
 	return 0;
 }
 
-static int domain_xlate(struct irq_domain *d,
-                        struct device_node *controller,
-                        const u32 *intspec, unsigned int intsize,
-                        unsigned long *out_hwirq,
-                        unsigned int *out_type)
+static struct irq_domain_ops l4x_irq_domain_icu_ops = {
+	.map   = domain_map_icu_chip,
+};
+
+static struct irq_domain_ops l4x_irq_domain_plain_ops;
+
+static int init_icu_irqs(struct device_node *devnode, l4_cap_idx_t icu)
+{
+	l4_icu_info_t icu_info;
+	int r, irq_base;
+	struct irq_domain *domain;
+
+	r = l4_error(l4_icu_info(icu, &icu_info));
+	if (r) {
+		pr_err("l4x: Cannot query L4ICU: %d\n", r);
+		return -ENOENT;
+	}
+
+	BUG_ON(L4X_IRQS_V_DYN_BASE < icu_info.nr_irqs);
+
+	irq_base = irq_alloc_descs(0, 0, icu_info.nr_irqs, numa_node_id());
+	if (IS_ERR_VALUE(irq_base)) {
+		pr_err("l4x-irq-init: Failed to alloc IRQ descs\n");
+		return -ENOMEM;
+	}
+
+	domain = irq_domain_add_legacy(devnode, icu_info.nr_irqs,
+	                               irq_base, 0, &l4x_irq_domain_icu_ops,
+	                               (void *)icu);
+	if (!domain) {
+		pr_err("l4icu: ICU domain creation failed\n");
+		irq_free_descs(irq_base, icu_info.nr_irqs);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static int init_dyn_irqs(void)
+{
+	struct irq_domain *domain;
+
+	domain = irq_domain_add_legacy(NULL, L4X_NR_IRQS_V_DYN,
+	                               L4X_IRQS_V_DYN_BASE,
+	                               L4X_IRQS_V_DYN_BASE,
+				       &l4x_irq_domain_plain_ops, NULL);
+	if (!domain) {
+		pr_err("l4icu: Plain domain creation failed\n");
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+
+#ifdef CONFIG_OF
+static int domain_xlate_gic(struct irq_domain *d,
+                            struct device_node *controller,
+                            const u32 *intspec, unsigned int intsize,
+                            unsigned long *out_hwirq,
+                            unsigned int *out_type)
 {
 	if (d->of_node != controller)
 		return -EINVAL;
@@ -80,20 +142,75 @@ static int domain_xlate(struct irq_domain *d,
 	return 0;
 }
 
-static const struct irq_domain_ops l4x_irq_domain_ops = {
-	.map   = domain_map,
-	.xlate = domain_xlate,
-};
+static int domain_xlate_single(struct irq_domain *d,
+                               struct device_node *controller,
+                               const u32 *intspec, unsigned int intsize,
+                               unsigned long *out_hwirq,
+                               unsigned int *out_type)
+{
+	if (d->of_node != controller)
+		return -EINVAL;
+
+	if (intsize < 1)
+		return -EINVAL;
+
+	*out_hwirq = intspec[0];
+	*out_type  = IRQ_TYPE_LEVEL_HIGH;
+
+	return 0;
+}
+
 
 int __init irq_l4icu_init(struct device_node *node,
                           struct device_node *parent)
 {
-	int irq_base;
-	l4_icu_info_t icu_info;
 	l4_cap_idx_t icu = L4_INVALID_CAP;
 	const char *capname;
 	int r;
-	struct irq_domain *domain;
+	enum irq_type_t {
+		TYPE_NONE,
+		TYPE_GIC_TRIPLE,
+		TYPE_SINGLE,
+	};
+	enum irq_type_t irq_type = TYPE_NONE;
+	const char *icutypestr;
+	int num_cells_needed;
+	const __be32 *tmp;
+
+	if (!of_property_read_string(node, "l4icu-type", &icutypestr)) {
+		if (!strcmp(icutypestr, "gic"))
+			irq_type = TYPE_GIC_TRIPLE;
+		else if (!strcmp(icutypestr, "single"))
+			irq_type = TYPE_SINGLE;
+	}
+
+	switch (irq_type) {
+	case TYPE_GIC_TRIPLE:
+		l4x_irq_domain_icu_ops.xlate = domain_xlate_gic;
+		num_cells_needed = 3;
+		break;
+	case TYPE_SINGLE:
+		l4x_irq_domain_icu_ops.xlate = domain_xlate_single;
+		num_cells_needed = 1;
+		break;
+	case TYPE_NONE:
+		pr_err("l4,icu: 'l4icu-type' must be specified in DT.\n"
+		       "        Possible values: gic, single.\n");
+		BUG();
+	};
+
+	/* This is just a sanity check */
+	tmp = of_get_property(node, "#interrupt-cells", NULL);
+	if (tmp) {
+		u32 n = be32_to_cpu(*tmp);
+
+		if (n != num_cells_needed)
+			pr_warn("l4,icu: Requested type wants %d "
+			        "interrupt-cells but %d given\n",
+			        num_cells_needed, n);
+	} else
+		pr_warn("l4,icu: DT entry has no #interrupt-cells property.\n");
+
 
 	if (!of_property_read_string(node, "cap", &capname))
 		if (l4x_re_resolve_name(capname, &icu)) {
@@ -110,26 +227,9 @@ int __init irq_l4icu_init(struct device_node *node,
 		return -ENOENT;
 	}
 
-	r = l4_error(l4_icu_info(icu, &icu_info));
-	if (r) {
-		pr_err("l4x: Cannot query L4ICU: %d\n", r);
-		return -ENOENT;
-	}
-
-	pr_info("l4icu: %u IRQs\n", icu_info.nr_irqs);
-
-	BUG_ON(L4X_IRQS_V_DYN_BASE < icu_info.nr_irqs);
-
-	irq_base = irq_alloc_descs(0, 0, icu_info.nr_irqs, numa_node_id());
-	if (IS_ERR_VALUE(irq_base)) {
-		irq_base = 0;
-	}
-
-	domain = irq_domain_add_legacy(node, icu_info.nr_irqs,
-	                               irq_base, 0, &l4x_irq_domain_ops,
-	                               (void *)icu);
-	if (!domain)
-		pr_err("l4icu: Domain creation failed\n");
+	r = init_icu_irqs(node, icu);
+	if (r)
+		return r;
 
 	l4x_of_found_l4icu = 1;
 
@@ -148,29 +248,24 @@ static const struct of_device_id irq_matches[] = {
 
 static void __init l4x_mach_init_of_irq(void)
 {
-	if (1)
+	if (L4X_PLATFORM_INIT_GENERIC)
 		of_irq_init(irq_matches);
 }
 #endif
 
 static void __init l4x_mach_init_irq(void)
 {
-	int i = 0;
-
 	/* Call our generic IRQ handling code */
 	l4lx_irq_init();
 
 #ifdef CONFIG_OF
 	l4x_mach_init_of_irq();
-
-	if (l4x_of_found_l4icu)
-		i = L4X_IRQS_V_DYN_BASE;
 #endif
 
-	for (; i < L4X_IRQS_V_DYN_BASE; i++)
-		init_irq(i, &l4x_irq_icu_chip, l4io_request_icu());
-	for (; i < L4X_IRQS_V_STATIC_BASE; ++i)
-		init_irq(i, &l4x_irq_plain_chip, L4_INVALID_CAP);
+	if (!l4x_of_found_l4icu)
+		init_icu_irqs(NULL, l4io_request_icu());
+
+	init_dyn_irqs();
 }
 
 #ifdef CONFIG_L4_CLK_NOOP
@@ -186,6 +281,13 @@ void clk_disable(struct clk *clk)
 	printk("%s %d\n", __func__, __LINE__);
 }
 EXPORT_SYMBOL(clk_disable);
+
+unsigned long clk_get_rate(struct clk *clk)
+{
+        return 1000;
+}
+EXPORT_SYMBOL(clk_get_rate);
+
 #endif
 
 int dma_needs_bounce(struct device *d, dma_addr_t a, size_t s)
@@ -261,13 +363,19 @@ static void __init l4x_mach_init(void)
 	l4x_setup_outer_cache();
 #endif
 
+#ifdef CONFIG_OF
+	if (L4X_PLATFORM_INIT_GENERIC)
+		of_platform_populate(NULL, of_default_bus_match_table,
+		                     NULL, NULL);
+#endif
+
 	l4x_arm_devices_init();
 }
 
 static inline void l4x_stop(enum reboot_mode mode, const char *cmd)
 {
 	local_irq_disable();
-	l4x_exit_l4linux();
+	l4x_platform_shutdown(1U);
 }
 
 static struct delay_timer arch_delay_timer;

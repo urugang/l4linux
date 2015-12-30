@@ -10,40 +10,10 @@
  *
  */
 #include <linux/efi.h>
-#include <linux/libfdt.h>
+#include <asm/efi.h>
 #include <asm/sections.h>
 
-/*
- * AArch64 requires the DTB to be 8-byte aligned in the first 512MiB from
- * start of kernel and may not cross a 2MiB boundary. We set alignment to
- * 2MiB so we know it won't cross a 2MiB boundary.
- */
-#define EFI_FDT_ALIGN	SZ_2M   /* used by allocate_new_fdt_and_exit_boot() */
-#define MAX_FDT_OFFSET	SZ_512M
-
-#define efi_call_early(f, ...) sys_table_arg->boottime->f(__VA_ARGS__)
-
-static void efi_char16_printk(efi_system_table_t *sys_table_arg,
-			      efi_char16_t *str);
-
-static efi_status_t efi_open_volume(efi_system_table_t *sys_table,
-				    void *__image, void **__fh);
-static efi_status_t efi_file_close(void *handle);
-
-static efi_status_t
-efi_file_read(void *handle, unsigned long *size, void *addr);
-
-static efi_status_t
-efi_file_size(efi_system_table_t *sys_table, void *__fh,
-	      efi_char16_t *filename_16, void **handle, u64 *file_sz);
-
-/* Include shared EFI stub code */
-#include "../../../drivers/firmware/efi/efi-stub-helper.c"
-#include "../../../drivers/firmware/efi/fdt.c"
-#include "../../../drivers/firmware/efi/arm-stub.c"
-
-
-static efi_status_t handle_kernel_image(efi_system_table_t *sys_table,
+efi_status_t __init handle_kernel_image(efi_system_table_t *sys_table_arg,
 					unsigned long *image_addr,
 					unsigned long *image_size,
 					unsigned long *reserve_addr,
@@ -53,25 +23,54 @@ static efi_status_t handle_kernel_image(efi_system_table_t *sys_table,
 {
 	efi_status_t status;
 	unsigned long kernel_size, kernel_memsize = 0;
+	unsigned long nr_pages;
+	void *old_image_addr = (void *)*image_addr;
+	unsigned long preferred_offset;
+
+	/*
+	 * The preferred offset of the kernel Image is TEXT_OFFSET bytes beyond
+	 * a 2 MB aligned base, which itself may be lower than dram_base, as
+	 * long as the resulting offset equals or exceeds it.
+	 */
+	preferred_offset = round_down(dram_base, SZ_2M) + TEXT_OFFSET;
+	if (preferred_offset < dram_base)
+		preferred_offset += SZ_2M;
 
 	/* Relocate the image, if required. */
 	kernel_size = _edata - _text;
-	if (*image_addr != (dram_base + TEXT_OFFSET)) {
+	if (*image_addr != preferred_offset) {
 		kernel_memsize = kernel_size + (_end - _edata);
-		status = efi_relocate_kernel(sys_table, image_addr,
-					     kernel_size, kernel_memsize,
-					     dram_base + TEXT_OFFSET,
-					     PAGE_SIZE);
+
+		/*
+		 * First, try a straight allocation at the preferred offset.
+		 * This will work around the issue where, if dram_base == 0x0,
+		 * efi_low_alloc() refuses to allocate at 0x0 (to prevent the
+		 * address of the allocation to be mistaken for a FAIL return
+		 * value or a NULL pointer). It will also ensure that, on
+		 * platforms where the [dram_base, dram_base + TEXT_OFFSET)
+		 * interval is partially occupied by the firmware (like on APM
+		 * Mustang), we can still place the kernel at the address
+		 * 'dram_base + TEXT_OFFSET'.
+		 */
+		*image_addr = *reserve_addr = preferred_offset;
+		nr_pages = round_up(kernel_memsize, EFI_ALLOC_ALIGN) /
+			   EFI_PAGE_SIZE;
+		status = efi_call_early(allocate_pages, EFI_ALLOCATE_ADDRESS,
+					EFI_LOADER_DATA, nr_pages,
+					(efi_physical_addr_t *)reserve_addr);
 		if (status != EFI_SUCCESS) {
-			pr_efi_err(sys_table, "Failed to relocate kernel\n");
-			return status;
+			kernel_memsize += TEXT_OFFSET;
+			status = efi_low_alloc(sys_table_arg, kernel_memsize,
+					       SZ_2M, reserve_addr);
+
+			if (status != EFI_SUCCESS) {
+				pr_efi_err(sys_table_arg, "Failed to relocate kernel\n");
+				return status;
+			}
+			*image_addr = *reserve_addr + TEXT_OFFSET;
 		}
-		if (*image_addr != (dram_base + TEXT_OFFSET)) {
-			pr_efi_err(sys_table, "Failed to alloc kernel memory\n");
-			efi_free(sys_table, kernel_memsize, *image_addr);
-			return EFI_ERROR;
-		}
-		*image_size = kernel_memsize;
+		memcpy((void *)*image_addr, old_image_addr, kernel_size);
+		*reserve_size = kernel_memsize;
 	}
 
 

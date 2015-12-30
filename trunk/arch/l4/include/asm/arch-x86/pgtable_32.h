@@ -34,9 +34,6 @@ static inline void pgtable_cache_init(void) { }
 static inline void check_pgt_cache(void) { }
 void paging_init(void);
 
-extern void set_pmd_pfn(unsigned long, unsigned long, pgprot_t);
-
-
 /*
  * Define this if things work differently on an i386 and an i486:
  * it will (on an i486) warn about kernel memory accesses that are
@@ -58,8 +55,13 @@ extern void set_pmd_pfn(unsigned long, unsigned long, pgprot_t);
  * L4Linux uses this hook to synchronize the Linux page tables with
  * the real hardware page tables kept by the L4 kernel.
  */
-extern unsigned long l4x_set_pte(struct mm_struct *mm, unsigned long addr, pte_t pteptr, pte_t pteval);
-extern void          l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte_t ptep);
+unsigned long l4x_set_pte(struct mm_struct *mm, unsigned long addr, pte_t pteptr, pte_t pteval);
+void          l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte_t ptep);
+
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+unsigned long l4x_set_pmd(struct mm_struct *mm, unsigned long addr, pmd_t pmdptr, pmd_t pmdval);
+void          l4x_pmd_clear(struct mm_struct *mm, unsigned long addr, pmd_t pmdp);
+#endif
 
 static inline void __l4x_set_pte(struct mm_struct *mm, unsigned long addr,
                                  pte_t *pteptr, pte_t pteval)
@@ -67,6 +69,22 @@ static inline void __l4x_set_pte(struct mm_struct *mm, unsigned long addr,
 	if (pte_val(*pteptr) & _PAGE_PRESENT)
 		pteval.pte_low = l4x_set_pte(mm, addr, *pteptr, pteval);
 	*pteptr = pteval;
+}
+
+static inline int
+l4x_pmd_present(pmd_t *pmdptr)
+{
+	return (pmd_val(*pmdptr) & (_PAGE_PRESENT | _PAGE_PSE)) == (_PAGE_PRESENT | _PAGE_PSE);
+}
+
+static inline void __l4x_set_pmd(struct mm_struct *mm, unsigned long addr,
+                                 pmd_t *pmdptr, pmd_t pmdval)
+{
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	if (l4x_pmd_present(pmdptr) && pmd_large(*pmdptr))
+		pmdval.pud.pgd = native_make_pgd(l4x_set_pmd(mm, addr, *pmdptr, pmdval));
+#endif
+	*pmdptr = pmdval;
 }
 
 static inline void set_pte(pte_t *pteptr, pte_t pteval)
@@ -86,6 +104,23 @@ static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *pt
 		l4x_pte_clear(mm, addr, *ptep);
 	ptep->pte_low = 0;
 }
+
+#ifdef CONFIG_L4
+static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmd)
+{
+	__l4x_set_pmd(NULL, 0, pmdp, pmd);
+}
+
+static inline void native_pmd_clear(pmd_t *pmd)
+{
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	if (l4x_pmd_present(pmd))
+		l4x_pmd_clear(NULL, 0, *pmd);
+#endif
+	native_set_pmd(pmd, (pmd_t) { { { 0 } } });
+}
+#endif /* L4 */
+
 
 #if defined(CONFIG_HIGHPTE)
 #define pte_offset_map(dir, address)					\

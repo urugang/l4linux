@@ -67,12 +67,12 @@ static inline int __copy_to_user_page(void *to, const void *from,
 }
 
 unsigned long __must_check
-copy_to_user(void __user *to, const void *from, unsigned long n)
+l4x_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	unsigned long copy_size = (unsigned long)to & ~PAGE_MASK;
 
 #ifdef DEBUG_MEMCPY_TOFS
-	printk("copy_to_user called from: %08lx to: %p, "
+	printk("l4x_copy_to_user called from: %08lx to: %p, "
 	       "from: %p, len: %08lx\n",
 	       *((unsigned long *)&to - 1), to, from, n);
 #endif
@@ -102,7 +102,7 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
 	}
 	return 0;
 }
-EXPORT_SYMBOL(copy_to_user);
+EXPORT_SYMBOL(l4x_copy_to_user);
 
 static inline int __copy_from_user_page(void *to, const void *from,
 					unsigned long n)
@@ -127,7 +127,7 @@ static inline int __copy_from_user_page(void *to, const void *from,
 }
 
 unsigned long
-copy_from_user(void *to, const void __user *from, unsigned long n)
+l4x_copy_from_user(void *to, const void __user *from, unsigned long n)
 {
 	unsigned long copy_size = (unsigned long)from & ~PAGE_MASK;
 
@@ -139,7 +139,7 @@ copy_from_user(void *to, const void __user *from, unsigned long n)
 	}
 
 #ifdef DEBUG_MEMCPY_FROMFS
-	printk("copy_from_user called from: %08lx "
+	printk("l4x_copy_from_user called from: %08lx "
 	       "to: %p, from: %p, len: %08lx\n",
 	       *((unsigned long *)&to - 1), to, from, n);
 #endif
@@ -163,7 +163,7 @@ copy_from_user(void *to, const void __user *from, unsigned long n)
 	}
 	return 0;
 }
-EXPORT_SYMBOL(copy_from_user);
+EXPORT_SYMBOL(l4x_copy_from_user);
 
 #ifdef CONFIG_X86
 unsigned long
@@ -193,7 +193,8 @@ static inline int __clear_user_page(void * address, unsigned long n)
 	log_efault(__func__, address, 0, n);
 	return -EFAULT;
 }
-unsigned long clear_user(void *address, unsigned long n)
+
+unsigned long l4x_clear_user(void *address, unsigned long n)
 {
 	unsigned long clear_size = (unsigned long)address & ~PAGE_MASK;
 
@@ -224,14 +225,16 @@ unsigned long clear_user(void *address, unsigned long n)
 	}
 	return 0;
 }
-EXPORT_SYMBOL(clear_user);
+EXPORT_SYMBOL(l4x_clear_user);
 
+#ifdef CONFIG_X86
 unsigned long
 __clear_user(void __user *to, unsigned long n)
 {
-	return clear_user(to, n);
+	return l4x_clear_user(to, n);
 }
 EXPORT_SYMBOL(__clear_user);
+#endif
 
 /*
  * Copy a null terminated string from userspace.
@@ -305,14 +308,14 @@ static inline int __strncpy_from_user_page(char * to, const char * from,
  * beeing the number of bytes to copy from the next pages and res the
  * number of remaining bytes after reaching the '\0' */
 
-long strncpy_from_user(char *dst, const char *src, long count)
+long l4x_strncpy_from_user(char *dst, const char *src, long count)
 {
 	unsigned long copy_size = (unsigned long)src & ~PAGE_MASK;
 	long res;
 	unsigned long n = count;
 
 #ifdef DEBUG_MEMCPY_FROMFS
-	printk("strncpy_from_user called from: %08lx "
+	printk("l4x_strncpy_from_user called from: %08lx "
 	       "to: %p, from: %p, len: 0x%lx (copy_size: 0x%lx)\n",
 	       *((unsigned long *)&dst - 1), dst, src, n, copy_size);
 #endif
@@ -350,7 +353,7 @@ long strncpy_from_user(char *dst, const char *src, long count)
 	}
 	return count;
 }
-EXPORT_SYMBOL(strncpy_from_user);
+EXPORT_SYMBOL(l4x_strncpy_from_user);
 
 static inline int __strnlen_from_user_page(const char *from,
 					   unsigned long n, unsigned long *len)
@@ -411,14 +414,14 @@ static inline int __strnlen_from_user_page(const char *from,
  * maximal length. The number of bytes remaining is (n + res) with n
  * being the number of bytes to copy from the next pages and res the
  * number of remaining bytes after reaching the '\0' */
-long strnlen_user(const char *src, long n)
+long l4x_strnlen_user(const char *src, long n)
 {
 	unsigned long search_size = PAGE_SIZE - ((unsigned long)src & ~PAGE_MASK);
 	int res;
-	unsigned long len=0;
+	unsigned long len = 0;
 
 #ifdef DEBUG_MEMCPY_FROMFS
-	printk("strnlen_user called from: %08lx, from: %p, %ld\n",
+	printk("l4x_strnlen_user called from: %08lx, from: %p, %ld\n",
 	       *((unsigned long *)&src - 1), src, n);
 #endif
 
@@ -427,7 +430,7 @@ long strnlen_user(const char *src, long n)
 			return -EFAULT;
 		len = strnlen(src, n);
 #ifdef DEBUG_MEMCPY_KERNEL
-		printk("kernel strnlen_user %p, %ld = %ld\n", src, n, len);
+		printk("kernel l4x_strnlen_user %p, %ld = %ld\n", src, n, len);
 #endif
 		return len + 1;
 	}
@@ -451,4 +454,75 @@ long strnlen_user(const char *src, long n)
 
 	return 0; /* EFAULT */
 }
-EXPORT_SYMBOL(strnlen_user);
+EXPORT_SYMBOL(l4x_strnlen_user);
+
+long l4x_strlen_user(const char *src)
+{
+	return l4x_strnlen_user(src, ~0l);
+}
+EXPORT_SYMBOL(l4x_strlen_user);
+
+#ifdef CONFIG_X86_64
+#ifdef CONFIG_IA32_EMULATION
+int __copy_in_user(void __user *dst, const void __user *src, unsigned size)
+{
+	unsigned long src_page, src_offs = 0;
+	unsigned long dst_page, dst_offs = 0;
+	unsigned long _src = (unsigned long)src;
+	unsigned long _dst = (unsigned long)dst;
+	unsigned long flags;
+	/* Disabling IRQs for the whole copy may be give bad preemptability,
+	 * however we would need to re-walk page tables after having IRQs
+	 * enabled otherwise. */
+	local_irq_save(flags);
+	while (size) {
+		/* dummy for old irq flags, we already disabled them above */
+		unsigned long flags_x;
+		unsigned long copy_len;
+
+		if (!src_offs) {
+			src_page = parse_ptabs_read(_src, &src_offs, &flags_x);
+			if (unlikely(src_page == -EFAULT)) {
+				local_irq_restore(flags);
+				return -EFAULT;
+			}
+		}
+
+		if (!dst_offs) {
+			dst_page = parse_ptabs_write(_dst, &dst_offs, &flags_x);
+			if (unlikely(dst_page == -EFAULT)) {
+				local_irq_restore(flags);
+				return -EFAULT;
+			}
+		}
+
+		copy_len = min((unsigned long)size,
+		               PAGE_SIZE - max(src_offs, dst_offs));
+		memcpy((void *)(dst_page + dst_offs),
+		       (void *)(src_page + src_offs), copy_len);
+
+		size -= copy_len;
+		src_offs = (src_offs + copy_len) & (PAGE_SIZE - 1);
+		dst_offs = (dst_offs + copy_len) & (PAGE_SIZE - 1);
+		_src += copy_len;
+		_dst += copy_len;
+	}
+
+	local_irq_restore(flags);
+	return 0;
+}
+
+EXPORT_SYMBOL(__copy_in_user);
+
+unsigned long
+copy_in_user(void __user *to, const void __user *from, unsigned len)
+{
+	if (access_ok(VERIFY_WRITE, to, len)
+	    && access_ok(VERIFY_READ, from, len))
+		return __copy_in_user(to, from, len);
+	return len;
+}
+EXPORT_SYMBOL(copy_in_user);
+
+#endif /* IA32_EMULATION */
+#endif /* X86_64 */
