@@ -42,6 +42,7 @@
 #define DEBUG_SUBSYSTEM S_LOV
 
 #include "lov_cl_internal.h"
+#include "../include/lclient.h"
 
 /** \addtogroup lov
  *  @{
@@ -217,7 +218,8 @@ static int lov_init_raid0(const struct lu_env *env,
 	r0->lo_nr  = lsm->lsm_stripe_count;
 	LASSERT(r0->lo_nr <= lov_targets_nr(dev));
 
-	OBD_ALLOC_LARGE(r0->lo_sub, r0->lo_nr * sizeof(r0->lo_sub[0]));
+	r0->lo_sub = libcfs_kvzalloc(r0->lo_nr * sizeof(r0->lo_sub[0]),
+				     GFP_NOFS);
 	if (r0->lo_sub != NULL) {
 		result = 0;
 		subconf->coc_inode = conf->coc_inode;
@@ -230,10 +232,13 @@ static int lov_init_raid0(const struct lu_env *env,
 			struct lov_oinfo *oinfo = lsm->lsm_oinfo[i];
 			int ost_idx = oinfo->loi_ost_idx;
 
+			if (lov_oinfo_is_dummy(oinfo))
+				continue;
+
 			result = ostid_to_fid(ofid, &oinfo->loi_oi,
 					      oinfo->loi_ost_idx);
 			if (result != 0)
-				GOTO(out, result);
+				goto out;
 
 			subdev = lovsub2cl_dev(dev->ld_target[ost_idx]);
 			subconf->u.coc_oinfo = oinfo;
@@ -371,7 +376,7 @@ static void lov_fini_raid0(const struct lu_env *env, struct lov_object *lov,
 	struct lov_layout_raid0 *r0 = &state->raid0;
 
 	if (r0->lo_sub != NULL) {
-		OBD_FREE_LARGE(r0->lo_sub, r0->lo_nr * sizeof(r0->lo_sub[0]));
+		kvfree(r0->lo_sub);
 		r0->lo_sub = NULL;
 	}
 
@@ -563,7 +568,7 @@ static const struct lov_layout_operations lov_dispatch[] = {
 /**
  * Return lov_layout_type associated with a given lsm
  */
-enum lov_layout_type lov_type(struct lov_stripe_md *lsm)
+static enum lov_layout_type lov_type(struct lov_stripe_md *lsm)
 {
 	if (lsm == NULL)
 		return LLT_EMPTY;
@@ -747,7 +752,8 @@ static int lov_conf_set(const struct lu_env *env, struct cl_object *obj,
 	lov_conf_lock(lov);
 	if (conf->coc_opc == OBJECT_CONF_INVALIDATE) {
 		lov->lo_layout_invalid = true;
-		GOTO(out, result = 0);
+		result = 0;
+		goto out;
 	}
 
 	if (conf->coc_opc == OBJECT_CONF_WAIT) {
@@ -757,7 +763,7 @@ static int lov_conf_set(const struct lu_env *env, struct cl_object *obj,
 			result = lov_layout_wait(env, lov);
 			lov_conf_lock(lov);
 		}
-		GOTO(out, result);
+		goto out;
 	}
 
 	LASSERT(conf->coc_opc == OBJECT_CONF_SET);
@@ -770,13 +776,15 @@ static int lov_conf_set(const struct lu_env *env, struct cl_object *obj,
 	     (lov->lo_lsm->lsm_pattern == lsm->lsm_pattern))) {
 		/* same version of layout */
 		lov->lo_layout_invalid = false;
-		GOTO(out, result = 0);
+		result = 0;
+		goto out;
 	}
 
 	/* will change layout - check if there still exists active IO. */
 	if (atomic_read(&lov->lo_active_ios) > 0) {
 		lov->lo_layout_invalid = true;
-		GOTO(out, result = -EBUSY);
+		result = -EBUSY;
+		goto out;
 	}
 
 	lov->lo_layout_invalid = lov_layout_change(env, lov, conf);
@@ -970,6 +978,10 @@ int lov_read_and_clear_async_rc(struct cl_object *clob)
 			LASSERT(lsm != NULL);
 			for (i = 0; i < lsm->lsm_stripe_count; i++) {
 				struct lov_oinfo *loi = lsm->lsm_oinfo[i];
+
+				if (lov_oinfo_is_dummy(loi))
+					continue;
+
 				if (loi->loi_ar.ar_rc && !rc)
 					rc = loi->loi_ar.ar_rc;
 				loi->loi_ar.ar_rc = 0;

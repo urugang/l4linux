@@ -12,32 +12,26 @@
  *    -- Initial Write (Borrowed heavily from ARM)
  */
 
-#include <linux/module.h>
-#include <linux/init.h>
 #include <linux/spinlock.h>
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/profile.h>
-#include <linux/errno.h>
-#include <linux/err.h>
 #include <linux/mm.h>
 #include <linux/cpu.h>
-#include <linux/smp.h>
 #include <linux/irq.h>
-#include <linux/delay.h>
 #include <linux/atomic.h>
-#include <linux/percpu.h>
 #include <linux/cpumask.h>
-#include <linux/spinlock_types.h>
 #include <linux/reboot.h>
 #include <asm/processor.h>
 #include <asm/setup.h>
 #include <asm/mach_desc.h>
 
+#ifndef CONFIG_ARC_HAS_LLSC
 arch_spinlock_t smp_atomic_ops_lock = __ARCH_SPIN_LOCK_UNLOCKED;
 arch_spinlock_t smp_bitops_lock = __ARCH_SPIN_LOCK_UNLOCKED;
+#endif
 
-struct plat_smp_ops  plat_smp_ops;
+struct plat_smp_ops  __weak plat_smp_ops;
 
 /* XXX: per cpu ? Only needed once in early seconday boot */
 struct task_struct *secondary_idle_tsk;
@@ -109,7 +103,7 @@ void __weak arc_platform_smp_wait_to_boot(int cpu)
 
 const char *arc_platform_smp_cpuinfo(void)
 {
-	return plat_smp_ops.info;
+	return plat_smp_ops.info ? : "";
 }
 
 /*
@@ -136,7 +130,7 @@ void start_kernel_secondary(void)
 	pr_info("## CPU%u LIVE ##: Executing Code...\n", cpu);
 
 	if (machine_desc->init_smp)
-		machine_desc->init_smp(smp_processor_id());
+		machine_desc->init_smp(cpu);
 
 	arc_local_timer_setup();
 
@@ -188,7 +182,7 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 /*
  * not supported here
  */
-int __init setup_profiling_timer(unsigned int multiplier)
+int setup_profiling_timer(unsigned int multiplier)
 {
 	return -EINVAL;
 }
@@ -227,7 +221,7 @@ static void ipi_send_msg_one(int cpu, enum ipi_msg_type msg)
 	 * and read back old value
 	 */
 	do {
-		new = old = *ipi_data_ptr;
+		new = old = ACCESS_ONCE(*ipi_data_ptr);
 		new |= 1U << msg;
 	} while (cmpxchg(ipi_data_ptr, old, new) != old);
 
@@ -284,8 +278,10 @@ static void ipi_cpu_stop(void)
 	machine_halt();
 }
 
-static inline void __do_IPI(unsigned long msg)
+static inline int __do_IPI(unsigned long msg)
 {
+	int rc = 0;
+
 	switch (msg) {
 	case IPI_RESCHEDULE:
 		scheduler_ipi();
@@ -300,8 +296,10 @@ static inline void __do_IPI(unsigned long msg)
 		break;
 
 	default:
-		pr_warn("IPI with unexpected msg %ld\n", msg);
+		rc = 1;
 	}
+
+	return rc;
 }
 
 /*
@@ -311,6 +309,7 @@ static inline void __do_IPI(unsigned long msg)
 irqreturn_t do_IPI(int irq, void *dev_id)
 {
 	unsigned long pending;
+	unsigned long __maybe_unused copy;
 
 	pr_debug("IPI [%ld] received on cpu %d\n",
 		 *this_cpu_ptr(&ipi_data), smp_processor_id());
@@ -322,11 +321,18 @@ irqreturn_t do_IPI(int irq, void *dev_id)
 	 * "dequeue" the msg corresponding to this IPI (and possibly other
 	 * piggybacked msg from elided IPIs: see ipi_send_msg_one() above)
 	 */
-	pending = xchg(this_cpu_ptr(&ipi_data), 0);
+	copy = pending = xchg(this_cpu_ptr(&ipi_data), 0);
 
 	do {
 		unsigned long msg = __ffs(pending);
-		__do_IPI(msg);
+		int rc;
+
+		rc = __do_IPI(msg);
+#ifdef CONFIG_ARC_IPI_DBG
+		/* IPI received but no valid @msg */
+		if (rc)
+			pr_info("IPI with bogus msg %ld in %ld\n", msg, copy);
+#endif
 		pending &= ~(1U << msg);
 	} while (pending);
 
@@ -338,18 +344,11 @@ irqreturn_t do_IPI(int irq, void *dev_id)
  */
 static DEFINE_PER_CPU(int, ipi_dev);
 
-static struct irqaction arc_ipi_irq = {
-        .name    = "IPI Interrupt",
-        .flags   = IRQF_PERCPU,
-        .handler = do_IPI,
-};
-
 int smp_ipi_irq_setup(int cpu, int irq)
 {
-	if (!cpu)
-		return setup_irq(irq, &arc_ipi_irq);
-	else
-		arch_unmask_irq(irq);
+	int *dev = per_cpu_ptr(&ipi_dev, cpu);
+
+	arc_request_percpu_irq(irq, cpu, do_IPI, "IPI Interrupt", dev);
 
 	return 0;
 }

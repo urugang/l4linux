@@ -83,7 +83,7 @@ static L4_CV int l4x_input_stream_info_for_id(l4_umword_t id, l4re_event_stream_
 }
 
 static L4_CV int l4x_input_axis_info(l4_umword_t id, unsigned naxes,
-                                     unsigned *axis, l4re_event_absinfo_t *info)
+                                     unsigned const *axis, l4re_event_absinfo_t *info)
 {
 	struct evdev *d = first_evdev;
 	struct input_dev *dev;

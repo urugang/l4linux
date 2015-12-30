@@ -21,7 +21,7 @@
 #endif
 
 // this may be a bit harsh but well...
-#if defined(ARCH_x86) && !defined(CONFIG_L4_FB_DRIVER) && \
+#if defined(CONFIG_X86) && !defined(CONFIG_L4_FB_DRIVER) && \
     !defined(CONFIG_VGA_CONSOLE) && \
     !defined(CONFIG_FRAMEBUFFER_CONSOLE) && \
     !defined(CONFIG_L4_SERIAL_CONSOLE)
@@ -57,7 +57,7 @@ static int __init l4x_check(void)
 #endif
 
 	mem = dma_alloc_coherent(dev, 30, &dmahandle, GFP_KERNEL);
-#ifdef CONFIG_L4_DMAPOOL
+#if defined CONFIG_L4_DMAPOOL || defined CONFIG_X86_64
 	if (mem)
 #endif
 	{

@@ -40,8 +40,9 @@ struct l4fdx_client {
 	unsigned gid;
 	unsigned openflags_mask;
 	unsigned flag_nogrow;
-	const char *basepath;
-	const char *filterpath;
+	char *basepath;
+	char *filterpath;
+	char *event_program;
 	unsigned basepath_len;
 	unsigned filterpath_len;
 	char *capname;
@@ -53,12 +54,13 @@ struct l4fdx_client {
 	struct file *files[5]; /* Dynamic? But needs limit */
 
 	wait_queue_head_t event;
-	atomic_t req_nr;
 	l4fdx_srv_obj srv_obj;
 
 	struct list_head req_list;
 	spinlock_t req_list_lock;
 };
+
+static char *global_event_program;
 
 L4_EXTERNAL_FUNC(l4x_fdx_srv_create);
 L4_EXTERNAL_FUNC(l4x_fdx_srv_create_name);
@@ -78,6 +80,7 @@ enum internal_request_type {
 struct internal_request {
 	struct list_head head;
 	enum internal_request_type type;
+	unsigned client_req_id;
 	union {
 		struct {
 			char path[56];
@@ -88,15 +91,11 @@ struct internal_request {
 			unsigned fid;
 			loff_t   offset;
 			size_t   size;
-		} read;
-		struct {
-			unsigned fid;
-			loff_t   offset;
-			size_t   size;
 			unsigned shm_offset;
-		} write;
+		} read_write;
 		struct {
 			unsigned fid;
+			unsigned shm_offset;
 		} fstat;
 		struct {
 			unsigned fid;
@@ -142,7 +141,7 @@ add_request(l4fdx_srv_obj srv_obj, struct internal_request *r)
 	spin_lock_irqsave(&d->req_list_lock, flags);
 	list_add(&r->head, &d->req_list);
 	spin_unlock_irqrestore(&d->req_list_lock, flags);
-	wake_up(&d->event);
+	wake_up(&srv_obj->client->event);
 }
 
 static
@@ -159,29 +158,62 @@ pop_request(l4fdx_srv_obj srv_obj)
 	return r;
 }
 
-static void res_event(l4fdx_srv_obj srv_obj, struct l4x_fdx_srv_result_t *r)
+static void res_event(l4fdx_srv_obj srv_obj,
+                      struct l4fdx_result_t *r, unsigned client_req_id)
 {
-	struct l4fdx_client *d = srv_obj->client;
 	L4XV_V(fl);
 
 	r->time = l4_kip_clock(l4lx_kinfo);
-	atomic_inc(&d->req_nr);
-	r->payload.req_nr = atomic_read(&d->req_nr);
+	r->payload.client_req_id = client_req_id;
 
 	L4XV_L(fl);
 	l4x_fdx_srv_add_event(srv_obj, r);
 	l4x_fdx_srv_trigger(srv_obj);
 	L4XV_U(fl);
+}
 
+static void call_fdx_event(struct l4fdx_client *c,
+                           char *command, char const *path, int umh_wait)
+{
+	int ret;
+	char *argv[4], *envp[4];
+	char *prg = NULL;
+	char client[40];
+
+	BUG_ON(umh_wait & UMH_NO_WAIT); /* Use of memory for arguments */
+
+	if (c->event_program)
+		prg = c->event_program;
+	else if (global_event_program)
+		prg = global_event_program;
+	else
+		return;
+
+	snprintf(client, sizeof(client), "FDX_CLIENT=%s",
+	         c->capname ? c->capname : "");
+
+	argv[0] = prg;
+	argv[1] = command;
+	argv[2] = (char *)path;
+	argv[3] = NULL;
+
+	envp[0] = "HOME=/";
+	envp[1] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
+	envp[2] = client;
+	envp[3] = NULL;
+
+	ret = call_usermodehelper(argv[0], argv, envp, umh_wait);
+	if (ret < 0)
+		pr_err("l4fdx: Failed to call user event (%d)\n", ret);
 }
 
 static void fn_open(l4fdx_srv_obj srv_obj, struct internal_request *r)
 {
 	struct file *f;
-	struct l4x_fdx_srv_result_t ret;
+	struct l4fdx_result_t ret;
 	struct l4fdx_client *c = srv_obj->client;
 	int err, fid = -1;
-	char *path = r->open.path;
+	char const *path = r->open.path;
 
 	if (c->basepath) {
 		unsigned l = strlen(path);
@@ -203,6 +235,8 @@ static void fn_open(l4fdx_srv_obj srv_obj, struct internal_request *r)
 		path = s;
 	}
 
+	call_fdx_event(c, "pre-open", path, UMH_WAIT_PROC);
+
 	f = filp_open(path, r->open.flags & c->openflags_mask, r->open.mode);
 	if (IS_ERR(f)) {
 		err = PTR_ERR(f);
@@ -221,13 +255,15 @@ static void fn_open(l4fdx_srv_obj srv_obj, struct internal_request *r)
 		c->max_file_size = r ? 0 : stat.size;
 	}
 
+	call_fdx_event(c, "post-open", path, UMH_WAIT_EXEC);
+
 	if (c->basepath)
 		kfree(path);
 
 out:
 	ret.payload.fid = fid;
-	ret.payload.err = err;
-	res_event(srv_obj, &ret);
+	ret.payload.ret = err;
+	res_event(srv_obj, &ret, r->client_req_id);
 
 	kfree(r);
 }
@@ -235,16 +271,16 @@ out:
 static void fn_fstat64(l4fdx_srv_obj srv_obj, struct internal_request *r)
 {
 	struct kstat stat;
-	struct l4x_fdx_srv_result_t ret;
+	struct l4fdx_result_t ret;
 	struct l4fdx_client *c = srv_obj->client;
 	struct l4x_fdx_srv_data *data = l4x_fdx_srv_get_srv_data(srv_obj);
 	int err, fid = r->fstat.fid;
-	unsigned shm_offset = 0;
+	unsigned long shm_addr = data->shm_base + r->fstat.shm_offset;
 
-	if (   sizeof(struct l4fdx_stat_t *) > data->shm_size_read
+	if (   sizeof(struct l4fdx_stat_t *) > data->shm_size
 	    || fid >= ARRAY_SIZE(c->files)
-	    || shm_offset + sizeof(struct l4fdx_stat_t *) > data->shm_size_read) {
-		ret.payload.err = -EINVAL;
+	    || r->fstat.shm_offset + sizeof(struct l4fdx_stat_t *) > data->shm_size) {
+		ret.payload.ret = -EINVAL;
 		goto out;
 	}
 
@@ -253,7 +289,7 @@ static void fn_fstat64(l4fdx_srv_obj srv_obj, struct internal_request *r)
 	if (!err) {
 		struct l4fdx_stat_t *b;
 
-		b = (struct l4fdx_stat_t *)(data->shm_base_read + shm_offset);
+		b = (struct l4fdx_stat_t *)shm_addr;
 
 		// is this ok to munge this like this?
 		if (S_ISBLK(stat.mode)) {
@@ -276,8 +312,6 @@ static void fn_fstat64(l4fdx_srv_obj srv_obj, struct internal_request *r)
 			b->size    = stat.size;
 			b->blocks  = stat.blocks;
 			b->blksize = stat.blksize;
-			if (0)
-				pr_info("l4fdx: file: %lld %lld\n", b->size, b->blocks);
 		}
 
 		b->dev        = stat.dev;
@@ -296,106 +330,104 @@ static void fn_fstat64(l4fdx_srv_obj srv_obj, struct internal_request *r)
 	}
 
 out_err:
-	ret.payload.shm_offset = shm_offset;
-	ret.payload.err = err;
+	ret.payload.ret = err;
 
 out:
 	ret.payload.fid = fid;
-	res_event(srv_obj, &ret);
+	res_event(srv_obj, &ret, r->client_req_id);
 
 	kfree(r);
 }
 
 static void fn_read(l4fdx_srv_obj srv_obj, struct internal_request *r)
 {
-	struct l4x_fdx_srv_result_t ret;
+	struct l4fdx_result_t ret;
 	struct l4x_fdx_srv_data *data = l4x_fdx_srv_get_srv_data(srv_obj);
-	long err;
-	int fid = r->read.fid;
-	unsigned shm_offset = 0;
+	long res;
+	int fid = r->read_write.fid;
+	unsigned long shm_addr = data->shm_base + r->read_write.shm_offset;
 
-	if (   r->read.size > data->shm_size_read
+	if (   r->read_write.size > data->shm_size
 	    || fid >= ARRAY_SIZE(srv_obj->client->files)
-	    || shm_offset + r->read.size > data->shm_size_read) {
-		ret.payload.err = -EINVAL;
+	    || r->read_write.shm_offset + r->read_write.size > data->shm_size) {
+		ret.payload.ret = -EINVAL;
 		goto out;
 	}
 
-	err = vfs_read(srv_obj->client->files[fid],
-	               (char *)data->shm_base_read + shm_offset,
-	               r->read.size, &r->read.offset);
+	res = vfs_read(srv_obj->client->files[fid],
+	               (char *)shm_addr,
+	               r->read_write.size, &r->read_write.offset);
 
-	if (err < 0)
-		pr_err("vfs_read error: %ld\n", err);
+	if (res < 0)
+		pr_err("vfs_read error: %ld\n", res);
 
-	ret.payload.shm_offset = shm_offset;
-	ret.payload.err        = err;
+	ret.payload.ret        = res;
 
 out:
 	ret.payload.fid = fid;
-	res_event(srv_obj, &ret);
+	res_event(srv_obj, &ret, r->client_req_id);
 
 	kfree(r);
 }
 
 static void fn_write(l4fdx_srv_obj srv_obj, struct internal_request *r)
 {
-	struct l4x_fdx_srv_result_t ret;
-	long err;
-	int fid = r->read.fid;
+	struct l4fdx_result_t ret;
+	long res;
+	int fid = r->read_write.fid;
 	struct l4fdx_client *c = srv_obj->client;
 	struct l4x_fdx_srv_data *data = l4x_fdx_srv_get_srv_data(srv_obj);
 
-	if (   r->write.size > data->shm_size_write
+	if (   r->read_write.size > data->shm_size
 	    || fid >= ARRAY_SIZE(srv_obj->client->files)
-	    || r->write.shm_offset + r->write.size > data->shm_size_write) {
-		ret.payload.err = -EINVAL;
+	    || r->read_write.shm_offset + r->read_write.size > data->shm_size) {
+		ret.payload.ret = -EINVAL;
 		goto out;
 	}
 
 	if (c->flag_nogrow) {
-		if (r->write.offset + r->write.size > c->max_file_size) {
-			ret.payload.err = -EINVAL;
+		if (r->read_write.offset + r->read_write.size > c->max_file_size) {
+			ret.payload.ret = -EINVAL;
 			goto out;
 		}
 	}
 
-	err = vfs_write(srv_obj->client->files[fid],
-	                (char *)data->shm_base_write + r->write.shm_offset,
-	                r->write.size, &r->write.offset);
+	res = vfs_write(srv_obj->client->files[fid],
+	                (char *)data->shm_base + r->read_write.shm_offset,
+	                r->read_write.size, &r->read_write.offset);
 
-	if (err < 0)
-		printk("vfs_write error: %ld\n", err);
+	if (res < 0)
+		pr_err("vfs_write error: %ld\n", res);
 
-	ret.payload.err       = err;
+	ret.payload.ret       = res;
 
 out:
 	ret.payload.fid       = fid;
-	res_event(srv_obj, &ret);
+	res_event(srv_obj, &ret, r->client_req_id);
 	kfree(r);
 }
 
 static void fn_close(l4fdx_srv_obj srv_obj, struct internal_request *r)
 {
-	struct l4x_fdx_srv_result_t ret;
-	long err;
-	int fid = r->read.fid;
+	struct l4fdx_result_t ret;
+	long res;
+	int fid = r->read_write.fid;
 	struct l4fdx_client *c = srv_obj->client;
 
 	if (fid >= ARRAY_SIZE(c->files)) {
-		ret.payload.err = -EINVAL;
+		ret.payload.ret = -EINVAL;
 		goto out;
 	}
 
-	err = filp_close(c->files[fid], NULL);
+	res = filp_close(c->files[fid], NULL);
 
 	c->files[fid] = NULL;
 
-	ret.payload.err = err;
+	ret.payload.ret = res;
 
 out:
 	ret.payload.fid = -1;
-	res_event(srv_obj, &ret);
+	res_event(srv_obj, &ret, r->client_req_id);
 	kfree(r);
 }
 
@@ -405,10 +437,6 @@ static int fn(void *d)
 {
 	struct l4fdx_client *client = d;
 	int err;
-
-	printk("l4xfdx: u/gid=%d/%d openflag-mask=%o base=%s filter=%s\n",
-	       client->uid, client->gid, client->openflags_mask,
-	       client->basepath, client->filterpath);
 
 	err = sys_setregid(client->gid, client->gid);
 	err = sys_setreuid(client->uid, client->uid);
@@ -460,7 +488,7 @@ static int fn(void *d)
 
 
 static L4_CV
-int b_open(l4fdx_srv_obj srv_obj,
+int b_open(l4fdx_srv_obj srv_obj, unsigned client_req_id,
            const char *path, unsigned len, int flags, unsigned mode)
 {
 	struct internal_request *r;
@@ -479,7 +507,8 @@ int b_open(l4fdx_srv_obj srv_obj,
 		return -ENOMEM;
 
 	r->type = L4FS_REQ_OPEN;
-	strlcpy(r->open.path, path, min(len + 1, sizeof(r->open.path)));
+	r->client_req_id = client_req_id;
+	strlcpy(r->open.path, path, min((size_t)len + 1, sizeof(r->open.path)));
 	r->open.flags = flags;
 	r->open.mode  = mode;
 
@@ -491,7 +520,7 @@ int b_open(l4fdx_srv_obj srv_obj,
 /* The kmalloc in here probably does not help for performance so think of
  * something smarter. The GFP_ATOMIC could also be avoided.
  * What about some shared memory between client and server ... */
-#define SETUP_REQUEST(client, fid, t) \
+#define SETUP_REQUEST(client, client_req_id, fid, t) \
 	struct internal_request *r; \
 	\
 	if (fid >= ARRAY_SIZE(client->files) || !client->files[fid]) \
@@ -501,49 +530,53 @@ int b_open(l4fdx_srv_obj srv_obj,
 	if (!r) \
 		return -ENOMEM; \
 	\
-	r->type = t;
+	r->type = t; \
+	r->client_req_id = client_req_id;
 
 
 static L4_CV
-int b_fstat(l4fdx_srv_obj srv_obj, int fid)
+int b_fstat(l4fdx_srv_obj srv_obj, unsigned client_req_id, int fid,
+            unsigned shm_off)
 {
-	SETUP_REQUEST(srv_obj->client, fid, L4FS_REQ_FSTAT64);
-	r->fstat.fid     = fid;
+	SETUP_REQUEST(srv_obj->client, client_req_id, fid, L4FS_REQ_FSTAT64);
+	r->fstat.fid        = fid;
+	r->fstat.shm_offset = shm_off;
 	add_request(srv_obj, r);
 	return 0;
 }
 
 static L4_CV
-int b_read(l4fdx_srv_obj srv_obj,
-            int fid, unsigned long long offset, size_t sz)
-{
-	SETUP_REQUEST(srv_obj->client, fid, L4FS_REQ_READ);
-	r->read.offset = offset;
-	r->read.size   = sz;
-	r->read.fid    = fid;
-
-	add_request(srv_obj, r);
-	return 0;
-}
-
-static L4_CV
-int b_write(l4fdx_srv_obj srv_obj,
+int b_read(l4fdx_srv_obj srv_obj, unsigned client_req_id,
             int fid, unsigned long long offset, size_t sz, unsigned shm_off)
 {
-	SETUP_REQUEST(srv_obj->client, fid, L4FS_REQ_WRITE);
-	r->write.offset     = offset;
-	r->write.size       = sz;
-	r->write.fid        = fid;
-	r->write.shm_offset = shm_off;
+	SETUP_REQUEST(srv_obj->client, client_req_id, fid, L4FS_REQ_READ);
+	r->read_write.offset     = offset;
+	r->read_write.size       = sz;
+	r->read_write.fid        = fid;
+	r->read_write.shm_offset = shm_off;
 
 	add_request(srv_obj, r);
 	return 0;
 }
 
 static L4_CV
-int b_close(l4fdx_srv_obj srv_obj, int fid)
+int b_write(l4fdx_srv_obj srv_obj, unsigned client_req_id,
+            int fid, unsigned long long offset, size_t sz, unsigned shm_off)
 {
-	SETUP_REQUEST(srv_obj->client, fid, L4FS_REQ_CLOSE);
+	SETUP_REQUEST(srv_obj->client, client_req_id, fid, L4FS_REQ_WRITE);
+	r->read_write.offset     = offset;
+	r->read_write.size       = sz;
+	r->read_write.fid        = fid;
+	r->read_write.shm_offset = shm_off;
+
+	add_request(srv_obj, r);
+	return 0;
+}
+
+static L4_CV
+int b_close(l4fdx_srv_obj srv_obj, unsigned client_req_id, int fid)
+{
+	SETUP_REQUEST(srv_obj->client, client_req_id, fid, L4FS_REQ_CLOSE);
 	r->close.fid = fid;
 
 	add_request(srv_obj, r);
@@ -706,8 +739,7 @@ static struct device_attribute dev_client_flag_nogrow_attr
 
 static ssize_t
 get_string(struct l4fdx_client *client,
-           const char **s,
-           unsigned *s_len,
+           char **s, unsigned *s_len,
            const char *buf, size_t size)
 {
 	size_t l = 0;
@@ -721,7 +753,8 @@ get_string(struct l4fdx_client *client,
 	while (l < size && buf[l] && buf[l] != '\n')
 		++l;
 	*s     = kstrndup(buf, l, GFP_KERNEL);
-	*s_len = l;
+	if (s_len)
+		*s_len = l;
 	return size;
 }
 
@@ -729,6 +762,9 @@ static ssize_t
 client_basepath_show(struct device *dev, struct device_attribute *attr,
 		     char *buf)
 {
+	if (!to_client(dev)->basepath)
+		return 0;
+
 	return sprintf(buf, "%s\n", to_client(dev)->basepath);
 }
 
@@ -747,14 +783,17 @@ static struct device_attribute dev_client_basepath_attr
 
 static ssize_t
 client_filterpath_show(struct device *dev, struct device_attribute *attr,
-		     char *buf)
+                       char *buf)
 {
+	if (!to_client(dev)->filterpath)
+		return 0;
+
 	return sprintf(buf, "%s\n", to_client(dev)->filterpath);
 }
 
 static ssize_t
 client_filterpath_store(struct device *dev, struct device_attribute *attr,
-                      const char *buf, size_t size)
+                        const char *buf, size_t size)
 {
 	return get_string(to_client(dev),
 	                  &to_client(dev)->filterpath,
@@ -766,6 +805,29 @@ static struct device_attribute dev_client_filterpath_attr
 	= __ATTR(filterpath, 0600, client_filterpath_show, client_filterpath_store);
 
 
+static ssize_t
+client_event_program_show(struct device *dev, struct device_attribute *attr,
+                          char *buf)
+{
+	if (!to_client(dev)->event_program)
+		return 0;
+
+	return sprintf(buf, "%s\n", to_client(dev)->event_program);
+}
+
+static ssize_t
+client_event_program_store(struct device *dev, struct device_attribute *attr,
+                           const char *buf, size_t size)
+{
+	return get_string(to_client(dev),
+	                  &to_client(dev)->event_program,
+	                  NULL, buf, size);
+}
+
+static struct device_attribute dev_client_event_program_attr
+	= __ATTR(event_program, 0600,
+	         client_event_program_show, client_event_program_store);
+
 static struct attribute *client_dev_attrs[] = {
 	&dev_client_enable_attr.attr,
 	&dev_client_uid_attr.attr,
@@ -774,6 +836,7 @@ static struct attribute *client_dev_attrs[] = {
 	&dev_client_flag_nogrow_attr.attr,
 	&dev_client_basepath_attr.attr,
 	&dev_client_filterpath_attr.attr,
+	&dev_client_event_program_attr.attr,
 	NULL
 };
 
@@ -787,10 +850,15 @@ static void add_device(struct work_struct *work)
 	struct l4fdx_client *client =
 	       container_of(work, struct l4fdx_client, add_device_work);
 
-	client_dev = device_create(&l4fdx_class, NULL, MKDEV(0, 0),
-	                           client,
-	                           "client-%lx",
-	                           client->cap >> L4_CAP_SHIFT);
+	if (client->capname)
+		client_dev = device_create(&l4fdx_class, NULL, MKDEV(0, 0),
+		                           client,
+		                           "client-%s", client->capname);
+	else
+		client_dev = device_create(&l4fdx_class, NULL, MKDEV(0, 0),
+		                           client,
+		                           "client-%lx",
+		                           client->cap >> L4_CAP_SHIFT);
 	if (IS_ERR(client_dev)) {
 		pr_warn("l4xfdx: device_create failed.\n");
 	} else {
@@ -803,7 +871,7 @@ static void add_device(struct work_struct *work)
 }
 
 L4_CV static
-int l4xfdx_factory_create(struct l4x_srv_factory_create_data *data,
+int l4xfdx_factory_create(struct l4x_fdx_srv_factory_create_data *data,
                           l4_cap_idx_t *client_cap)
 {
 	struct l4fdx_client *client;
@@ -839,18 +907,31 @@ int l4xfdx_factory_create(struct l4x_srv_factory_create_data *data,
 
 	if (data->opt_flags & L4X_FDX_SRV_FACTORY_HAS_BASEPATH) {
 		client->basepath_len = data->basepath_len;
+		if (!data->basepath[client->basepath_len - 1])
+			--client->basepath_len;
 		client->basepath = kstrndup(data->basepath,
-		                            data->basepath_len, GFP_ATOMIC);
+		                            client->basepath_len, GFP_ATOMIC);
 		if (!client->basepath)
 			goto out_free_objmem_and_client_strings;
 	}
 
 	if (data->opt_flags & L4X_FDX_SRV_FACTORY_HAS_FILTERPATH) {
 		client->filterpath_len = data->filterpath_len;
+		if (!data->filterpath[client->filterpath_len - 1])
+			--client->filterpath_len;
 		client->filterpath = kstrndup(data->filterpath,
-		                              data->filterpath_len, GFP_ATOMIC);
+		                              client->filterpath_len, GFP_ATOMIC);
 		if (!client->filterpath)
 			goto out_free_objmem_and_client_strings;
+	}
+
+	if (data->opt_flags & L4X_FDX_SRV_FACTORY_HAS_CLIENTNAME) {
+		client->capname = kstrndup(data->clientname,
+		                           data->clientname_len + 1, GFP_ATOMIC);
+		if (!client->capname)
+			goto out_free_objmem_and_client_strings;
+
+		client->capname[data->clientname_len] = 0;
 	}
 
 	if (data->opt_flags & L4X_FDX_SRV_FACTORY_HAS_FLAG_NOGROW)
@@ -879,6 +960,7 @@ out_free_objmem_and_client_strings:
 	kfree(objmem);
 	kfree(client->basepath);
 	kfree(client->filterpath);
+	kfree(client->capname);
 
 out_free_client:
 	kfree(client);
@@ -900,7 +982,7 @@ static ssize_t create_client_store(struct class *cls,
 	int ret;
 	l4_cap_idx_t c;
 
-	while (l < size && l < sizeof(capname) && buf[l] && buf[l] != '\n')
+	while (l < size && buf[l] && buf[l] != '\n')
 		++l;
 
 	capname = kstrndup(buf, l, GFP_KERNEL);
@@ -912,6 +994,8 @@ static ssize_t create_client_store(struct class *cls,
 
 	c = l4re_env_get_cap(capname);
 	if (l4_is_invalid_cap(c)) {
+		pr_err("l4xfdx: Cap '%s' not found in L4Re environment\n",
+		       capname);
 		ret = -ENOENT;
 		goto out_free_capname;
 	}
@@ -957,8 +1041,37 @@ out_free_capname:
 	return ret;
 }
 
-static struct class_attribute class_attr
+static struct class_attribute class_attr_create_client
 	= __ATTR_WO(create_client);
+
+
+static ssize_t event_program_show(struct class *cls,
+                                  struct class_attribute *attr,
+                                  char *buf)
+{
+	if (!global_event_program)
+		return 0;
+
+	return sprintf(buf, "%s\n", global_event_program);
+}
+
+
+static ssize_t event_program_store(struct class *cls,
+                                   struct class_attribute *attr,
+                                   const char *buf, size_t size)
+{
+	kfree(global_event_program);
+
+	global_event_program = kstrndup(buf, size + 1, GFP_KERNEL);
+	global_event_program[size] = 0;
+	if (size && global_event_program[size - 1] == '\n')
+		global_event_program[size - 1] = 0;
+
+	return size;
+}
+
+static struct class_attribute class_attr_event_program
+	= __ATTR_RW(event_program);
 
 static int __init l4xfdx_srv_init(void)
 {
@@ -974,18 +1087,25 @@ static int __init l4xfdx_srv_init(void)
 		return ret;
 	}
 
-	sysfs_attr_init(&class_attr.attr);
-	ret = class_create_file(&l4fdx_class, &class_attr);
+	sysfs_attr_init(&class_attr_create_client.attr);
+	ret = class_create_file(&l4fdx_class, &class_attr_create_client);
 	if (ret) {
 		pr_err("l4xfdx: Failed to create file in class (%d)\n", ret);
 		goto out_class;
+	}
+
+	sysfs_attr_init(&class_attr_event_program.attr);
+	ret = class_create_file(&l4fdx_class, &class_attr_event_program);
+	if (ret) {
+		pr_err("l4xfdx: Failed to create file in class (%d)\n", ret);
+		goto out_file1;
 	}
 
 	objmem = kmalloc(l4x_fdx_factory_objsize(), GFP_KERNEL);
 	if (!objmem) {
 		pr_err("l4xfdx: Memory alloation failure\n");
 		ret = -ENOMEM;
-		goto out_file;
+		goto out_file2;
 	}
 
 	factory_ops.create = l4xfdx_factory_create;
@@ -1000,8 +1120,10 @@ static int __init l4xfdx_srv_init(void)
 
 out_mem:
 	kfree(objmem);
-out_file:
-	class_remove_file(&l4fdx_class, &class_attr);
+out_file2:
+	class_remove_file(&l4fdx_class, &class_attr_event_program);
+out_file1:
+	class_remove_file(&l4fdx_class, &class_attr_create_client);
 out_class:
 	class_unregister(&l4fdx_class);
 	return ret;

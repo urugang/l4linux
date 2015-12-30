@@ -6,7 +6,7 @@
 #include <linux/linkage.h>
 #include <asm/asm-offsets.h>
 
-#ifdef ARCH_x86
+#ifdef CONFIG_X86_32
 #include <asm/page_types.h>
 
 /* Physical address */
@@ -51,9 +51,9 @@ ENTRY(empty_zero_page)
 ENTRY(swapper_pg_dir)
 	.fill 1024,4,0
 .previous
-#endif
+#endif /* X86_32 */
 
-#ifdef ARCH_arm
+#ifdef CONFIG_ARM
 .section ".text"
 .globl _start
 _start:
@@ -86,4 +86,4 @@ __address_l4lx_kinfo:
 .p2align 12
 ENTRY(swapper_pg_dir)
 	.fill 4096,4,0
-#endif
+#endif /* ARM */

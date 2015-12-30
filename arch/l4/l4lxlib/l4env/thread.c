@@ -176,7 +176,7 @@ int l4lx_thread_start(struct l4lx_thread_start_info_t *s)
 EXPORT_SYMBOL(l4lx_thread_start);
 
 
-#ifdef ARCH_arm
+#ifdef CONFIG_ARM
 void __thread_launch(void);
 asm(
 "__thread_launch:\n"
@@ -187,7 +187,7 @@ asm(
 "	mov pc, r1\n"
 );
 #endif
-#ifdef ARCH_amd64
+#ifdef CONFIG_X86_64
 void __thread_launch(void);
 asm(
 "__thread_launch:\n"
@@ -237,12 +237,12 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 	memcpy(sp_data, stack_data, stack_data_size);
 
 	sp = sp_data;
-#ifdef ARCH_amd64
+#ifdef CONFIG_X86_64
 	sp = (l4_umword_t *)((l4_umword_t)sp & ~0xf);
 	*(--sp) = 0;
 	*(--sp) = (l4_umword_t)thread_func;
 	*(--sp) = (l4_umword_t)sp_data;
-#elif defined(ARCH_arm)
+#elif defined(CONFIG_ARM)
 	*(--sp) = 0;
 	*(--sp) = (l4_umword_t)thread_func;
 	*(--sp) = (l4_umword_t)sp_data;
@@ -322,7 +322,7 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 	si->sp    = (l4_umword_t)sp;
 	si->prio  = prio;
 	si->pcpu  = l4x_cpu_physmap_get_id(vcpu);
-#if defined(ARCH_arm) || defined(ARCH_amd64)
+#if defined(CONFIG_ARM) || defined(CONFIG_X86_64)
 	si->ip    = (l4_umword_t)__thread_launch;
 #else
 	si->ip    = (l4_umword_t)thread_func;

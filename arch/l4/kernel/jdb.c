@@ -15,7 +15,7 @@
 #define MODULE_PARAM_PREFIX "l4x."
 
 
-static char jdb_prefix[6] = "l4lx";
+static char jdb_prefix[9] = "l4lx";
 module_param_string(jdb_prefix, jdb_prefix, sizeof(jdb_prefix), 0);
 
 static int jdb_prefix_len;

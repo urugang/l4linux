@@ -13,9 +13,12 @@ nostackp := $(call cc-option, -fno-stack-protector)
 CFLAGS_common.o		:= $(nostackp)
 
 obj-y			:= intel_cacheinfo.o scattered.o topology.o
-obj-y			+= proc.o capflags.o powerflags.o common.o
+obj-y			+= common.o
 obj-y			+= rdrand.o
 obj-y			+= match.o
+
+obj-$(CONFIG_PROC_FS)	+= proc.o
+obj-$(CONFIG_X86_FEATURE_NAMES) += capflags.o powerflags.o
 
 obj-$(CONFIG_X86_32)	+= bugs.o
 obj-$(CONFIG_X86_64)	+= bugs_64.o
@@ -36,7 +39,15 @@ obj-$(CONFIG_CPU_SUP_AMD)		+= perf_event_amd_iommu.o
 endif
 obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_p6.o perf_event_knc.o perf_event_p4.o
 obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_lbr.o perf_event_intel_ds.o perf_event_intel.o
-obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_uncore.o perf_event_intel_rapl.o
+obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_rapl.o perf_event_intel_cqm.o
+obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_pt.o perf_event_intel_bts.o
+
+obj-$(CONFIG_PERF_EVENTS_INTEL_UNCORE)	+= perf_event_intel_uncore.o \
+					   perf_event_intel_uncore_snb.o \
+					   perf_event_intel_uncore_snbep.o \
+					   perf_event_intel_uncore_nhmex.o
+obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_msr.o
+obj-$(CONFIG_CPU_SUP_AMD)		+= perf_event_msr.o
 endif
 
 
@@ -48,46 +59,38 @@ obj-$(CONFIG_X86_LOCAL_APIC)		+= perfctr-watchdog.o perf_event_amd_ibs.o
 
 obj-$(CONFIG_HYPERVISOR_GUEST)		+= vmware.o hypervisor.o mshyperv.o
 
-b                      := ../../../../x86/kernel/cpu
+b := ../../../../x86/kernel/cpu
 
+ifdef CONFIG_X86_FEATURE_NAMES
 quiet_cmd_mkcapflags = MKCAP   $@
-      cmd_mkcapflags = $(CONFIG_SHELL) $(srctree)/$(src)/../../../../x86/kernel/cpu/mkcapflags.sh $< $@
+      cmd_mkcapflags = $(CONFIG_SHELL) $(srctree)/$(src)/$(b)/mkcapflags.sh $< $@
 
-cpufeature = $(src)/../../../../x86/include/asm/cpufeature.h
+cpufeature = $(src)/$(b)/../../include/asm/cpufeature.h
 
 targets += capflags.c
-$(obj)/capflags.c: $(cpufeature) $(src)/../../../../x86/kernel/cpu/mkcapflags.sh FORCE
+$(obj)/capflags.c: $(cpufeature) $(src)/$(b)/mkcapflags.sh FORCE
 	$(call if_changed,mkcapflags)
+endif
+clean-files += capflags.c
 
 KBUILD_CFLAGS += -I$(srctree)/arch/x86/kernel/cpu
 
-amd-y		       := $(b)/amd.o
-cyrix-y		       := $(b)/cyrix.o
-centaur-y	       := $(b)/centaur.o
-transmeta-y	       := $(b)/transmeta.o
-intel_cacheinfo-y      := $(b)/intel_cacheinfo.o
-umc-y		       := $(b)/umc.o
-proc-y		       := $(b)/proc.o
-bugs-y		       := $(b)/bugs.o
-bugs_64-y	       := $(b)/bugs_64.o
-perfctr-watchdog-y     := $(b)/perfctr-watchdog.o
-perf_event_amd_ibs-y   := $(b)/perf_event_amd_ibs.o
-powerflags-y           := $(b)/powerflags.o
-vmware-y               := $(b)/vmware.o
-hypervisor-y           := $(b)/hypervisor.o
-mshyperv-y             := $(b)/mshyperv.o
-scattered-y            := $(b)/scattered.o
-topology-y             := $(b)/topology.o
-perf_event-y           := $(b)/perf_event.o
-perf_event_p6-y        := $(b)/perf_event_p6.o
-perf_event_p4-y        := $(b)/perf_event_p4.o
-perf_event_intel_ds-y  := $(b)/perf_event_intel_ds.o
-perf_event_intel_lbr-y := $(b)/perf_event_intel_lbr.o
-perf_event_intel-y     := $(b)/perf_event_intel.o
-perf_event_intel_uncore-y:= $(b)/perf_event_intel_uncore.o
-perf_event_intel_rapl-y:= $(b)/perf_event_intel_rapl.o
-perf_event_amd-y       := $(b)/perf_event_amd.o
-perf_event_amd_uncore-y := $(b)/perf_event_amd_uncore.o
-perf_event_knc-y       := $(b)/perf_event_knc.o
-rdrand-y               := $(b)/rdrand.o
-match-y                := $(b)/match.o
+include arch/l4/Makefile.lib
+
+$(call L4X_FILEREF, $(b), \
+                    amd bugs bugs_64 centaur cyrix hypervisor \
+                    intel_cacheinfo match mshyperv perf_event \
+                    perf_event_amd perf_event_amd_ibs         \
+                    perf_event_amd_uncore perf_event_intel    \
+                    perf_event_intel_bts perf_event_intel_cqm \
+                    perf_event_intel_ds perf_event_intel_lbr  \
+                    perf_event_intel_pt perf_event_intel_rapl \
+                    perf_event_intel_uncore                   \
+                    perf_event_intel_uncore_nhmex             \
+                    perf_event_intel_uncore_snb               \
+                    perf_event_intel_uncore_snbep             \
+                    perf_event_knc perf_event_msr             \
+		    perf_event_p4                             \
+                    perf_event_p6 perfctr-watchdog powerflags \
+                    proc rdrand scattered topology transmeta  \
+                    umc vmware);

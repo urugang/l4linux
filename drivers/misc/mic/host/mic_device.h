@@ -25,7 +25,9 @@
 #include <linux/idr.h>
 #include <linux/notifier.h>
 #include <linux/irqreturn.h>
-
+#include <linux/dmaengine.h>
+#include <linux/mic_bus.h>
+#include "../bus/scif_bus.h"
 #include "mic_intr.h"
 
 /* The maximum number of MIC devices supported in a single host system. */
@@ -87,6 +89,10 @@ enum mic_stepping {
  * @cdev: Character device for MIC.
  * @vdev_list: list of virtio devices.
  * @pm_notifier: Handles PM notifications from the OS.
+ * @dma_mbdev: MIC BUS DMA device.
+ * @dma_ch - Array of DMA channels
+ * @num_dma_ch - Number of DMA channels available
+ * @scdev: SCIF device on the SCIF virtual bus.
  */
 struct mic_device {
 	struct mic_mw mmio;
@@ -124,6 +130,10 @@ struct mic_device {
 	struct cdev cdev;
 	struct list_head vdev_list;
 	struct notifier_block pm_notifier;
+	struct mbus_device *dma_mbdev;
+	struct dma_chan *dma_ch[MIC_MAX_DMA_CHAN];
+	int num_dma_ch;
+	struct scif_hw_dev *scdev;
 };
 
 /**
@@ -144,6 +154,7 @@ struct mic_device {
  * @load_mic_fw: Load firmware segments required to boot the card
  * into card memory. This includes the kernel, command line, ramdisk etc.
  * @get_postcode: Get post code status from firmware.
+ * @dma_filter: DMA filter function to be used.
  */
 struct mic_hw_ops {
 	u8 aper_bar;
@@ -159,6 +170,7 @@ struct mic_hw_ops {
 	void (*send_firmware_intr)(struct mic_device *mdev);
 	int (*load_mic_fw)(struct mic_device *mdev, const char *buf);
 	u32 (*get_postcode)(struct mic_device *mdev);
+	bool (*dma_filter)(struct dma_chan *chan, void *param);
 };
 
 /**
@@ -187,6 +199,22 @@ mic_mmio_write(struct mic_mw *mw, u32 val, u32 offset)
 	iowrite32(val, mw->va + offset);
 }
 
+static inline struct dma_chan *mic_request_dma_chan(struct mic_device *mdev)
+{
+	dma_cap_mask_t mask;
+	struct dma_chan *chan;
+
+	dma_cap_zero(mask);
+	dma_cap_set(DMA_MEMCPY, mask);
+	chan = dma_request_channel(mask, mdev->ops->dma_filter,
+				   mdev->sdev->parent);
+	if (chan)
+		return chan;
+	dev_err(mdev->sdev->parent, "%s %d unable to acquire channel\n",
+		__func__, __LINE__);
+	return NULL;
+}
+
 void mic_sysfs_init(struct mic_device *mdev);
 int mic_start(struct mic_device *mdev, const char *buf);
 void mic_stop(struct mic_device *mdev, bool force);
@@ -204,4 +232,5 @@ void mic_exit_debugfs(void);
 void mic_prepare_suspend(struct mic_device *mdev);
 void mic_complete_resume(struct mic_device *mdev);
 void mic_suspend(struct mic_device *mdev);
+extern atomic_t g_num_mics;
 #endif

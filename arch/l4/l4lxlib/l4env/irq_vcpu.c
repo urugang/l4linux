@@ -33,30 +33,16 @@
 #define dd_printk(format, args...) do { if (0) printk(format , ## args); } while (0)
 
 
-/*
- * Return the priority of an interrupt thread.
- */
-int l4lx_irq_prio_get(unsigned int irq)
-{
-	if (irq == 0)
-		return CONFIG_L4_PRIO_IRQ_BASE + 1;
-	if (irq < NR_IRQS)
-		return CONFIG_L4_PRIO_IRQ_BASE;
-
-	enter_kdebug("l4lx_irq_prio_get: wrong IRQ!");
-	return -1;
-}
-
 static inline l4_cap_idx_t get_irq(struct l4x_irq_desc_private *p)
 {
 	return p->is_percpu ? *this_cpu_ptr(p->c.irq_caps) : p->c.irq_cap;
 }
 
-static inline void attach_to_irq(struct irq_desc *desc)
+static inline void attach_to_irq(struct irq_data *data)
 {
 	long r;
-	unsigned irq = irq_desc_get_irq_data(desc)->irq;
-	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
+	unsigned irq = data->irq;
+	struct l4x_irq_desc_private *p = irq_data_get_irq_chip_data(data);
 	unsigned cpu = p->is_percpu ? smp_processor_id() : p->cpu;
 	l4_cap_idx_t ic = get_irq(p);
 
@@ -72,15 +58,14 @@ static inline void attach_to_irq(struct irq_desc *desc)
 
 }
 
-static void detach_from_interrupt(struct irq_desc *desc)
+static void detach_from_interrupt(struct irq_data *data)
 {
-	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
+	struct l4x_irq_desc_private *p = irq_data_get_irq_chip_data(data);
 	unsigned long flags;
 
 	local_irq_save(flags);
 	if (l4_error(l4_irq_detach(get_irq(p))))
-		dd_printk("%02d: Unable to detach from IRQ\n",
-		          irq_desc_get_irq_data(desc)->irq);
+		dd_printk("%02d: Unable to detach from IRQ\n", data->irq);
 	local_irq_restore(flags);
 }
 
@@ -90,15 +75,14 @@ void l4lx_irq_init(void)
 
 unsigned int l4lx_irq_icu_startup(struct irq_data *data)
 {
-	unsigned irq = data->irq;
-	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
+	struct l4x_irq_desc_private *p = irq_data_get_irq_chip_data(data);
 
 	BUG_ON(p->is_percpu);
 	BUG_ON(!l4_is_invalid_cap(p->c.irq_cap));
 
-	p->c.irq_cap = l4x_irq_init(p->icu, irq, p->trigger, "icu");
+	p->c.irq_cap = l4x_irq_init(p->icu, data->hwirq, p->trigger, "icu");
 	if (l4_is_invalid_cap(p->c.irq_cap)) {
-		pr_err("l4x-irq: Failed to initialize IRQ %d\n", irq);
+		pr_err("l4x-irq: Failed to initialize IRQ %ld\n", data->hwirq);
 		return -ENXIO;
 	}
 
@@ -106,9 +90,21 @@ unsigned int l4lx_irq_icu_startup(struct irq_data *data)
 	return 0;
 }
 
+unsigned int l4lx_irq_msi_startup(struct irq_data *data)
+{
+	struct l4x_irq_desc_private *p = irq_data_get_irq_chip_data(data);
+
+	BUG_ON(p->is_percpu);
+	BUG_ON(l4_is_invalid_cap(p->c.irq_cap));
+
+	l4lx_irq_dev_enable(data);
+	irq_data_get_irq_chip(data)->irq_unmask(data);
+	return 0;
+}
+
 unsigned int l4lx_irq_plain_startup(struct irq_data *data)
 {
-	struct l4x_irq_desc_private *p = irq_get_chip_data(data->irq);
+	struct l4x_irq_desc_private *p = irq_data_get_irq_chip_data(data);
 	p->c.irq_cap = l4x_have_irqcap(data->irq, smp_processor_id());
 	BUG_ON(l4_is_invalid_cap(p->c.irq_cap));
 	l4lx_irq_dev_enable(data);
@@ -117,16 +113,18 @@ unsigned int l4lx_irq_plain_startup(struct irq_data *data)
 
 void l4lx_irq_icu_shutdown(struct irq_data *data)
 {
+	dd_printk("%s: %u\n", __func__, data->irq);
+	l4lx_irq_dev_disable(data);
+	l4x_irq_deinit(data);
+}
+
+
+void l4lx_irq_msi_shutdown(struct irq_data *data)
+{
 	unsigned irq = data->irq;
-	struct l4x_irq_desc_private *p = irq_get_chip_data(irq);
 
 	dd_printk("%s: %u\n", __func__, irq);
 	l4lx_irq_dev_disable(data);
-	if (L4XV_FN_i(l4_error(l4_icu_unbind(p->icu, irq, p->c.irq_cap))))
-		pr_err("l4x-irq: Failed to unbind IRQ %d\n", irq);
-	l4x_irq_release(p->c.irq_cap);
-	l4x_cap_free(p->c.irq_cap);
-	p->c.irq_cap = L4_INVALID_CAP;
 }
 
 void l4lx_irq_plain_shutdown(struct irq_data *data)
@@ -135,35 +133,46 @@ void l4lx_irq_plain_shutdown(struct irq_data *data)
 
 void l4lx_irq_dev_enable(struct irq_data *data)
 {
-	struct irq_desc *desc = irq_to_desc(data->irq);
-	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
+	struct l4x_irq_desc_private *p = irq_data_get_irq_chip_data(data);
 
 	dd_printk("%s: %u\n", __func__, data->irq);
 
 	if (unlikely(!p->is_percpu && l4_is_invalid_cap(p->c.irq_cap))) {
-		WARN_ONCE(1, "Use of irq-enable on non-initialized IRQ %d", data->irq);
+		WARN_ONCE(1, "Use of irq-enable on non-initialized IRQ%d",
+		          data->irq);
 		return;
 	}
 
-	p->enabled = 1;
-	attach_to_irq(desc);
+	if (p->is_percpu || !p->enabled) {
+		p->enabled = 1;
+		attach_to_irq(data);
+	}
 	l4lx_irq_dev_eoi(data);
 }
 
 void l4lx_irq_dev_disable(struct irq_data *data)
 {
-	struct irq_desc *desc = irq_to_desc(data->irq);
-	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
+	struct l4x_irq_desc_private *p = irq_data_get_irq_chip_data(data);
 
 	if (unlikely(!p->is_percpu && l4_is_invalid_cap(p->c.irq_cap))) {
-		WARN_ONCE(1, "Use of irq-disable on non-initialized IRQ");
+		WARN_ONCE(1, "Use of irq-disable on non-initialized IRQ%d",
+		          data->irq);
 		return;
 	}
 
 	dd_printk("%s: %u\n", __func__, data->irq);
 
-	p->enabled = 0;
-	detach_from_interrupt(desc);
+	/* do not detach if the IRQ is used for wakeup */
+	if (irqd_is_wakeup_set(data)) {
+		pr_info("leave IRQ %d attached, is configured as wakeup\n",
+		        data->irq);
+		return;
+	}
+
+	if (p->is_percpu || p->enabled) {
+		p->enabled = 0;
+		detach_from_interrupt(data);
+	}
 }
 
 void l4lx_irq_dev_ack(struct irq_data *data)
@@ -183,13 +192,17 @@ void l4lx_irq_dev_mask_ack(struct irq_data *data)
 
 void l4lx_irq_dev_unmask(struct irq_data *data)
 {
-	struct l4x_irq_desc_private *p = irq_get_chip_data(data->irq);
+	struct l4x_irq_desc_private *p = irq_data_get_irq_chip_data(data);
 	unsigned long flags;
 
 	if (unlikely(l4_is_invalid_cap(get_irq(p)))) {
-		WARN_ONCE(1, "Use of irq-unmask on non-initialized IRQ");
+		WARN_ONCE(1, "Use of irq-unmask on non-initialized IRQ%d",
+		          data->irq);
 		return;
 	}
+
+	irq_move_irq(data);
+
 
 	dd_printk("%s: %u\n", __func__, data->irq);
 	local_irq_save(flags);
@@ -202,41 +215,56 @@ void l4lx_irq_dev_eoi(struct irq_data *data)
 	l4lx_irq_dev_unmask(data);
 }
 
-#ifdef CONFIG_SMP
+
 static spinlock_t migrate_lock;
 
-int l4lx_irq_dev_set_affinity(struct irq_data *data,
-                              const struct cpumask *dest, bool force)
+int
+do_l4lx_irq_set_affinity(struct irq_data *data,
+                         const struct cpumask *dest, bool force,
+                         int (*fn)(struct irq_data *data,
+                                   unsigned logical_dest))
 {
-        unsigned target_cpu;
+	unsigned target_cpu;
 	unsigned long flags;
-	struct irq_desc *desc = irq_to_desc(data->irq);
-	struct l4x_irq_desc_private *p = irq_desc_get_chip_data(desc);
+	struct l4x_irq_desc_private *p = irq_data_get_irq_chip_data(data);
 
 	if (p->is_percpu)
-		return 0;
+		return IRQ_SET_MASK_OK_NOCOPY;
 
 	if (unlikely(l4_is_invalid_cap(p->c.irq_cap)))
-		return 0;
+		return IRQ_SET_MASK_OK_NOCOPY;
 
 	if (!cpumask_intersects(dest, cpu_online_mask))
-                return 1;
+                return IRQ_SET_MASK_OK_NOCOPY;
 
         target_cpu = cpumask_any_and(dest, cpu_online_mask);
 
 	if (target_cpu == p->cpu)
-		return 0;
+		return IRQ_SET_MASK_OK_NOCOPY;
 
 	spin_lock_irqsave(&migrate_lock, flags);
-	detach_from_interrupt(desc);
+	if (p->enabled)
+		detach_from_interrupt(data);
 
-	cpumask_copy(irq_desc_get_irq_data(desc)->affinity, dest);
+	if (fn) {
+		int ret = fn(data, target_cpu);
+		if (ret < 0)
+			return ret;
+	}
+
+	cpumask_copy(irq_data_get_affinity_mask(data), dest);
 	p->cpu = target_cpu;
-	attach_to_irq(desc);
-	if (p->enabled);
+	if (p->enabled) {
+		attach_to_irq(data);
 		l4_irq_unmask(p->c.irq_cap);
+	}
 	spin_unlock_irqrestore(&migrate_lock, flags);
 
-	return 0;
+	return IRQ_SET_MASK_OK_NOCOPY;
 }
-#endif
+
+int l4lx_irq_dev_set_affinity(struct irq_data *data,
+                              const struct cpumask *dest, bool force)
+{
+	return do_l4lx_irq_set_affinity(data, dest, force, NULL);
+}

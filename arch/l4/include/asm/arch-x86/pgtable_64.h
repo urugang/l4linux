@@ -19,6 +19,7 @@ extern pud_t level3_ident_pgt[512];
 extern pmd_t level2_kernel_pgt[512];
 extern pmd_t level2_fixmap_pgt[512];
 extern pmd_t level2_ident_pgt[512];
+extern pte_t level1_fixmap_pgt[512];
 extern pgd_t init_level4_pgt[];
 
 #define swapper_pg_dir init_level4_pgt
@@ -42,16 +43,62 @@ struct mm_struct;
 
 void set_pte_vaddr_pud(pud_t *pud_page, unsigned long vaddr, pte_t new_pte);
 
+#ifdef CONFIG_L4
+/*
+ * L4Linux uses this hook to synchronize the Linux page tables with
+ * the real hardware page tables kept by the L4 kernel.
+ */
+unsigned long l4x_set_pte(struct mm_struct *mm, unsigned long addr, pte_t pteptr, pte_t pteval);
+void          l4x_pte_clear(struct mm_struct *mm, unsigned long addr, pte_t ptep);
+
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+unsigned long l4x_set_pmd(struct mm_struct *mm, unsigned long addr, pmd_t pmdptr, pmd_t pmdval);
+void          l4x_pmd_clear(struct mm_struct *mm, unsigned long addr, pmd_t pmdp);
+#endif
+
+static inline void __l4x_set_pte(struct mm_struct *mm, unsigned long addr,
+                                 pte_t *pteptr, pte_t pteval)
+{
+	if (pte_val(*pteptr) & _PAGE_PRESENT)
+		pteval = native_make_pte(l4x_set_pte(mm, addr, *pteptr, pteval));
+	*pteptr = pteval;
+}
+
+static inline int
+l4x_pmd_present(pmd_t *pmdptr)
+{
+	return (pmd_val(*pmdptr) & (_PAGE_PRESENT | _PAGE_PSE)) == (_PAGE_PRESENT | _PAGE_PSE);
+}
+
+static inline void __l4x_set_pmd(struct mm_struct *mm, unsigned long addr,
+                                 pmd_t *pmdptr, pmd_t pmdval)
+{
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	if (l4x_pmd_present(pmdptr) && pmd_large(*pmdptr))
+		pmdval = native_make_pmd(l4x_set_pmd(mm, addr, *pmdptr, pmdval));
+#endif
+	*pmdptr = pmdval;
+}
+#endif /* L4 */
+
 
 static inline void native_pte_clear(struct mm_struct *mm, unsigned long addr,
 				    pte_t *ptep)
 {
+#ifdef CONFIG_L4
+	if (pte_val(*ptep) & _PAGE_PRESENT)
+		l4x_pte_clear(mm, addr, *ptep);
+#endif /* L4 */
 	*ptep = native_make_pte(0);
 }
 
 static inline void native_set_pte(pte_t *ptep, pte_t pte)
 {
+#ifdef CONFIG_L4
+	__l4x_set_pte(NULL, 0, ptep, pte);
+#else
 	*ptep = pte;
+#endif /* L4 */
 }
 
 static inline void native_set_pte_atomic(pte_t *ptep, pte_t pte)
@@ -61,11 +108,21 @@ static inline void native_set_pte_atomic(pte_t *ptep, pte_t pte)
 
 static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmd)
 {
+#ifdef CONFIG_L4
+	__l4x_set_pmd(NULL, 0, pmdp, pmd);
+#else
 	*pmdp = pmd;
+#endif /* L4 */
 }
 
 static inline void native_pmd_clear(pmd_t *pmd)
 {
+#ifdef CONFIG_L4
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	if (l4x_pmd_present(pmd))
+		l4x_pmd_clear(NULL, 0, *pmd);
+#endif
+#endif /* L4 */
 	native_set_pmd(pmd, native_make_pmd(0));
 }
 
@@ -115,7 +172,8 @@ static inline void native_pgd_clear(pgd_t *pgd)
 	native_set_pgd(pgd, native_make_pgd(0));
 }
 
-extern void sync_global_pgds(unsigned long start, unsigned long end);
+extern void sync_global_pgds(unsigned long start, unsigned long end,
+			     int removed);
 
 /*
  * Conversion functions: convert a page and protection to a page entry,
@@ -131,10 +189,6 @@ static inline int pgd_large(pgd_t pgd) { return 0; }
 /* PUD - Level3 access */
 
 /* PMD  - Level 2 access */
-#define pte_to_pgoff(pte) ((pte_val((pte)) & PHYSICAL_PAGE_MASK) >> PAGE_SHIFT)
-#define pgoff_to_pte(off) ((pte_t) { .pte = ((off) << PAGE_SHIFT) |	\
-					    _PAGE_FILE })
-#define PTE_FILE_MAX_BITS __PHYSICAL_MASK_SHIFT
 
 /* PTE - Level 1 access. */
 
@@ -143,13 +197,8 @@ static inline int pgd_large(pgd_t pgd) { return 0; }
 #define pte_unmap(pte) ((void)(pte))/* NOP */
 
 /* Encode and de-code a swap entry */
-#define SWP_TYPE_BITS (_PAGE_BIT_FILE - _PAGE_BIT_PRESENT - 1)
-#ifdef CONFIG_NUMA_BALANCING
-/* Automatic NUMA balancing needs to be distinguishable from swap entries */
-#define SWP_OFFSET_SHIFT (_PAGE_BIT_PROTNONE + 2)
-#else
+#define SWP_TYPE_BITS 5
 #define SWP_OFFSET_SHIFT (_PAGE_BIT_PROTNONE + 1)
-#endif
 
 #define MAX_SWAPFILES_CHECK() BUILD_BUG_ON(MAX_SWAPFILES_SHIFT > SWP_TYPE_BITS)
 

@@ -28,10 +28,10 @@
  * Code originally extracted from quota directory
  */
 
-#include <obd_ost.h>
+#include "../include/obd_class.h"
 #include "osc_internal.h"
 
-static inline struct osc_quota_info *osc_oqi_alloc(obd_uid id)
+static inline struct osc_quota_info *osc_oqi_alloc(u32 id)
 {
 	struct osc_quota_info *oqi;
 
@@ -71,7 +71,7 @@ int osc_quota_chkdq(struct client_obd *cli, const unsigned int qid[])
 						: OBD_FL_NO_GRPQUOTA)
 
 int osc_quota_setdq(struct client_obd *cli, const unsigned int qid[],
-		    obd_flag valid, obd_flag flags)
+		    u32 valid, u32 flags)
 {
 	int type;
 	int rc = 0;
@@ -138,17 +138,17 @@ int osc_quota_setdq(struct client_obd *cli, const unsigned int qid[],
 static unsigned
 oqi_hashfn(struct cfs_hash *hs, const void *key, unsigned mask)
 {
-	return cfs_hash_u32_hash(*((__u32*)key), mask);
+	return cfs_hash_u32_hash(*((__u32 *)key), mask);
 }
 
 static int
 oqi_keycmp(const void *key, struct hlist_node *hnode)
 {
 	struct osc_quota_info *oqi;
-	obd_uid uid;
+	u32 uid;
 
 	LASSERT(key != NULL);
-	uid = *((obd_uid*)key);
+	uid = *((u32 *)key);
 	oqi = hlist_entry(hnode, struct osc_quota_info, oqi_hash);
 
 	return uid == oqi->oqi_id;
@@ -232,7 +232,7 @@ int osc_quota_setup(struct obd_device *obd)
 
 int osc_quota_cleanup(struct obd_device *obd)
 {
-	struct client_obd     *cli = &obd->u.cli;
+	struct client_obd *cli = &obd->u.cli;
 	int type;
 
 	for (type = 0; type < MAXQUOTAS; type++)
@@ -245,8 +245,8 @@ int osc_quotactl(struct obd_device *unused, struct obd_export *exp,
 		 struct obd_quotactl *oqctl)
 {
 	struct ptlrpc_request *req;
-	struct obd_quotactl   *oqc;
-	int		    rc;
+	struct obd_quotactl *oqc;
+	int rc;
 
 	req = ptlrpc_request_alloc_pack(class_exp2cliimp(exp),
 					&RQF_OST_QUOTACTL, LUSTRE_OST_VERSION,
@@ -285,10 +285,10 @@ int osc_quotactl(struct obd_device *unused, struct obd_export *exp,
 int osc_quotacheck(struct obd_device *unused, struct obd_export *exp,
 		   struct obd_quotactl *oqctl)
 {
-	struct client_obd       *cli = &exp->exp_obd->u.cli;
-	struct ptlrpc_request   *req;
-	struct obd_quotactl     *body;
-	int		      rc;
+	struct client_obd *cli = &exp->exp_obd->u.cli;
+	struct ptlrpc_request *req;
+	struct obd_quotactl *body;
+	int rc;
 
 	req = ptlrpc_request_alloc_pack(class_exp2cliimp(exp),
 					&RQF_OST_QUOTACHECK, LUSTRE_OST_VERSION,

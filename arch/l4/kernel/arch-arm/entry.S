@@ -9,7 +9,7 @@ ENTRY(ret_from_fork)
 	bl	schedule_tail
 	cmp	r5, #0
 	movne	r0, r4
-	adrne	lr, BSYM(1f)
+	adrne	lr, 1f
 	movne	pc, r5
 1:	get_thread_info tsk
 #ifdef CONFIG_L4
@@ -156,7 +156,7 @@ ENTRY(sys_oabi_call_table)
 #ifdef CONFIG_ARM_THUMB
 	bx	\reg
 #else
-	mov	pc, \reg
+	ret	\reg
 #endif
 	.endm
 
@@ -248,7 +248,7 @@ kuser_cmpxchg64_fixup:
 #if __LINUX_ARM_ARCH__ < 6
 	bcc	kuser_cmpxchg32_fixup
 #endif
-	mov	pc, lr
+	ret	lr
 	.previous
 
 #else
@@ -323,7 +323,7 @@ kuser_cmpxchg32_fixup:
 	subs	r8, r4, r7
 	rsbcss	r8, r8, #(2b - 1b)
 	strcs	r7, [sp, #S_PC]
-	mov	pc, lr
+	ret	lr
 	.previous
 
 	.global l4x_kuser_cmpxchg_critical_start
@@ -543,17 +543,29 @@ vector_addrexcptn:
 	b	vector_addrexcptn
 
 /*=============================================================================
- * Undefined FIQs
+ * FIQ "NMI" handler
  *-----------------------------------------------------------------------------
- * Enter in FIQ mode, spsr = ANY CPSR, lr = ANY PC
- * MUST PRESERVE SVC SPSR, but need to switch to SVC mode to show our msg.
- * Basically to switch modes, we *HAVE* to clobber one register...  brain
- * damage alert!  I don't think that we can execute any code in here in any
- * other mode than FIQ...  Ok you can switch to another mode, but you can't
- * get out of that mode without clobbering one register.
+ * Handle a FIQ using the SVC stack allowing FIQ act like NMI on x86
+ * systems.
  */
-vector_fiq:
-	subs	pc, lr, #4
+	vector_stub	fiq, FIQ_MODE, 4
+
+	.long	__fiq_usr			@  0  (USR_26 / USR_32)
+	.long	__fiq_svc			@  1  (FIQ_26 / FIQ_32)
+	.long	__fiq_svc			@  2  (IRQ_26 / IRQ_32)
+	.long	__fiq_svc			@  3  (SVC_26 / SVC_32)
+	.long	__fiq_svc			@  4
+	.long	__fiq_svc			@  5
+	.long	__fiq_svc			@  6
+	.long	__fiq_abt			@  7
+	.long	__fiq_svc			@  8
+	.long	__fiq_svc			@  9
+	.long	__fiq_svc			@  a
+	.long	__fiq_svc			@  b
+	.long	__fiq_svc			@  c
+	.long	__fiq_svc			@  d
+	.long	__fiq_svc			@  e
+	.long	__fiq_svc			@  f
 
 	.globl	vector_fiq_offset
 	.equ	vector_fiq_offset, vector_fiq
@@ -573,10 +585,7 @@ __vectors_start:
 	.data
 
 	.globl	cr_alignment
-	.globl	cr_no_alignment
 cr_alignment:
-	.space	4
-cr_no_alignment:
 	.space	4
 
 #ifdef CONFIG_MULTI_IRQ_HANDLER

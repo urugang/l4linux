@@ -20,7 +20,6 @@ typedef struct { pteval_t pte; } pte_t;
 #endif	/* !__ASSEMBLY__ */
 
 #define SHARED_KERNEL_PMD	0
-#define PAGETABLE_LEVELS	4
 
 /*
  * PGDIR_SHIFT determines what a top-level page table entry can map
@@ -56,9 +55,10 @@ typedef struct { pteval_t pte; } pte_t;
 /* See Documentation/x86/x86_64/mm.txt for a description of the memory map. */
 #define MAXMEM		 _AC(__AC(1, UL) << MAX_PHYSMEM_BITS, UL)
 #ifdef CONFIG_L4
-#define VMALLOC_START    _AC(0x0000000200000000, UL)
-#define VMALLOC_END      _AC(0x00000002ffffffff, UL)
-#define VMEMMAP_START	 _AC(0x0000000300000000, UL)
+#define VMALLOC_START    _AC(0x0000080000000000, UL)
+#define VMALLOC_END      _AC(0x0000087fffffffff, UL)
+#define VMEMMAP_START	 _AC(0x0000088000000000, UL)
+#define L4X_VMEMMAP_END  _AC(0x000008a000000000, UL)
 #define MODULES_VADDR    _AC(0x0000000002000000, UL)
 #define MODULES_END      _AC(0x0000000010000000, UL)
 #else
@@ -71,6 +71,8 @@ typedef struct { pteval_t pte; } pte_t;
 #define MODULES_LEN   (MODULES_END - MODULES_VADDR)
 #define ESPFIX_PGD_ENTRY _AC(-2, UL)
 #define ESPFIX_BASE_ADDR (ESPFIX_PGD_ENTRY << PGDIR_SHIFT)
+#define EFI_VA_START	 ( -4 * (_AC(1, UL) << 30))
+#define EFI_VA_END	 (-68 * (_AC(1, UL) << 30))
 
 #define EARLY_DYNAMIC_PAGE_TABLES	64
 

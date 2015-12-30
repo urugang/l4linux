@@ -34,15 +34,16 @@
  * B : SSI direction
  */
 #define RSND_SSI_CLK_PIN_SHARE		(1 << 31)
+#define RSND_SSI_NO_BUSIF		(1 << 30) /* SSI+DMA without BUSIF */
 
-#define RSND_SSI(_dma_id, _pio_irq, _flags)		\
-{ .dma_id = _dma_id, .pio_irq = _pio_irq, .flags = _flags }
+#define RSND_SSI(_dma_id, _irq, _flags)		\
+{ .dma_id = _dma_id, .irq = _irq, .flags = _flags }
 #define RSND_SSI_UNUSED \
-{ .dma_id = -1, .pio_irq = -1, .flags = 0 }
+{ .dma_id = -1, .irq = -1, .flags = 0 }
 
 struct rsnd_ssi_platform_info {
 	int dma_id;
-	int pio_irq;
+	int irq;
 	u32 flags;
 };
 
@@ -54,11 +55,20 @@ struct rsnd_ssi_platform_info {
 struct rsnd_src_platform_info {
 	u32 convert_rate; /* sampling rate convert */
 	int dma_id; /* for Gen2 SCU */
+	int irq;
 };
 
 /*
  * flags
  */
+struct rsnd_ctu_platform_info {
+	u32 flags;
+};
+
+struct rsnd_mix_platform_info {
+	u32 flags;
+};
+
 struct rsnd_dvc_platform_info {
 	u32 flags;
 };
@@ -66,6 +76,8 @@ struct rsnd_dvc_platform_info {
 struct rsnd_dai_path_info {
 	struct rsnd_ssi_platform_info *ssi;
 	struct rsnd_src_platform_info *src;
+	struct rsnd_ctu_platform_info *ctu;
+	struct rsnd_mix_platform_info *mix;
 	struct rsnd_dvc_platform_info *dvc;
 };
 
@@ -91,6 +103,10 @@ struct rcar_snd_info {
 	int ssi_info_nr;
 	struct rsnd_src_platform_info *src_info;
 	int src_info_nr;
+	struct rsnd_ctu_platform_info *ctu_info;
+	int ctu_info_nr;
+	struct rsnd_mix_platform_info *mix_info;
+	int mix_info_nr;
 	struct rsnd_dvc_platform_info *dvc_info;
 	int dvc_info_nr;
 	struct rsnd_dai_platform_info *dai_info;

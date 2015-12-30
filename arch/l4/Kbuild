@@ -3,9 +3,14 @@ obj-y				+= kernel/			\
 				   kernel/arch-$(BASEARCH)/	\
 				   mm/arch-$(BASEARCH)/
 obj-$(CONFIG_L4_ARCH_X86)	+= ../x86/crypto/
-obj-$(CONFIG_L4_ARCH_X86)	+= ../x86/vdso/
 obj-$(CONFIG_L4_ARCH_X86)	+= ../x86/platform/
 obj-$(CONFIG_L4_ARCH_X86)	+= ../x86/net/
+obj-$(CONFIG_L4_ARCH_X86)	+= entry/
+obj-$(CONFIG_IA32_EMULATION)	+= ia32/
+
+ifeq ($(BASEARCH),x86)
+obj-$(CONFIG_KEXEC_FILE) += ../x86/purgatory/
+endif
 
 ifeq ($(BASEARCH),arm)
 obj-$(CONFIG_FPE_NWFPE)		+= ../arm/nwfpe/

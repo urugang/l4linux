@@ -18,8 +18,6 @@
 #include <linux/types.h>
 #include <linux/sizes.h>
 
-#include <asm/cache.h>
-
 #ifdef CONFIG_NEED_MACH_MEMORY_H
 #include <mach/memory.h>
 #endif
@@ -103,9 +101,7 @@
  * of this define that was meant to.
  * Fortunately, there is no reference for this in noMMU mode, for now.
  */
-#ifndef TASK_SIZE
-#define TASK_SIZE		(CONFIG_DRAM_SIZE)
-#endif
+#define TASK_SIZE		UL(0xffffffff)
 
 #ifndef TASK_UNMAPPED_BASE
 #define TASK_UNMAPPED_BASE	UL(0x00000000)
@@ -135,40 +131,18 @@
 #endif
 
 /*
- * Convert a physical address to a Page Frame Number and back
- */
-#define	__phys_to_pfn(paddr)	((unsigned long)((paddr) >> PAGE_SHIFT))
-#define	__pfn_to_phys(pfn)	((phys_addr_t)(pfn) << PAGE_SHIFT)
-
-/*
  * Convert a page to/from a physical address
  */
 #define page_to_phys(page)	(__pfn_to_phys(page_to_pfn(page)))
 #define phys_to_page(phys)	(pfn_to_page(__phys_to_pfn(phys)))
 
 /*
- * Minimum guaranted alignment in pgd_alloc().  The page table pointers passed
- * around in head.S and proc-*.S are shifted by this amount, in order to
- * leave spare high bits for systems with physical address extension.  This
- * does not fully accomodate the 40-bit addressing capability of ARM LPAE, but
- * gives us about 38-bits or so.
- */
-#ifdef CONFIG_ARM_LPAE
-#define ARCH_PGD_SHIFT		L1_CACHE_SHIFT
-#else
-#define ARCH_PGD_SHIFT		0
-#endif
-#define ARCH_PGD_MASK		((1 << ARCH_PGD_SHIFT) - 1)
-
-/*
  * PLAT_PHYS_OFFSET is the offset (from zero) of the start of physical
- * memory.  This is used for XIP and NoMMU kernels, or by kernels which
- * have their own mach/memory.h.  Assembly code must always use
+ * memory.  This is used for XIP and NoMMU kernels, and on platforms that don't
+ * have CONFIG_ARM_PATCH_PHYS_VIRT. Assembly code must always use
  * PLAT_PHYS_OFFSET and not PHYS_OFFSET.
  */
-#ifndef PLAT_PHYS_OFFSET
 #define PLAT_PHYS_OFFSET	UL(CONFIG_PHYS_OFFSET)
-#endif
 
 #ifndef __ASSEMBLY__
 
@@ -290,6 +264,7 @@ static inline unsigned long __phys_to_virt(phys_addr_t x)
  * translation for translating DMA addresses.  Use the driver
  * DMA support - see dma-mapping.h.
  */
+#define virt_to_phys virt_to_phys
 #include <asm/api/api.h>
 static inline phys_addr_t virt_to_phys(const volatile void *x)
 {
@@ -300,6 +275,7 @@ static inline phys_addr_t virt_to_phys(const volatile void *x)
 #endif /* L4 */
 }
 
+#define phys_to_virt phys_to_virt
 static inline void *phys_to_virt(phys_addr_t x)
 {
 #ifdef CONFIG_L4
@@ -314,7 +290,7 @@ static inline void *phys_to_virt(phys_addr_t x)
  */
 #define __pa(x)			__virt_to_phys((unsigned long)(x))
 #define __va(x)			((void *)__phys_to_virt((phys_addr_t)(x)))
-#define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
+#define pfn_to_kaddr(pfn)	__va((phys_addr_t)(pfn) << PAGE_SHIFT)
 
 extern phys_addr_t (*arch_virt_to_idmap)(unsigned long x);
 
@@ -325,7 +301,7 @@ extern phys_addr_t (*arch_virt_to_idmap)(unsigned long x);
  */
 static inline phys_addr_t __virt_to_idmap(unsigned long x)
 {
-	if (arch_virt_to_idmap)
+	if (IS_ENABLED(CONFIG_MMU) && arch_virt_to_idmap)
 		return arch_virt_to_idmap(x);
 	else
 		return __virt_to_phys(x);
@@ -360,11 +336,13 @@ static inline unsigned long __l4x_bus_to_virt(unsigned long p)
 #endif
 
 #ifdef CONFIG_VIRT_TO_BUS
+#define virt_to_bus virt_to_bus
 static inline __deprecated unsigned long virt_to_bus(void *x)
 {
 	return __virt_to_bus((unsigned long)x);
 }
 
+#define bus_to_virt bus_to_virt
 static inline __deprecated void *bus_to_virt(unsigned long x)
 {
 	return (void *)__bus_to_virt(x);

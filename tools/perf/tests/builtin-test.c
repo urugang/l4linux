@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <string.h>
 #include "builtin.h"
+#include "hist.h"
 #include "intlist.h"
 #include "tests.h"
 #include "debug.h"
@@ -22,12 +23,12 @@ static struct test {
 		.func = test__vmlinux_matches_kallsyms,
 	},
 	{
-		.desc = "detect open syscall event",
-		.func = test__open_syscall_event,
+		.desc = "detect openat syscall event",
+		.func = test__openat_syscall_event,
 	},
 	{
-		.desc = "detect open syscall event on all cpus",
-		.func = test__open_syscall_event_on_all_cpus,
+		.desc = "detect openat syscall event on all cpus",
+		.func = test__openat_syscall_event_on_all_cpus,
 	},
 	{
 		.desc = "read samples using the mmap interface",
@@ -72,8 +73,8 @@ static struct test {
 		.func = test__perf_evsel__tp_sched_test,
 	},
 	{
-		.desc = "Generate and check syscalls:sys_enter_open event fields",
-		.func = test__syscall_open_tp_fields,
+		.desc = "Generate and check syscalls:sys_enter_openat event fields",
+		.func = test__syscall_openat_tp_fields,
 	},
 	{
 		.desc = "struct perf_event_attr setup",
@@ -84,7 +85,7 @@ static struct test {
 		.func = test__hists_link,
 	},
 	{
-		.desc = "Try 'use perf' in python, checking link problems",
+		.desc = "Try 'import perf' in python, checking link problems",
 		.func = test__python_use,
 	},
 	{
@@ -125,7 +126,7 @@ static struct test {
 		.desc = "Test parsing with no sample_id_all bit set",
 		.func = test__parse_no_sample_id_all,
 	},
-#if defined(__x86_64__) || defined(__i386__) || defined(__arm__)
+#if defined(__x86_64__) || defined(__i386__) || defined(__arm__) || defined(__aarch64__)
 #ifdef HAVE_DWARF_UNWIND_SUPPORT
 	{
 		.desc = "Test dwarf unwind",
@@ -152,6 +153,30 @@ static struct test {
 	{
 		.desc = "Test cumulation of child hist entries",
 		.func = test__hists_cumulate,
+	},
+	{
+		.desc = "Test tracking with sched_switch",
+		.func = test__switch_tracking,
+	},
+	{
+		.desc = "Filter fds with revents mask in a fdarray",
+		.func = test__fdarray__filter,
+	},
+	{
+		.desc = "Add fd to a fdarray, making it autogrow",
+		.func = test__fdarray__add,
+	},
+	{
+		.desc = "Test kmod_path__parse function",
+		.func = test__kmod_path__parse,
+	},
+	{
+		.desc = "Test thread map",
+		.func = test__thread_map,
+	},
+	{
+		.desc = "Test LLVM searching and compiling",
+		.func = test__llvm,
 	},
 	{
 		.func = NULL,
@@ -185,9 +210,11 @@ static bool perf_test__matches(int curr, int argc, const char *argv[])
 static int run_test(struct test *test)
 {
 	int status, err = -1, child = fork();
+	char sbuf[STRERR_BUFSIZE];
 
 	if (child < 0) {
-		pr_err("failed to fork test: %s\n", strerror(errno));
+		pr_err("failed to fork test: %s\n",
+			strerror_r(errno, sbuf, sizeof(sbuf)));
 		return -1;
 	}
 
@@ -200,7 +227,7 @@ static int run_test(struct test *test)
 	wait(&status);
 
 	if (WIFEXITED(status)) {
-		err = WEXITSTATUS(status);
+		err = (signed char)WEXITSTATUS(status);
 		pr_debug("test child finished with %d\n", err);
 	} else if (WIFSIGNALED(status)) {
 		err = -1;
@@ -276,7 +303,7 @@ static int perf_test__list(int argc, const char **argv)
 
 int cmd_test(int argc, const char **argv, const char *prefix __maybe_unused)
 {
-	const char * const test_usage[] = {
+	const char *test_usage[] = {
 	"perf test [<options>] [{list <test-name-fragment>|[<test-name-fragments>|<test-numbers>]}]",
 	NULL,
 	};
@@ -287,9 +314,14 @@ int cmd_test(int argc, const char **argv, const char *prefix __maybe_unused)
 		    "be more verbose (show symbol address, etc)"),
 	OPT_END()
 	};
+	const char * const test_subcommands[] = { "list", NULL };
 	struct intlist *skiplist = NULL;
+        int ret = hists__init();
 
-	argc = parse_options(argc, argv, test_options, test_usage, 0);
+        if (ret < 0)
+                return ret;
+
+	argc = parse_options_subcommand(argc, argv, test_options, test_subcommands, test_usage, 0);
 	if (argc >= 1 && !strcmp(argv[0], "list"))
 		return perf_test__list(argc, argv);
 
@@ -297,7 +329,7 @@ int cmd_test(int argc, const char **argv, const char *prefix __maybe_unused)
 	symbol_conf.sort_by_name = true;
 	symbol_conf.try_vmlinux_path = true;
 
-	if (symbol__init() < 0)
+	if (symbol__init(NULL) < 0)
 		return -1;
 
 	if (skip != NULL)

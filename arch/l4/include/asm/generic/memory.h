@@ -19,10 +19,10 @@
 #else
 #define PF_EUSER		(1 << 14)
 #define PF_EKERNEL		0
-#define PF_EWRITE		(1 << 11)
+#define PF_EWRITE		(1 << 6)
 #define PF_EREAD		0
-#define PF_EPROTECTION		0xf
-#define PF_ENOTPRESENT		0x7
+#define PF_EPROTECTION		0xd
+#define PF_ENOTPRESENT		0x8
 #define L4X_PHYSICAL_PAGE_MASK PAGE_MASK
 #endif
 #else
@@ -49,34 +49,46 @@ enum { L4X_CHECK_IN_KERNEL_ACCESS = 0, };
 int l4x_check_kern_region(void *address, unsigned long size, int rw);
 
 int l4x_do_page_fault(unsigned long address, struct pt_regs *regs, unsigned long error_code);
+#ifdef CONFIG_ARM
+void do_DataAbort(unsigned long addr, unsigned int fsr, struct pt_regs *regs);
+#endif
 
 static inline pte_t *lookup_pte_lock(struct mm_struct *mm,
                                      unsigned long address,
+                                     unsigned *page_shift,
                                      spinlock_t **ptl)
 {
+	pud_t *pud;
+	pmd_t *pmd;
 	pgd_t *pgd = mm->pgd + pgd_index(address);
 
-	if (pgd_present(*pgd)) {
-		pud_t *pud = pud_offset(pgd, address);
-		pmd_t *pmd = pmd_offset(pud, address);
-		if (pmd_present(*pmd)) {
-			if (ptl)
-				*ptl = pte_lockptr(mm, pmd);
-#ifdef ARCH_x86
-			if (pmd_large(*pmd))
-				return (pte_t *)pmd;
-#endif
-			return pte_offset_kernel(pmd, address);
-		}
-	}
+	if (unlikely(!pgd_present(*pgd)))
+		return NULL;
+
+	pud = pud_offset(pgd, address);
+	if (unlikely(!pud_present(*pud)))
+		return NULL;
+
+	pmd = pmd_offset(pud, address);
+	if (unlikely(!pmd_present(*pmd)))
+		return NULL;
+
 	if (ptl)
-		*ptl = NULL;
-	return NULL;
+		*ptl = pte_lockptr(mm, pmd);
+#ifdef CONFIG_X86
+	if (pmd_large(*pmd)) {
+		*page_shift = PMD_SHIFT;
+		return (pte_t *)pmd;
+	}
+#endif
+	*page_shift = PAGE_SHIFT;
+	return pte_offset_kernel(pmd, address);
 }
 
-static inline pte_t *lookup_pte(struct mm_struct *mm, unsigned long address)
+static inline pte_t *lookup_pte(struct mm_struct *mm, unsigned long address,
+                                unsigned *page_shift)
 {
-	return lookup_pte_lock(mm, address, NULL);
+	return lookup_pte_lock(mm, address, page_shift, NULL);
 }
 
 static inline int l4x_pte_present_user(pte_t pte)
@@ -97,11 +109,13 @@ static inline unsigned long parse_ptabs_read(unsigned long address,
 	spinlock_t *ptl;
 	pte_t *ptep;
 	unsigned retry_count = 0;
+	unsigned page_shift;
+	unsigned long page_mask;
 
 	local_irq_save(*flags);
 retry:
 
-	ptep = lookup_pte_lock(current->mm, address, &ptl);
+	ptep = lookup_pte_lock(current->mm, address, &page_shift, &ptl);
 
 	BUG_ON(!irqs_disabled());
 
@@ -119,8 +133,8 @@ retry:
 			goto return_efault;
 		local_irq_disable();
 
-		if (ptep == NULL)
-			ptep = lookup_pte_lock(current->mm, address, &ptl);
+		ptep = lookup_pte_lock(current->mm, address,
+		                       &page_shift, &ptl);
 	}
 
 	if (!spin_trylock(ptl)) {
@@ -138,8 +152,9 @@ retry:
 	}
 	*ptep   = pte_mkyoung(*ptep);
 	spin_unlock(ptl);
-	*offset = address & ~PAGE_MASK;
-	return pte_val(*ptep) & L4X_PHYSICAL_PAGE_MASK;
+	page_mask = ~0UL << page_shift;
+	*offset = address & ~page_mask;
+	return pte_val(*ptep) & page_mask & L4X_PHYSICAL_PAGE_MASK;
 
 return_efault:
 	local_irq_restore(*flags);
@@ -153,14 +168,16 @@ static inline unsigned long parse_ptabs_write(unsigned long address,
 	spinlock_t *ptl;
 	pte_t *ptep;
 	unsigned retry_count = 0;
+	unsigned page_shift;
+	unsigned long page_mask;
 
 	local_irq_save(*flags);
 
 retry:
-	ptep = lookup_pte_lock(current->mm, address, &ptl);
+	ptep = lookup_pte_lock(current->mm, address, &page_shift, &ptl);
 
 	// XXX: also check for user-bit as with read!?
-	while (ptep == NULL || !pte_present(*ptep) || !pte_write(*ptep)) {
+	while (ptep == NULL || !l4x_pte_present_user(*ptep) || !pte_write(*ptep)) {
 		if (in_atomic())
 			goto return_efault;
 
@@ -179,8 +196,8 @@ retry:
 		}
 		local_irq_disable();
 
-		if (ptep == NULL)
-			ptep = lookup_pte_lock(current->mm, address, &ptl);
+		ptep = lookup_pte_lock(current->mm, address,
+		                       &page_shift, &ptl);
 
 #ifdef DEBUG_PARSE_PTABS_WRITE
 		if (ptep)
@@ -205,8 +222,9 @@ retry:
 	}
 	*ptep   = pte_mkdirty(pte_mkyoung(*ptep));
 	spin_unlock(ptl);
-	*offset = address & ~PAGE_MASK;
-	return pte_val(*ptep) & L4X_PHYSICAL_PAGE_MASK;
+	page_mask = ~0UL << page_shift;
+	*offset = address & ~page_mask;
+	return pte_val(*ptep) & page_mask & L4X_PHYSICAL_PAGE_MASK;
 
 return_efault:
 	local_irq_restore(*flags);

@@ -29,8 +29,8 @@
 
 #include <linux/crypto.h>
 #include <linux/scatterlist.h>
-#include <linux/libcfs/libcfs.h>
-#include <linux/libcfs/linux/linux-crypto.h>
+#include "../../../include/linux/libcfs/libcfs.h"
+#include "linux-crypto.h"
 /**
  *  Array of  hash algorithm speed in MByte per second
  */
@@ -114,7 +114,7 @@ int cfs_crypto_hash_digest(unsigned char alg_id,
 		crypto_free_hash(hdesc.tfm);
 		return -ENOSPC;
 	}
-	sg_init_one(&sl, (void *)buf, buf_len);
+	sg_init_one(&sl, buf, buf_len);
 
 	hdesc.flags = 0;
 	err = crypto_hash_digest(&hdesc, &sl, sl.length, hash);
@@ -165,7 +165,7 @@ int cfs_crypto_hash_update(struct cfs_crypto_hash_desc *hdesc,
 {
 	struct scatterlist sl;
 
-	sg_init_one(&sl, (void *)buf, buf_len);
+	sg_init_one(&sl, buf, buf_len);
 
 	return crypto_hash_update((struct hash_desc *)hdesc, &sl, sl.length);
 }

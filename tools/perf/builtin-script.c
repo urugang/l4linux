@@ -6,6 +6,7 @@
 #include "util/exec_cmd.h"
 #include "util/header.h"
 #include "util/parse-options.h"
+#include "util/perf_regs.h"
 #include "util/session.h"
 #include "util/tool.h"
 #include "util/symbol.h"
@@ -16,6 +17,7 @@
 #include "util/evsel.h"
 #include "util/sort.h"
 #include "util/data.h"
+#include "util/auxtrace.h"
 #include <linux/bitmap.h>
 
 static char const		*script_name;
@@ -23,10 +25,10 @@ static char const		*generate_script_lang;
 static bool			debug_mode;
 static u64			last_timestamp;
 static u64			nr_unordered;
-extern const struct option	record_options[];
 static bool			no_callchain;
 static bool			latency_format;
 static bool			system_wide;
+static bool			print_flags;
 static const char		*cpu_list;
 static DECLARE_BITMAP(cpu_bitmap, MAX_NR_CPUS);
 
@@ -44,6 +46,8 @@ enum perf_output_field {
 	PERF_OUTPUT_ADDR            = 1U << 10,
 	PERF_OUTPUT_SYMOFFSET       = 1U << 11,
 	PERF_OUTPUT_SRCLINE         = 1U << 12,
+	PERF_OUTPUT_PERIOD          = 1U << 13,
+	PERF_OUTPUT_IREGS	    = 1U << 14,
 };
 
 struct output_option {
@@ -63,6 +67,8 @@ struct output_option {
 	{.str = "addr",  .field = PERF_OUTPUT_ADDR},
 	{.str = "symoff", .field = PERF_OUTPUT_SYMOFFSET},
 	{.str = "srcline", .field = PERF_OUTPUT_SRCLINE},
+	{.str = "period", .field = PERF_OUTPUT_PERIOD},
+	{.str = "iregs", .field = PERF_OUTPUT_IREGS},
 };
 
 /* default set to maintain compatibility with current format */
@@ -80,7 +86,8 @@ static struct {
 		.fields = PERF_OUTPUT_COMM | PERF_OUTPUT_TID |
 			      PERF_OUTPUT_CPU | PERF_OUTPUT_TIME |
 			      PERF_OUTPUT_EVNAME | PERF_OUTPUT_IP |
-				  PERF_OUTPUT_SYM | PERF_OUTPUT_DSO,
+			      PERF_OUTPUT_SYM | PERF_OUTPUT_DSO |
+			      PERF_OUTPUT_PERIOD,
 
 		.invalid_fields = PERF_OUTPUT_TRACE,
 	},
@@ -91,7 +98,8 @@ static struct {
 		.fields = PERF_OUTPUT_COMM | PERF_OUTPUT_TID |
 			      PERF_OUTPUT_CPU | PERF_OUTPUT_TIME |
 			      PERF_OUTPUT_EVNAME | PERF_OUTPUT_IP |
-				  PERF_OUTPUT_SYM | PERF_OUTPUT_DSO,
+			      PERF_OUTPUT_SYM | PERF_OUTPUT_DSO |
+			      PERF_OUTPUT_PERIOD,
 
 		.invalid_fields = PERF_OUTPUT_TRACE,
 	},
@@ -110,7 +118,8 @@ static struct {
 		.fields = PERF_OUTPUT_COMM | PERF_OUTPUT_TID |
 			      PERF_OUTPUT_CPU | PERF_OUTPUT_TIME |
 			      PERF_OUTPUT_EVNAME | PERF_OUTPUT_IP |
-				  PERF_OUTPUT_SYM | PERF_OUTPUT_DSO,
+			      PERF_OUTPUT_SYM | PERF_OUTPUT_DSO |
+			      PERF_OUTPUT_PERIOD,
 
 		.invalid_fields = PERF_OUTPUT_TRACE,
 	},
@@ -142,9 +151,10 @@ static const char *output_field2str(enum perf_output_field field)
 
 #define PRINT_FIELD(x)  (output[attr->type].fields & PERF_OUTPUT_##x)
 
-static int perf_evsel__check_stype(struct perf_evsel *evsel,
-				   u64 sample_type, const char *sample_msg,
-				   enum perf_output_field field)
+static int perf_evsel__do_check_stype(struct perf_evsel *evsel,
+				      u64 sample_type, const char *sample_msg,
+				      enum perf_output_field field,
+				      bool allow_user_set)
 {
 	struct perf_event_attr *attr = &evsel->attr;
 	int type = attr->type;
@@ -154,6 +164,8 @@ static int perf_evsel__check_stype(struct perf_evsel *evsel,
 		return 0;
 
 	if (output[type].user_set) {
+		if (allow_user_set)
+			return 0;
 		evname = perf_evsel__name(evsel);
 		pr_err("Samples for '%s' event do not have %s attribute set. "
 		       "Cannot print '%s' field.\n",
@@ -171,10 +183,22 @@ static int perf_evsel__check_stype(struct perf_evsel *evsel,
 	return 0;
 }
 
+static int perf_evsel__check_stype(struct perf_evsel *evsel,
+				   u64 sample_type, const char *sample_msg,
+				   enum perf_output_field field)
+{
+	return perf_evsel__do_check_stype(evsel, sample_type, sample_msg, field,
+					  false);
+}
+
 static int perf_evsel__check_attr(struct perf_evsel *evsel,
 				  struct perf_session *session)
 {
 	struct perf_event_attr *attr = &evsel->attr;
+	bool allow_user_set;
+
+	allow_user_set = perf_header__has_feat(&session->header,
+					       HEADER_AUXTRACE);
 
 	if (PRINT_FIELD(TRACE) &&
 		!perf_session__has_traces(session, "record -R"))
@@ -184,15 +208,11 @@ static int perf_evsel__check_attr(struct perf_evsel *evsel,
 		if (perf_evsel__check_stype(evsel, PERF_SAMPLE_IP, "IP",
 					    PERF_OUTPUT_IP))
 			return -EINVAL;
-
-		if (!no_callchain &&
-		    !(attr->sample_type & PERF_SAMPLE_CALLCHAIN))
-			symbol_conf.use_callchain = false;
 	}
 
 	if (PRINT_FIELD(ADDR) &&
-		perf_evsel__check_stype(evsel, PERF_SAMPLE_ADDR, "ADDR",
-					PERF_OUTPUT_ADDR))
+		perf_evsel__do_check_stype(evsel, PERF_SAMPLE_ADDR, "ADDR",
+					   PERF_OUTPUT_ADDR, allow_user_set))
 		return -EINVAL;
 
 	if (PRINT_FIELD(SYM) && !PRINT_FIELD(IP) && !PRINT_FIELD(ADDR)) {
@@ -229,8 +249,18 @@ static int perf_evsel__check_attr(struct perf_evsel *evsel,
 		return -EINVAL;
 
 	if (PRINT_FIELD(CPU) &&
-		perf_evsel__check_stype(evsel, PERF_SAMPLE_CPU, "CPU",
-					PERF_OUTPUT_CPU))
+		perf_evsel__do_check_stype(evsel, PERF_SAMPLE_CPU, "CPU",
+					   PERF_OUTPUT_CPU, allow_user_set))
+		return -EINVAL;
+
+	if (PRINT_FIELD(PERIOD) &&
+		perf_evsel__check_stype(evsel, PERF_SAMPLE_PERIOD, "PERIOD",
+					PERF_OUTPUT_PERIOD))
+		return -EINVAL;
+
+	if (PRINT_FIELD(IREGS) &&
+		perf_evsel__check_stype(evsel, PERF_SAMPLE_REGS_INTR, "IREGS",
+					PERF_OUTPUT_IREGS))
 		return -EINVAL;
 
 	return 0;
@@ -290,6 +320,19 @@ static int perf_session__check_output_opt(struct perf_session *session)
 		set_print_ip_opts(&evsel->attr);
 	}
 
+	if (!no_callchain) {
+		bool use_callchain = false;
+
+		evlist__for_each(session->evlist, evsel) {
+			if (evsel->attr.sample_type & PERF_SAMPLE_CALLCHAIN) {
+				use_callchain = true;
+				break;
+			}
+		}
+		if (!use_callchain)
+			symbol_conf.use_callchain = false;
+	}
+
 	/*
 	 * set default for tracepoints to print symbols only
 	 * if callchains are present
@@ -315,6 +358,24 @@ static int perf_session__check_output_opt(struct perf_session *session)
 
 out:
 	return 0;
+}
+
+static void print_sample_iregs(union perf_event *event __maybe_unused,
+			  struct perf_sample *sample,
+			  struct thread *thread __maybe_unused,
+			  struct perf_event_attr *attr)
+{
+	struct regs_dump *regs = &sample->intr_regs;
+	uint64_t mask = attr->sample_regs_intr;
+	unsigned i = 0, r;
+
+	if (!regs)
+		return;
+
+	for_each_set_bit(r, (unsigned long *) &mask, sizeof(mask) * 8) {
+		u64 val = regs->regs[i++];
+		printf("%5s:0x%"PRIx64" ", perf_reg_name(r), val);
+	}
 }
 
 static void print_sample_start(struct perf_sample *sample,
@@ -358,52 +419,19 @@ static void print_sample_start(struct perf_sample *sample,
 	}
 }
 
-static bool is_bts_event(struct perf_event_attr *attr)
-{
-	return ((attr->type == PERF_TYPE_HARDWARE) &&
-		(attr->config & PERF_COUNT_HW_BRANCH_INSTRUCTIONS) &&
-		(attr->sample_period == 1));
-}
-
-static bool sample_addr_correlates_sym(struct perf_event_attr *attr)
-{
-	if ((attr->type == PERF_TYPE_SOFTWARE) &&
-	    ((attr->config == PERF_COUNT_SW_PAGE_FAULTS) ||
-	     (attr->config == PERF_COUNT_SW_PAGE_FAULTS_MIN) ||
-	     (attr->config == PERF_COUNT_SW_PAGE_FAULTS_MAJ)))
-		return true;
-
-	if (is_bts_event(attr))
-		return true;
-
-	return false;
-}
-
 static void print_sample_addr(union perf_event *event,
 			  struct perf_sample *sample,
-			  struct machine *machine,
 			  struct thread *thread,
 			  struct perf_event_attr *attr)
 {
 	struct addr_location al;
-	u8 cpumode = event->header.misc & PERF_RECORD_MISC_CPUMODE_MASK;
 
 	printf("%16" PRIx64, sample->addr);
 
 	if (!sample_addr_correlates_sym(attr))
 		return;
 
-	thread__find_addr_map(thread, machine, cpumode, MAP__FUNCTION,
-			      sample->addr, &al);
-	if (!al.map)
-		thread__find_addr_map(thread, machine, cpumode, MAP__VARIABLE,
-				      sample->addr, &al);
-
-	al.cpu = sample->cpu;
-	al.sym = NULL;
-
-	if (al.map)
-		al.sym = map__find_symbol(al.map, al.addr, NULL);
+	perf_event__preprocess_sample_addr(event, sample, thread, &al);
 
 	if (PRINT_FIELD(SYM)) {
 		printf(" ");
@@ -427,33 +455,62 @@ static void print_sample_bts(union perf_event *event,
 			     struct addr_location *al)
 {
 	struct perf_event_attr *attr = &evsel->attr;
+	bool print_srcline_last = false;
 
 	/* print branch_from information */
 	if (PRINT_FIELD(IP)) {
-		if (!symbol_conf.use_callchain)
-			printf(" ");
-		else
+		unsigned int print_opts = output[attr->type].print_ip_opts;
+
+		if (symbol_conf.use_callchain && sample->callchain) {
 			printf("\n");
-		perf_evsel__print_ip(evsel, sample, al,
-				     output[attr->type].print_ip_opts,
+		} else {
+			printf(" ");
+			if (print_opts & PRINT_IP_OPT_SRCLINE) {
+				print_srcline_last = true;
+				print_opts &= ~PRINT_IP_OPT_SRCLINE;
+			}
+		}
+		perf_evsel__print_ip(evsel, sample, al, print_opts,
 				     PERF_MAX_STACK_DEPTH);
 	}
-
-	printf(" => ");
 
 	/* print branch_to information */
 	if (PRINT_FIELD(ADDR) ||
 	    ((evsel->attr.sample_type & PERF_SAMPLE_ADDR) &&
-	     !output[attr->type].user_set))
-		print_sample_addr(event, sample, al->machine, thread, attr);
+	     !output[attr->type].user_set)) {
+		printf(" => ");
+		print_sample_addr(event, sample, thread, attr);
+	}
+
+	if (print_srcline_last)
+		map__fprintf_srcline(al->map, al->addr, "\n  ", stdout);
 
 	printf("\n");
 }
 
-static void process_event(union perf_event *event, struct perf_sample *sample,
-			  struct perf_evsel *evsel, struct thread *thread,
-			  struct addr_location *al)
+static void print_sample_flags(u32 flags)
 {
+	const char *chars = PERF_IP_FLAG_CHARS;
+	const int n = strlen(PERF_IP_FLAG_CHARS);
+	char str[33];
+	int i, pos = 0;
+
+	for (i = 0; i < n; i++, flags >>= 1) {
+		if (flags & 1)
+			str[pos++] = chars[i];
+	}
+	for (; i < 32; i++, flags >>= 1) {
+		if (flags & 1)
+			str[pos++] = '?';
+	}
+	str[pos] = 0;
+	printf("  %-4s ", str);
+}
+
+static void process_event(union perf_event *event, struct perf_sample *sample,
+			  struct perf_evsel *evsel, struct addr_location *al)
+{
+	struct thread *thread = al->thread;
 	struct perf_event_attr *attr = &evsel->attr;
 
 	if (output[attr->type].fields == 0)
@@ -461,10 +518,16 @@ static void process_event(union perf_event *event, struct perf_sample *sample,
 
 	print_sample_start(sample, thread, evsel);
 
+	if (PRINT_FIELD(PERIOD))
+		printf("%10" PRIu64 " ", sample->period);
+
 	if (PRINT_FIELD(EVNAME)) {
 		const char *evname = perf_evsel__name(evsel);
 		printf("%s: ", evname ? evname : "[unknown]");
 	}
+
+	if (print_flags)
+		print_sample_flags(sample->flags);
 
 	if (is_bts_event(attr)) {
 		print_sample_bts(event, sample, evsel, thread, al);
@@ -475,7 +538,7 @@ static void process_event(union perf_event *event, struct perf_sample *sample,
 		event_format__print(evsel->tp_format, sample->cpu,
 				    sample->raw_data, sample->raw_size);
 	if (PRINT_FIELD(ADDR))
-		print_sample_addr(event, sample, al->machine, thread, attr);
+		print_sample_addr(event, sample, thread, attr);
 
 	if (PRINT_FIELD(IP)) {
 		if (!symbol_conf.use_callchain)
@@ -488,12 +551,20 @@ static void process_event(union perf_event *event, struct perf_sample *sample,
 				     PERF_MAX_STACK_DEPTH);
 	}
 
+	if (PRINT_FIELD(IREGS))
+		print_sample_iregs(event, sample, thread, attr);
+
 	printf("\n");
 }
 
 static int default_start_script(const char *script __maybe_unused,
 				int argc __maybe_unused,
 				const char **argv __maybe_unused)
+{
+	return 0;
+}
+
+static int default_flush_script(void)
 {
 	return 0;
 }
@@ -511,6 +582,7 @@ static int default_generate_script(struct pevent *pevent __maybe_unused,
 
 static struct scripting_ops default_scripting_ops = {
 	.start_script		= default_start_script,
+	.flush_script		= default_flush_script,
 	.stop_script		= default_stop_script,
 	.process_event		= process_event,
 	.generate_script	= default_generate_script,
@@ -524,6 +596,11 @@ static void setup_scripting(void)
 	setup_python_scripting();
 
 	scripting_ops = &default_scripting_ops;
+}
+
+static int flush_scripting(void)
+{
+	return scripting_ops->flush_script();
 }
 
 static int cleanup_scripting(void)
@@ -540,14 +617,6 @@ static int process_sample_event(struct perf_tool *tool __maybe_unused,
 				struct machine *machine)
 {
 	struct addr_location al;
-	struct thread *thread = machine__findnew_thread(machine, sample->pid,
-							sample->tid);
-
-	if (thread == NULL) {
-		pr_debug("problem processing %d event, skipping it.\n",
-			 event->header.type);
-		return -1;
-	}
 
 	if (debug_mode) {
 		if (sample->time < last_timestamp) {
@@ -567,14 +636,14 @@ static int process_sample_event(struct perf_tool *tool __maybe_unused,
 	}
 
 	if (al.filtered)
-		return 0;
+		goto out_put;
 
 	if (cpu_list && !test_bit(sample->cpu, cpu_bitmap))
-		return 0;
+		goto out_put;
 
-	scripting_ops->process_event(event, sample, evsel, thread, &al);
-
-	evsel->hists.stats.total_period += sample->period;
+	scripting_ops->process_event(event, sample, evsel, &al);
+out_put:
+	addr_location__put(&al);
 	return 0;
 }
 
@@ -583,6 +652,7 @@ struct perf_script {
 	struct perf_session	*session;
 	bool			show_task_events;
 	bool			show_mmap_events;
+	bool			show_switch_events;
 };
 
 static int process_attr(struct perf_tool *tool, union perf_event *event,
@@ -621,7 +691,7 @@ static int process_comm_event(struct perf_tool *tool,
 	struct thread *thread;
 	struct perf_script *script = container_of(tool, struct perf_script, tool);
 	struct perf_session *session = script->session;
-	struct perf_evsel *evsel = perf_evlist__first(session->evlist);
+	struct perf_evsel *evsel = perf_evlist__id2evsel(session->evlist, sample->id);
 	int ret = -1;
 
 	thread = machine__findnew_thread(machine, event->comm.pid, event->comm.tid);
@@ -642,8 +712,8 @@ static int process_comm_event(struct perf_tool *tool,
 	print_sample_start(sample, thread, evsel);
 	perf_event__fprintf(event, stdout);
 	ret = 0;
-
 out:
+	thread__put(thread);
 	return ret;
 }
 
@@ -655,7 +725,7 @@ static int process_fork_event(struct perf_tool *tool,
 	struct thread *thread;
 	struct perf_script *script = container_of(tool, struct perf_script, tool);
 	struct perf_session *session = script->session;
-	struct perf_evsel *evsel = perf_evlist__first(session->evlist);
+	struct perf_evsel *evsel = perf_evlist__id2evsel(session->evlist, sample->id);
 
 	if (perf_event__process_fork(tool, event, sample, machine) < 0)
 		return -1;
@@ -674,6 +744,7 @@ static int process_fork_event(struct perf_tool *tool,
 	}
 	print_sample_start(sample, thread, evsel);
 	perf_event__fprintf(event, stdout);
+	thread__put(thread);
 
 	return 0;
 }
@@ -682,10 +753,11 @@ static int process_exit_event(struct perf_tool *tool,
 			      struct perf_sample *sample,
 			      struct machine *machine)
 {
+	int err = 0;
 	struct thread *thread;
 	struct perf_script *script = container_of(tool, struct perf_script, tool);
 	struct perf_session *session = script->session;
-	struct perf_evsel *evsel = perf_evlist__first(session->evlist);
+	struct perf_evsel *evsel = perf_evlist__id2evsel(session->evlist, sample->id);
 
 	thread = machine__findnew_thread(machine, event->fork.pid, event->fork.tid);
 	if (thread == NULL) {
@@ -696,16 +768,17 @@ static int process_exit_event(struct perf_tool *tool,
 	if (!evsel->attr.sample_id_all) {
 		sample->cpu = 0;
 		sample->time = 0;
-		sample->tid = event->comm.tid;
-		sample->pid = event->comm.pid;
+		sample->tid = event->fork.tid;
+		sample->pid = event->fork.pid;
 	}
 	print_sample_start(sample, thread, evsel);
 	perf_event__fprintf(event, stdout);
 
 	if (perf_event__process_exit(tool, event, sample, machine) < 0)
-		return -1;
+		err = -1;
 
-	return 0;
+	thread__put(thread);
+	return err;
 }
 
 static int process_mmap_event(struct perf_tool *tool,
@@ -716,7 +789,7 @@ static int process_mmap_event(struct perf_tool *tool,
 	struct thread *thread;
 	struct perf_script *script = container_of(tool, struct perf_script, tool);
 	struct perf_session *session = script->session;
-	struct perf_evsel *evsel = perf_evlist__first(session->evlist);
+	struct perf_evsel *evsel = perf_evlist__id2evsel(session->evlist, sample->id);
 
 	if (perf_event__process_mmap(tool, event, sample, machine) < 0)
 		return -1;
@@ -735,7 +808,7 @@ static int process_mmap_event(struct perf_tool *tool,
 	}
 	print_sample_start(sample, thread, evsel);
 	perf_event__fprintf(event, stdout);
-
+	thread__put(thread);
 	return 0;
 }
 
@@ -747,7 +820,7 @@ static int process_mmap2_event(struct perf_tool *tool,
 	struct thread *thread;
 	struct perf_script *script = container_of(tool, struct perf_script, tool);
 	struct perf_session *session = script->session;
-	struct perf_evsel *evsel = perf_evlist__first(session->evlist);
+	struct perf_evsel *evsel = perf_evlist__id2evsel(session->evlist, sample->id);
 
 	if (perf_event__process_mmap2(tool, event, sample, machine) < 0)
 		return -1;
@@ -766,7 +839,33 @@ static int process_mmap2_event(struct perf_tool *tool,
 	}
 	print_sample_start(sample, thread, evsel);
 	perf_event__fprintf(event, stdout);
+	thread__put(thread);
+	return 0;
+}
 
+static int process_switch_event(struct perf_tool *tool,
+				union perf_event *event,
+				struct perf_sample *sample,
+				struct machine *machine)
+{
+	struct thread *thread;
+	struct perf_script *script = container_of(tool, struct perf_script, tool);
+	struct perf_session *session = script->session;
+	struct perf_evsel *evsel = perf_evlist__id2evsel(session->evlist, sample->id);
+
+	if (perf_event__process_switch(tool, event, sample, machine) < 0)
+		return -1;
+
+	thread = machine__findnew_thread(machine, sample->pid,
+					 sample->tid);
+	if (thread == NULL) {
+		pr_debug("problem processing SWITCH event, skipping it.\n");
+		return -1;
+	}
+
+	print_sample_start(sample, thread, evsel);
+	perf_event__fprintf(event, stdout);
+	thread__put(thread);
 	return 0;
 }
 
@@ -791,8 +890,10 @@ static int __cmd_script(struct perf_script *script)
 		script->tool.mmap = process_mmap_event;
 		script->tool.mmap2 = process_mmap2_event;
 	}
+	if (script->show_switch_events)
+		script->tool.context_switch = process_switch_event;
 
-	ret = perf_session__process_events(script->session, &script->tool);
+	ret = perf_session__process_events(script->session);
 
 	if (debug_mode)
 		pr_err("Misordered timestamps: %" PRIu64 "\n", nr_unordered);
@@ -999,11 +1100,14 @@ static int parse_output_fields(const struct option *opt __maybe_unused,
 		}
 	}
 
-	tok = strtok(tok, ",");
-	while (tok) {
+	for (tok = strtok(tok, ","); tok; tok = strtok(NULL, ",")) {
 		for (i = 0; i < imax; ++i) {
 			if (strcmp(tok, all_output_options[i].str) == 0)
 				break;
+		}
+		if (i == imax && strcmp(tok, "flags") == 0) {
+			print_flags = true;
+			continue;
 		}
 		if (i == imax) {
 			fprintf(stderr, "Invalid field requested.\n");
@@ -1032,8 +1136,6 @@ static int parse_output_fields(const struct option *opt __maybe_unused,
 			}
 			output[type].fields |= all_output_options[i].field;
 		}
-
-		tok = strtok(NULL, ",");
 	}
 
 	if (type >= 0) {
@@ -1488,17 +1590,35 @@ static int have_cmd(int argc, const char **argv)
 	return 0;
 }
 
+static void script__setup_sample_type(struct perf_script *script)
+{
+	struct perf_session *session = script->session;
+	u64 sample_type = perf_evlist__combined_sample_type(session->evlist);
+
+	if (symbol_conf.use_callchain || symbol_conf.cumulate_callchain) {
+		if ((sample_type & PERF_SAMPLE_REGS_USER) &&
+		    (sample_type & PERF_SAMPLE_STACK_USER))
+			callchain_param.record_mode = CALLCHAIN_DWARF;
+		else if (sample_type & PERF_SAMPLE_BRANCH_STACK)
+			callchain_param.record_mode = CALLCHAIN_LBR;
+		else
+			callchain_param.record_mode = CALLCHAIN_FP;
+	}
+}
+
 int cmd_script(int argc, const char **argv, const char *prefix __maybe_unused)
 {
 	bool show_full_info = false;
 	bool header = false;
 	bool header_only = false;
+	bool script_started = false;
 	char *rec_script_path = NULL;
 	char *rep_script_path = NULL;
 	struct perf_session *session;
+	struct itrace_synth_opts itrace_synth_opts = { .set = false, };
 	char *script_path = NULL;
 	const char **__argv;
-	int i, j, err;
+	int i, j, err = 0;
 	struct perf_script script = {
 		.tool = {
 			.sample		 = process_sample_event,
@@ -1510,9 +1630,16 @@ int cmd_script(int argc, const char **argv, const char *prefix __maybe_unused)
 			.attr		 = process_attr,
 			.tracing_data	 = perf_event__process_tracing_data,
 			.build_id	 = perf_event__process_build_id,
-			.ordered_samples = true,
+			.id_index	 = perf_event__process_id_index,
+			.auxtrace_info	 = perf_event__process_auxtrace_info,
+			.auxtrace	 = perf_event__process_auxtrace,
+			.auxtrace_error	 = perf_event__process_auxtrace_error,
+			.ordered_events	 = true,
 			.ordering_requires_timestamps = true,
 		},
+	};
+	struct perf_data_file file = {
+		.mode = PERF_DATA_MODE_READ,
 	};
 	const struct option options[] = {
 	OPT_BOOLEAN('D', "dump-raw-trace", &dump_trace,
@@ -1541,11 +1668,11 @@ int cmd_script(int argc, const char **argv, const char *prefix __maybe_unused)
 		    "When printing symbols do not display call chain"),
 	OPT_STRING(0, "symfs", &symbol_conf.symfs, "directory",
 		    "Look for files with symbols relative to this directory"),
-	OPT_CALLBACK('f', "fields", NULL, "str",
+	OPT_CALLBACK('F', "fields", NULL, "str",
 		     "comma separated output fields prepend with 'type:'. "
 		     "Valid types: hw,sw,trace,raw. "
 		     "Fields: comm,tid,pid,time,cpu,event,trace,ip,sym,dso,"
-		     "addr,symoff", parse_output_fields),
+		     "addr,symoff,period,iregs,flags", parse_output_fields),
 	OPT_BOOLEAN('a', "all-cpus", &system_wide,
 		    "system-wide collection from all CPUs"),
 	OPT_STRING('S', "symbols", &symbol_conf.sym_list_str, "symbol[,symbol...]",
@@ -1553,6 +1680,10 @@ int cmd_script(int argc, const char **argv, const char *prefix __maybe_unused)
 	OPT_STRING('C', "cpu", &cpu_list, "cpu", "list of cpus to profile"),
 	OPT_STRING('c', "comms", &symbol_conf.comm_list_str, "comm[,comm...]",
 		   "only display events for these comms"),
+	OPT_STRING(0, "pid", &symbol_conf.pid_list_str, "pid[,pid...]",
+		   "only consider symbols in these pids"),
+	OPT_STRING(0, "tid", &symbol_conf.tid_list_str, "tid[,tid...]",
+		   "only consider symbols in these tids"),
 	OPT_BOOLEAN('I', "show-info", &show_full_info,
 		    "display extended information from perf.data file"),
 	OPT_BOOLEAN('\0', "show-kernel-path", &symbol_conf.show_kernel_path,
@@ -1561,9 +1692,23 @@ int cmd_script(int argc, const char **argv, const char *prefix __maybe_unused)
 		    "Show the fork/comm/exit events"),
 	OPT_BOOLEAN('\0', "show-mmap-events", &script.show_mmap_events,
 		    "Show the mmap events"),
+	OPT_BOOLEAN('\0', "show-switch-events", &script.show_switch_events,
+		    "Show context switch events (if recorded)"),
+	OPT_BOOLEAN('f', "force", &file.force, "don't complain, do it"),
+	OPT_CALLBACK_OPTARG(0, "itrace", &itrace_synth_opts, NULL, "opts",
+			    "Instruction Tracing options",
+			    itrace_parse_synth_opts),
+	OPT_BOOLEAN(0, "full-source-path", &srcline_full_filename,
+			"Show full source file name path for source lines"),
+	OPT_BOOLEAN(0, "demangle", &symbol_conf.demangle,
+			"Enable symbol demangling"),
+	OPT_BOOLEAN(0, "demangle-kernel", &symbol_conf.demangle_kernel,
+			"Enable kernel symbol demangling"),
+
 	OPT_END()
 	};
-	const char * const script_usage[] = {
+	const char * const script_subcommands[] = { "record", "report", NULL };
+	const char *script_usage[] = {
 		"perf script [<options>]",
 		"perf script [<options>] record <script> [<record-options>] <command>",
 		"perf script [<options>] report <script> [script-args]",
@@ -1571,13 +1716,10 @@ int cmd_script(int argc, const char **argv, const char *prefix __maybe_unused)
 		"perf script [<options>] <top-script> [script-args]",
 		NULL
 	};
-	struct perf_data_file file = {
-		.mode = PERF_DATA_MODE_READ,
-	};
 
 	setup_scripting();
 
-	argc = parse_options(argc, argv, options, script_usage,
+	argc = parse_options_subcommand(argc, argv, options, script_subcommands, script_usage,
 			     PARSE_OPT_STOP_AT_NON_OPTION);
 
 	file.path = input_name;
@@ -1740,32 +1882,45 @@ int cmd_script(int argc, const char **argv, const char *prefix __maybe_unused)
 		exit(-1);
 	}
 
-	if (symbol__init() < 0)
-		return -1;
 	if (!script_name)
 		setup_pager();
 
 	session = perf_session__new(&file, false, &script.tool);
 	if (session == NULL)
-		return -ENOMEM;
+		return -1;
 
 	if (header || header_only) {
 		perf_session__fprintf_info(session, stdout, show_full_info);
 		if (header_only)
-			return 0;
+			goto out_delete;
 	}
 
+	if (symbol__init(&session->header.env) < 0)
+		goto out_delete;
+
 	script.session = session;
+	script__setup_sample_type(&script);
+
+	session->itrace_synth_opts = &itrace_synth_opts;
 
 	if (cpu_list) {
-		if (perf_session__cpu_bitmap(session, cpu_list, cpu_bitmap))
-			return -1;
+		err = perf_session__cpu_bitmap(session, cpu_list, cpu_bitmap);
+		if (err < 0)
+			goto out_delete;
 	}
 
 	if (!no_callchain)
 		symbol_conf.use_callchain = true;
 	else
 		symbol_conf.use_callchain = false;
+
+	if (session->tevent.pevent &&
+	    pevent_set_function_resolver(session->tevent.pevent,
+					 machine__resolve_kernel_addr,
+					 &session->machines.host) < 0) {
+		pr_err("%s: failed to set libtraceevent function resolver\n", __func__);
+		return -1;
+	}
 
 	if (generate_script_lang) {
 		struct stat perf_stat;
@@ -1774,53 +1929,62 @@ int cmd_script(int argc, const char **argv, const char *prefix __maybe_unused)
 		if (output_set_by_user()) {
 			fprintf(stderr,
 				"custom fields not supported for generated scripts");
-			return -1;
+			err = -EINVAL;
+			goto out_delete;
 		}
 
 		input = open(file.path, O_RDONLY);	/* input_name */
 		if (input < 0) {
+			err = -errno;
 			perror("failed to open file");
-			return -1;
+			goto out_delete;
 		}
 
 		err = fstat(input, &perf_stat);
 		if (err < 0) {
 			perror("failed to stat file");
-			return -1;
+			goto out_delete;
 		}
 
 		if (!perf_stat.st_size) {
 			fprintf(stderr, "zero-sized file, nothing to do!\n");
-			return 0;
+			goto out_delete;
 		}
 
 		scripting_ops = script_spec__lookup(generate_script_lang);
 		if (!scripting_ops) {
 			fprintf(stderr, "invalid language specifier");
-			return -1;
+			err = -ENOENT;
+			goto out_delete;
 		}
 
 		err = scripting_ops->generate_script(session->tevent.pevent,
 						     "perf-script");
-		goto out;
+		goto out_delete;
 	}
 
 	if (script_name) {
 		err = scripting_ops->start_script(script_name, argc, argv);
 		if (err)
-			goto out;
+			goto out_delete;
 		pr_debug("perf script started with script %s\n\n", script_name);
+		script_started = true;
 	}
 
 
 	err = perf_session__check_output_opt(session);
 	if (err < 0)
-		goto out;
+		goto out_delete;
 
 	err = __cmd_script(&script);
 
+	flush_scripting();
+
+out_delete:
 	perf_session__delete(session);
-	cleanup_scripting();
+
+	if (script_started)
+		cleanup_scripting();
 out:
 	return err;
 }

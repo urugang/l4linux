@@ -37,6 +37,15 @@
 #define __addr_ok(addr) 	\
 	((unsigned long __force)(addr) < user_addr_max())
 
+#ifdef CONFIG_L4
+#define l4x_copy_to_user       copy_to_user
+#define l4x_copy_from_user     copy_from_user
+#define l4x_clear_user         clear_user
+#define l4x_strncpy_from_user  strncpy_from_user
+#define l4x_strnlen_user       strnlen_user
+#define l4x_strlen_user        strlen_user
+#endif
+
 /*
  * Test whether a block of memory is a valid user space address.
  * Returns 0 if the range is valid, nonzero otherwise.
@@ -74,7 +83,8 @@ static inline bool __chk_range_not_ok(unsigned long addr, unsigned long size, un
  * @addr: User space pointer to start of block to check
  * @size: Size of block to check
  *
- * Context: User context only.  This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * Checks if a pointer to a block of memory in user space is valid.
  *
@@ -133,15 +143,20 @@ extern long __get_user_4(u32 *val, const void *address);
 extern long __get_user_8(u64 *val, const void *address);
 extern long __get_user_bad(void);
 
-/* Careful: we have to cast the result to the type of the pointer
- * for sign reasons */
+/*
+ * This is a type: either unsigned long, if the argument fits into
+ * that type, or otherwise unsigned long long.
+ */
+#define __inttype(x) \
+__typeof__(__builtin_choose_expr(sizeof(x) > sizeof(0UL), 0ULL, 0UL))
 
 /**
  * get_user: - Get a simple variable from user space.
  * @x:   Variable to store result.
  * @ptr: Source address, in user space.
  *
- * Context: User context only.  This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple variable from user space to kernel
  * space.  It supports simple types like char and int, but not larger
@@ -153,8 +168,22 @@ extern long __get_user_bad(void);
  * Returns zero on success, or -EFAULT on error.
  * On error, the variable @x is set to zero.
  */
-#define get_user(x,ptr)							\
-({	int __ret_gu;							\
+/*
+ * Careful: we have to cast the result to the type of the pointer
+ * for sign reasons.
+ *
+ * The use of _ASM_DX as the register specifier is a bit of a
+ * simplification, as gcc only cares about it as the starting point
+ * and not size: for a 64-bit value it will use %ecx:%edx on 32 bits
+ * (%ecx being the next register in gcc's x86 register sequence), and
+ * %rdx on 64 bits.
+ *
+ * Clang/LLVM cares about the size of the register, but still wants
+ * the base register for something that ends up being a pair.
+ */
+#define get_user(x, ptr)						\
+({									\
+	int __ret_gu;							\
  	unsigned long __val_gu;						\
 	__chk_user_ptr(ptr);						\
 	switch(sizeof (*(ptr))) {					\
@@ -164,7 +193,7 @@ extern long __get_user_bad(void);
 	case 8:  __ret_gu = __get_user_8((unsigned long long *)&__val_gu,ptr); break;		\
 	default: __ret_gu = __get_user_bad(); break;		\
 	}								\
-	(x) = (__typeof__(*(ptr)))__val_gu;				\
+	(x) = (__force __typeof__(*(ptr)))__val_gu;				\
 	__ret_gu;							\
 })
 
@@ -195,7 +224,8 @@ extern long __put_user_bad(void);
  * @x:   Value to copy to user space.
  * @ptr: Destination address, in user space.
  *
- * Context: User context only.  This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple value from kernel space to user
  * space.  It supports simple types like char and int, but not larger
@@ -203,9 +233,6 @@ extern long __put_user_bad(void);
  *
  * @ptr must have pointer-to-simple-variable type, and @x must be assignable
  * to the result of dereferencing @ptr.
- *
- * Caller must check the pointer with access_ok() before calling this
- * function.
  *
  * Returns zero on success, or -EFAULT on error.
  */
@@ -252,6 +279,8 @@ extern long __put_user_bad(void);
 #define __put_user(x,ptr) put_user_macro((__typeof__(*(ptr)))(x), (ptr))
 #define put_user put_user_macro
 
+#define __get_user_unaligned __get_user
+#define __put_user_unaligned __put_user
 
 struct __large_struct { unsigned long buf[100]; };
 #define __m(x) (*(struct __large_struct __user *)(x))
@@ -303,7 +332,8 @@ long __must_check __strncpy_from_user(char *dst,
  * @x:   Value to copy to user space.
  * @ptr: Destination address, in user space.
  *
- * Context: User context only.  This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * This macro copies a single simple value from kernel space to user
  * space.  It supports simple types like char and int, but not larger
@@ -569,7 +599,17 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
 #undef __copy_from_user_overflow
 #undef __copy_to_user_overflow
 
-#endif /* !L4 */
+#else
+
+#ifdef CONFIG_X86_64
+__must_check int
+__copy_in_user(void __user *dst, const void __user *src, unsigned size);
+
+__must_check unsigned long
+copy_in_user(void __user *to, const void __user *from, unsigned len);
+#endif /* X86_64 */
+
+#endif /* L4 */
 
 #endif
 

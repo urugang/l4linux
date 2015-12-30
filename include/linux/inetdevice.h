@@ -120,6 +120,9 @@ static inline void ipv4_devconf_setall(struct in_device *in_dev)
 	 || (!IN_DEV_FORWARD(in_dev) && \
 	  IN_DEV_ORCONF((in_dev), ACCEPT_REDIRECTS)))
 
+#define IN_DEV_IGNORE_ROUTES_WITH_LINKDOWN(in_dev) \
+	IN_DEV_CONF_GET((in_dev), IGNORE_ROUTES_WITH_LINKDOWN)
+
 #define IN_DEV_ARPFILTER(in_dev)	IN_DEV_ORCONF((in_dev), ARPFILTER)
 #define IN_DEV_ARP_ACCEPT(in_dev)	IN_DEV_ORCONF((in_dev), ARP_ACCEPT)
 #define IN_DEV_ARP_ANNOUNCE(in_dev)	IN_DEV_MAXCONF((in_dev), ARP_ANNOUNCE)
@@ -242,7 +245,7 @@ static inline void in_dev_put(struct in_device *idev)
 static __inline__ __be32 inet_make_mask(int logmask)
 {
 	if (logmask)
-		return htonl(~((1<<(32-logmask))-1));
+		return htonl(~((1U<<(32-logmask))-1));
 	return 0;
 }
 

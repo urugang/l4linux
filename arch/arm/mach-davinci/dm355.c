@@ -411,6 +411,7 @@ static struct davinci_spi_platform_data dm355_spi0_pdata = {
 	.num_chipselect = 2,
 	.cshold_bug	= true,
 	.dma_event_q	= EVENTQ_1,
+	.prescaler_limit = 1,
 };
 static struct platform_device dm355_spi0_device = {
 	.name = "spi_davinci",
@@ -785,14 +786,13 @@ static struct resource dm355_v4l2_disp_resources[] = {
 	},
 };
 
-static int dm355_vpbe_setup_pinmux(enum v4l2_mbus_pixelcode if_type,
-			    int field)
+static int dm355_vpbe_setup_pinmux(u32 if_type, int field)
 {
 	switch (if_type) {
-	case V4L2_MBUS_FMT_SGRBG8_1X8:
+	case MEDIA_BUS_FMT_SGRBG8_1X8:
 		davinci_cfg_reg(DM355_VOUT_FIELD_G70);
 		break;
-	case V4L2_MBUS_FMT_YUYV10_1X20:
+	case MEDIA_BUS_FMT_YUYV10_1X20:
 		if (field)
 			davinci_cfg_reg(DM355_VOUT_FIELD);
 		else

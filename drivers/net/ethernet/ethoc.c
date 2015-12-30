@@ -1132,10 +1132,6 @@ static int ethoc_probe(struct platform_device *pdev)
 		memcpy(netdev->dev_addr, pdata->hwaddr, IFHWADDRLEN);
 		priv->phy_id = pdata->phy_id;
 	} else {
-		priv->phy_id = -1;
-
-#ifdef CONFIG_OF
-		{
 		const uint8_t *mac;
 
 		mac = of_get_property(pdev->dev.of_node,
@@ -1143,8 +1139,7 @@ static int ethoc_probe(struct platform_device *pdev)
 				      NULL);
 		if (mac)
 			memcpy(netdev->dev_addr, mac, IFHWADDRLEN);
-		}
-#endif
+		priv->phy_id = -1;
 	}
 
 	/* Check that the given MAC address is valid. If it isn't, read the
@@ -1221,8 +1216,6 @@ static int ethoc_probe(struct platform_device *pdev)
 		dev_err(&netdev->dev, "failed to probe MDIO bus\n");
 		goto error;
 	}
-
-	ether_setup(netdev);
 
 	/* setup the net_device structure */
 	netdev->netdev_ops = &ethoc_netdev_ops;
@@ -1301,7 +1294,7 @@ static int ethoc_resume(struct platform_device *pdev)
 # define ethoc_resume  NULL
 #endif
 
-static struct of_device_id ethoc_match[] = {
+static const struct of_device_id ethoc_match[] = {
 	{ .compatible = "opencores,ethoc", },
 	{},
 };
@@ -1314,7 +1307,6 @@ static struct platform_driver ethoc_driver = {
 	.resume  = ethoc_resume,
 	.driver  = {
 		.name = "ethoc",
-		.owner = THIS_MODULE,
 		.of_match_table = ethoc_match,
 	},
 };

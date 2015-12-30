@@ -58,7 +58,10 @@ static struct bench mem_benchmarks[] = {
 static struct bench futex_benchmarks[] = {
 	{ "hash",	"Benchmark for futex hash table",               bench_futex_hash	},
 	{ "wake",	"Benchmark for futex wake calls",               bench_futex_wake	},
+	{ "wake-parallel", "Benchmark for parallel futex wake calls",   bench_futex_wake_parallel },
 	{ "requeue",	"Benchmark for futex requeue calls",            bench_futex_requeue	},
+	/* pi-futexes */
+	{ "lock-pi",	"Benchmark for futex lock_pi calls",            bench_futex_lock_pi	},
 	{ "all",	"Test all futex benchmarks",			NULL			},
 	{ NULL,		NULL,						NULL			}
 };
@@ -104,9 +107,11 @@ static const char *bench_format_str;
 
 /* Output/formatting style, exported to benchmark modules: */
 int bench_format = BENCH_FORMAT_DEFAULT;
+unsigned int bench_repeat = 10; /* default number of times to repeat the run */
 
 static const struct option bench_options[] = {
 	OPT_STRING('f', "format", &bench_format_str, "default", "Specify format style"),
+	OPT_UINTEGER('r', "repeat",  &bench_repeat,   "Specify amount of times to repeat the run"),
 	OPT_END()
 };
 
@@ -223,6 +228,11 @@ int cmd_bench(int argc, const char **argv, const char *prefix __maybe_unused)
 	bench_format = bench_str2int(bench_format_str);
 	if (bench_format == BENCH_FORMAT_UNKNOWN) {
 		printf("Unknown format descriptor: '%s'\n", bench_format_str);
+		goto end;
+	}
+
+	if (bench_repeat == 0) {
+		printf("Invalid repeat option: Must specify a positive value\n");
 		goto end;
 	}
 

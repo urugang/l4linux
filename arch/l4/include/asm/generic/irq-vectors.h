@@ -2,7 +2,7 @@
 #define __ASM_L4__GENERIC__IRQ_VECTORS_H__
 
 #ifndef L4X_NR_IRQS_V_DYN
-#define L4X_NR_IRQS_V_DYN 10
+#define L4X_NR_IRQS_V_DYN 72
 #endif
 
 #ifndef L4X_NR_IRQS_V_STATIC

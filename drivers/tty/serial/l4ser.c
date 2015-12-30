@@ -15,11 +15,13 @@
 #include <linux/irq.h>
 #include <linux/console.h>
 #include <linux/sysrq.h>
+#include <linux/platform_device.h>
 #include <linux/device.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
 #include <linux/serial_core.h>
 #include <linux/serial.h>
+#include <linux/of_platform.h>
 
 #include <l4/re/env.h>
 #include <l4/sys/vcon.h>
@@ -34,21 +36,20 @@
 /* This is the same major as the sa1100 one */
 #define SERIAL_L4SER_MAJOR	204
 #define MINOR_START		5
-
-#define PORT0_NAME              "log"
-#define NR_ADDITIONAL_PORTS	3
-
-static char ports_to_add[NR_ADDITIONAL_PORTS][20];
-static int  ports_to_add_pos;
+#define UART_NR			8
 
 struct l4ser_uart_port {
 	struct uart_port port;
 	l4_cap_idx_t vcon_cap;
 	l4_cap_idx_t vcon_irq_cap;
-	int inited;
+	struct platform_device *pdev;
+	const char *capname;
+	char inited;
 };
 
-static struct l4ser_uart_port l4ser_port[1 + NR_ADDITIONAL_PORTS];
+static char capnames[UART_NR][20];
+static int nr_capnames;
+static struct l4ser_uart_port l4ser_port[UART_NR];
 
 static void l4ser_stop_tx(struct uart_port *port)
 {
@@ -167,7 +168,8 @@ static int l4ser_startup(struct uart_port *port)
 	int retval;
 
 	if (port->irq) {
-		retval = request_irq(port->irq, l4ser_int, 0, "L4-uart", port);
+		retval = request_irq(port->irq, l4ser_int,
+		                     IRQF_TRIGGER_RISING, "L4-uart", port);
 		if (retval)
 			return retval;
 
@@ -190,7 +192,7 @@ static void l4ser_set_termios(struct uart_port *port, struct ktermios *termios,
 
 static const char *l4ser_type(struct uart_port *port)
 {
-	return port->type == PORT_SA1100 ? "L4" : NULL;
+	return port->type == PORT_SA1100 ? "L4-vcon" : NULL;
 }
 
 
@@ -218,14 +220,13 @@ l4ser_verify_port(struct uart_port *port, struct serial_struct *ser)
 #ifdef CONFIG_CONSOLE_POLL
 static int l4ser_poll_get_char(struct uart_port *port)
 {
-       struct l4ser_uart_port *l4port = (struct l4ser_uart_port *)port;
-       char c;
-       int r = L4XV_FN_i(l4_vcon_read(l4port->vcon_cap, &c, 1));
-       if (r < 1)
-	       return NO_POLL_CHAR;
+	struct l4ser_uart_port *l4port = (struct l4ser_uart_port *)port;
+	char c;
+	int r = L4XV_FN_i(l4_vcon_read(l4port->vcon_cap, &c, 1));
+	if (r < 1)
+		return NO_POLL_CHAR;
 
-        return c;
-
+	return c;
 }
 
 static void l4ser_poll_put_char(struct uart_port *port, unsigned char ch)
@@ -239,7 +240,7 @@ static void l4ser_poll_put_char(struct uart_port *port, unsigned char ch)
 }
 #endif
 
-static struct uart_ops l4ser_pops = {
+static const struct uart_ops l4ser_pops = {
 	.tx_empty	= l4ser_tx_empty,
 	.set_mctrl	= l4ser_set_mctrl,
 	.get_mctrl	= l4ser_get_mctrl,
@@ -262,65 +263,66 @@ static struct uart_ops l4ser_pops = {
 #endif
 };
 
-static int __init l4ser_init_port(int num, const char *name)
+static int l4ser_init_port(struct l4ser_uart_port *lup, unsigned id)
 {
 	int irq, r;
 	l4_msgtag_t t;
 	l4_vcon_attr_t vcon_attr;
 
-	if (l4ser_port[num].inited)
+	if (lup->inited)
 		return 0;
-	l4ser_port[num].inited = 1;
+	lup->inited = 1;
 
-	if ((r = l4x_re_resolve_name(name, &l4ser_port[num].vcon_cap))) {
-		if (num == 0)
-			l4ser_port[num].vcon_cap = l4re_env()->log;
-		else
-			return r;
-	}
+	if (id == 0)
+		lup->vcon_cap = l4re_env()->log;
+	else if ((r = l4x_re_resolve_name(l4ser_port[id].capname,
+	                                  &lup->vcon_cap)))
+		return r;
 
-	l4ser_port[num].vcon_irq_cap = l4x_cap_alloc();
-	if (l4_is_invalid_cap(l4ser_port[num].vcon_irq_cap))
+	lup->vcon_irq_cap = l4x_cap_alloc();
+	if (l4_is_invalid_cap(lup->vcon_irq_cap))
 		return -ENOMEM;
 
 	t = L4XV_FN(l4_msgtag_t,
 	            l4_factory_create_irq(l4re_env()->factory,
-	                                  l4ser_port[num].vcon_irq_cap));
+	                                  lup->vcon_irq_cap));
 	if (l4_error(t)) {
-		l4x_cap_free(l4ser_port[num].vcon_irq_cap);
+		l4x_cap_free(lup->vcon_irq_cap);
 		return -ENOMEM;
 	}
 
 	t = L4XV_FN(l4_msgtag_t,
-	            l4_icu_bind(l4ser_port[num].vcon_cap, 0,
-	                        l4ser_port[num].vcon_irq_cap));
+	            l4_icu_bind(lup->vcon_cap, 0,
+	                        lup->vcon_irq_cap));
 	if ((l4_error(t))) {
-		L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP, l4ser_port[num].vcon_irq_cap));
-		l4x_cap_free(l4ser_port[num].vcon_irq_cap);
+		L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP,
+		                             lup->vcon_irq_cap));
+		l4x_cap_free(lup->vcon_irq_cap);
 
 		// No interrupt, just output
-		l4ser_port[num].vcon_irq_cap = L4_INVALID_CAP;
+		lup->vcon_irq_cap = L4_INVALID_CAP;
 		irq = 0;
-	} else if ((irq = l4x_register_irq(l4ser_port[num].vcon_irq_cap)) < 0) {
-		L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP, l4ser_port[num].vcon_irq_cap));
-		l4x_cap_free(l4ser_port[num].vcon_irq_cap);
+	} else if ((irq = l4x_register_irq(lup->vcon_irq_cap)) < 0) {
+		L4XV_FN_v(l4_task_delete_obj(L4RE_THIS_TASK_CAP,
+		                             lup->vcon_irq_cap));
+		l4x_cap_free(lup->vcon_irq_cap);
 		return -EIO;
 	}
 
 	vcon_attr.i_flags = 0;
 	vcon_attr.o_flags = 0;
 	vcon_attr.l_flags = 0;
-	L4XV_FN_v(l4_vcon_set_attr(l4ser_port[num].vcon_cap, &vcon_attr));
+	L4XV_FN_v(l4_vcon_set_attr(lup->vcon_cap, &vcon_attr));
 
-	l4ser_port[num].port.uartclk   = 3686400;
-	l4ser_port[num].port.ops       = &l4ser_pops;
-	l4ser_port[num].port.fifosize  = 8;
-	l4ser_port[num].port.line      = num;
-	l4ser_port[num].port.iotype    = UPIO_MEM;
-	l4ser_port[num].port.membase   = (void *)1;
-	l4ser_port[num].port.mapbase   = 1;
-	l4ser_port[num].port.flags     = UPF_BOOT_AUTOCONF;
-	l4ser_port[num].port.irq       = irq;
+	lup->port.uartclk   = 3686400;
+	lup->port.ops       = &l4ser_pops;
+	lup->port.fifosize  = 8;
+	lup->port.line      = id;
+	lup->port.iotype    = UPIO_MEM;
+	lup->port.membase   = (void *)1;
+	lup->port.mapbase   = 1;
+	lup->port.flags     = UPF_BOOT_AUTOCONF;
+	lup->port.irq       = irq;
 
 	return 0;
 }
@@ -332,7 +334,7 @@ l4ser_console_setup(struct console *co, char *options)
 {
 	struct uart_port *up;
 
-	if (co->index >= 1 + NR_ADDITIONAL_PORTS)
+	if (co->index >= UART_NR)
 		co->index = 0;
 	up = &l4ser_port[co->index].port;
 	if (!up)
@@ -357,7 +359,7 @@ l4ser_console_write(struct console *co, const char *s, unsigned int count)
 }
 
 
-static struct uart_driver l4ser_reg;
+static struct uart_driver l4ser_driver;
 static struct console l4ser_console = {
 	.name		= "ttyLv",
 	.write		= l4ser_console_write,
@@ -365,12 +367,12 @@ static struct console l4ser_console = {
 	.setup		= l4ser_console_setup,
 	.flags		= CON_PRINTBUFFER,
 	.index		= -1,
-	.data		= &l4ser_reg,
+	.data		= &l4ser_driver,
 };
 
 static int __init l4ser_rs_console_init(void)
 {
-	if (l4ser_init_port(0, PORT0_NAME))
+	if (l4ser_init_port(&l4ser_port[0], 0))
 		return -ENODEV;
 	register_console(&l4ser_console);
 	return 0;
@@ -382,47 +384,244 @@ console_initcall(l4ser_rs_console_init);
 #define L4SER_CONSOLE	NULL
 #endif
 
-static struct uart_driver l4ser_reg = {
+static struct uart_driver l4ser_driver = {
 	.owner			= THIS_MODULE,
 	.driver_name		= "ttyLv",
 	.dev_name		= "ttyLv",
 	.major			= SERIAL_L4SER_MAJOR,
 	.minor			= MINOR_START,
-	.nr			= 1 + NR_ADDITIONAL_PORTS,
+	.nr			= UART_NR,
 	.cons			= L4SER_CONSOLE,
 };
+
+#ifdef CONFIG_PM
+static int l4ser_suspend(struct device *dev)
+{
+	struct l4ser_uart_port *lup = dev_get_drvdata(dev);
+	if (device_may_wakeup(dev)) {
+		dev_info(dev, "enable IRQ wake\n");
+		enable_irq_wake(lup->port.irq);
+		disable_irq(lup->port.irq);
+	}
+	return 0;
+}
+
+static int l4ser_resume(struct device *dev)
+{
+	struct l4ser_uart_port *lup = dev_get_drvdata(dev);
+	if (device_may_wakeup(dev)) {
+		dev_info(dev, "disable IRQ wake\n");
+		enable_irq(lup->port.irq);
+		disable_irq_wake(lup->port.irq);
+	}
+	return 0;
+}
+#endif
+
+static int get_next_free(void)
+{
+	int id;
+
+	for (id = 0; id < UART_NR; ++id)
+		if (!l4ser_port[id].inited)
+			break;
+
+	if (id >= UART_NR) {
+		pr_err("l4ser: Out of internal storage\n");
+		return -ENOMEM;
+	}
+
+	return id;
+}
+
+static int l4ser_probe(struct platform_device *pdev)
+{
+	struct l4ser_uart_port *lup = NULL;
+	struct device_node *np = pdev->dev.of_node;
+	const char *of_capname = NULL;
+	int id = -1;
+
+	if (np) {
+		int len;
+		const char *n;
+
+		id = of_alias_get_id(np, "serial");
+		if (id < 0) {
+			const __be32 *idv;
+			idv = of_get_property(np, "id", NULL);
+			if (!idv) {
+				dev_err(&pdev->dev,
+				        "Missing 'id' attribute.\n");
+				return -EINVAL;
+			}
+			id = be32_to_cpu(*idv);
+		}
+
+		if (id == 0) {
+			dev_err(&pdev->dev,
+			        "id=0 must not be defined in DT.\n");
+			return -EINVAL;
+		}
+
+		if (id > 0 && id < UART_NR && l4ser_port[id].inited)
+			dev_warn(&pdev->dev, "Duplicate id=%d.\n", id);
+
+		n = of_get_property(np, "cap", &len);
+		if (!n) {
+			dev_err(&pdev->dev, "Missing 'cap' attribute.\n");
+			return -EINVAL;
+		}
+		of_capname = n;
+	}
+
+
+	if (id < 0)
+		id = pdev->id;
+
+	if (id < 0) {
+		id = get_next_free();
+		if (id < 0)
+			return id;
+	}
+
+	if (id < 0 || id >= UART_NR)
+		return -ENXIO;
+
+	lup = &l4ser_port[id];
+
+	if (of_capname)
+		lup->capname = of_capname;
+
+	if (l4ser_init_port(lup, id))
+		return -ENODEV;
+
+	lup->port.dev = &pdev->dev;
+	platform_set_drvdata(pdev, lup);
+	uart_add_one_port(&l4ser_driver, &lup->port);
+
+	if (lup->port.irq)
+		device_set_wakeup_capable(lup->port.dev, true);
+
+	return 0;
+}
+
+#ifdef CONFIG_OF
+static const struct of_device_id l4ser_id_table[] = {
+	{ .compatible = "l4linux,l4ser" },
+};
+MODULE_DEVICE_TABLE(of, l4ser_id_table);
+#endif
+
+static int l4ser_remove(struct platform_device *pdev)
+{
+	struct l4ser_uart_port *lup = platform_get_drvdata(pdev);
+	if (lup->port.irq) {
+		disable_irq(lup->port.irq);
+		device_set_wakeup_capable(&pdev->dev, false);
+	}
+	uart_remove_one_port(&l4ser_driver, &lup->port);
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(l4ser_pm_ops, l4ser_suspend, l4ser_resume);
+static struct platform_driver l4ser_platform_driver = {
+	.probe		= l4ser_probe,
+	.remove		= l4ser_remove,
+	.driver = {
+		.name           = "serial-ttyLv",
+		.owner          = THIS_MODULE,
+		.pm             = &l4ser_pm_ops,
+#ifdef CONFIG_OF
+		.of_match_table = l4ser_id_table,
+#endif
+	},
+};
+
+static int __init l4ser_add_one_dev(int id)
+{
+	int ret;
+
+	l4ser_port[id].pdev = platform_device_alloc("serial-ttyLv", id);
+	if (!l4ser_port[id].pdev)
+		return -ENOMEM;
+
+	ret = platform_device_add(l4ser_port[id].pdev);
+	if (ret) {
+		platform_device_put(l4ser_port[id].pdev);
+		l4ser_port[id].pdev = NULL;
+		return ret;
+	}
+
+	return 0;
+}
 
 static int __init l4ser_serial_init(void)
 {
 	int ret, i;
+	l4_cap_idx_t tmpcap;
 
 	pr_info("L4 serial driver\n");
-
-	if (l4ser_init_port(0, PORT0_NAME))
-		return -ENODEV;
-
-	ret = uart_register_driver(&l4ser_reg);
-	if (!ret)
-		uart_add_one_port(&l4ser_reg, &l4ser_port[0].port);
-
-	for (i = 0; i < NR_ADDITIONAL_PORTS; ++i) {
-		if (*ports_to_add[i]
-		    && l4ser_init_port(i + 1, ports_to_add[i])) {
-			pr_warn("l4ser: Failed to initialize additional port '%s'.\n", ports_to_add[i]);
-			continue;
-		}
-		uart_add_one_port(&l4ser_reg, &l4ser_port[i + 1].port);
+	ret = uart_register_driver(&l4ser_driver);
+	if (ret) {
+		pr_err("l4ser: could not register uart driver: %d\n", ret);
+		return ret;
 	}
-	return ret;
+
+	ret = platform_driver_register(&l4ser_platform_driver);
+	if (ret) {
+		uart_unregister_driver(&l4ser_driver);
+		pr_err("l4ser: could not register platform driver: %d\n", ret);
+		return ret;
+	}
+
+	/* A warning/hint, remove some time later */
+	if (!l4x_re_resolve_name("log", &tmpcap))
+		pr_err("l4ser: INFO: Do not use "
+		       "\"caps = { log = ... },\" anymore.\n"
+		       "l4ser: INFO: The 'log' capability "
+		       "is not evaluated anymore.\n"
+		       "l4ser: INFO: Pull the 'log' statement out "
+		       "of the 'caps' table.\n");
+
+	ret = l4ser_add_one_dev(0);
+	if (ret) {
+		platform_driver_unregister(&l4ser_platform_driver);
+		uart_unregister_driver(&l4ser_driver);
+		return ret;
+	}
+
+	for (i = 0; i < nr_capnames; ++i) {
+		int id;
+
+		if (capnames[i][0] == 0)
+			break;
+
+		id = get_next_free();
+		if (id < 0)
+			return id;
+
+		l4ser_port[id].capname = capnames[i];
+		ret = l4ser_add_one_dev(id);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 static void __exit l4ser_serial_exit(void)
 {
-	int i;
-	uart_remove_one_port(&l4ser_reg, &l4ser_port[0].port);
-	for (i = 0; i < NR_ADDITIONAL_PORTS; ++i)
-		uart_remove_one_port(&l4ser_reg, &l4ser_port[i + 1].port);
-	uart_unregister_driver(&l4ser_reg);
+	int id;
+
+#ifdef CONFIG_L4_SERIAL_CONSOLE
+	unregister_console(&l4ser_console);
+#endif
+	for (id = 0; id < UART_NR; ++id)
+		if (l4ser_port[id].pdev)
+			platform_device_unregister(l4ser_port[id].pdev);
+
+	platform_driver_unregister(&l4ser_platform_driver);
+	uart_unregister_driver(&l4ser_driver);
 }
 
 module_init(l4ser_serial_init);
@@ -432,20 +631,19 @@ module_exit(l4ser_serial_exit);
  * no kmalloc available */
 static int l4ser_setup(const char *val, struct kernel_param *kp)
 {
-	if (ports_to_add_pos >= NR_ADDITIONAL_PORTS) {
+	if (nr_capnames > UART_NR) {
 		pr_err("l4ser: Too many additional ports specified\n");
 		return 1;
 	}
-	strlcpy(ports_to_add[ports_to_add_pos], val,
-	        sizeof(ports_to_add[ports_to_add_pos]));
-	ports_to_add_pos++;
+	strlcpy(capnames[nr_capnames], val, sizeof(capnames[0]));
+	nr_capnames++;
 	return 0;
 }
 
 module_param_call(add, l4ser_setup, NULL, NULL, 0200);
-MODULE_PARM_DESC(add, "Use l4ser.add=name to add an another port, name queried in cap environment");
+MODULE_PARM_DESC(add, "Use l4ser.add=name to add another port, name queried in cap environment");
 
-MODULE_AUTHOR("Adam Lackorzynski <adam@os.inf.tu-dresden.de>");
+MODULE_AUTHOR("Adam Lackorzynski <adam@l4re.org>");
 MODULE_DESCRIPTION("L4 serial driver");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_CHARDEV_MAJOR(SERIAL_L4SER_MAJOR);

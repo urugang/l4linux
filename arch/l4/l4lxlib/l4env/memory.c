@@ -24,7 +24,7 @@ int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte)
 	l4_addr_t addr;
 	unsigned flags;
 	unsigned long size;
-	int r;
+	int r, rw;
 
 	addr = pte_val(pte) & L4X_PHYSICAL_PAGE_MASK;
 	size = 1;
@@ -37,11 +37,12 @@ int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte)
 
 	offset += (pte_val(pte) & L4X_PHYSICAL_PAGE_MASK) - addr;
 	addr    = address & PAGE_MASK;
+	rw      = pte_write(pte);
 	if ((r = L4XV_FN_i(l4re_rm_attach((void **)&addr, PAGE_SIZE,
 	                                  L4RE_RM_IN_AREA | L4RE_RM_EAGER_MAP
-	                                   | ((pte_write(pte)
-	                                      ? 0 : L4RE_RM_READ_ONLY)),
-	                                  ds, offset, L4_PAGESHIFT)))) {
+	                                   | (rw ? 0 : L4RE_RM_READ_ONLY),
+	                                  ds | (rw ? L4_CAP_FPAGE_RW : 0),
+	                                  offset, L4_PAGESHIFT)))) {
 
 		if (r == -L4_EADDRNOTAVAIL) {
 			l4_addr_t a = addr;
@@ -104,8 +105,9 @@ int l4lx_memory_map_virtual_range(unsigned long address, unsigned long size,
 			s = end - address;
 		r = L4XV_FN_i(l4re_rm_attach((void **)&addr, s,
 		                             L4RE_RM_IN_AREA | L4RE_RM_EAGER_MAP
-				             | (map_rw ? 0 : L4RE_RM_READ_ONLY),
-				             ds, offset, L4_PAGESHIFT));
+		                             | (map_rw ? 0 : L4RE_RM_READ_ONLY),
+		                             ds | (map_rw ? L4_CAP_FPAGE_RW : 0),
+		                             offset, L4_PAGESHIFT));
 		if (r) {
 			// FIXME wrt L4_EUSED?
 			// see above...

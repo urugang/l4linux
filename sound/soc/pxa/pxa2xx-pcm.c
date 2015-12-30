@@ -124,13 +124,7 @@ static struct snd_soc_platform_driver pxa2xx_soc_platform = {
 
 static int pxa2xx_soc_platform_probe(struct platform_device *pdev)
 {
-	return snd_soc_register_platform(&pdev->dev, &pxa2xx_soc_platform);
-}
-
-static int pxa2xx_soc_platform_remove(struct platform_device *pdev)
-{
-	snd_soc_unregister_platform(&pdev->dev);
-	return 0;
+	return devm_snd_soc_register_platform(&pdev->dev, &pxa2xx_soc_platform);
 }
 
 #ifdef CONFIG_OF
@@ -143,12 +137,10 @@ static const struct of_device_id snd_soc_pxa_audio_match[] = {
 static struct platform_driver pxa_pcm_driver = {
 	.driver = {
 		.name = "pxa-pcm-audio",
-		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(snd_soc_pxa_audio_match),
 	},
 
 	.probe = pxa2xx_soc_platform_probe,
-	.remove = pxa2xx_soc_platform_remove,
 };
 
 module_platform_driver(pxa_pcm_driver);

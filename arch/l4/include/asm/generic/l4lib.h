@@ -3,7 +3,7 @@
 
 #include <linux/stringify.h>
 
-#ifdef ARCH_arm
+#ifdef CONFIG_ARM
 
 //#define L4X_ASSUME_READONLY_TEXT
 
@@ -41,13 +41,17 @@
 	    "                           .long __l4_external_resolver    \n" \
 	   )
 
+#define L4_EXTERNAL_FUNC_VARGS(func) L4_EXTERNAL_FUNC(func)
+
 #else
 #ifdef CONFIG_X86_32
 #define PSTOR ".long"
+#define RAX_SETUP ""
 #else
 #define PSTOR ".quad"
+#define RAX_SETUP "xor %eax,%eax; "
 #endif
-#define L4_EXTERNAL_FUNC(func) \
+#define L4_EXTERNAL_FUNC_GEN(func, call_prolog) \
 	asm(".section \".data.l4externals.str\"                         \n" \
 	    "9: .string \"" __stringify(func) "\"                       \n" \
 	    ".previous                                                  \n" \
@@ -65,12 +69,16 @@
 	    ".weak " __stringify(func) "                                \n" \
 	    ".type " __stringify(func) ", @function                     \n" \
 	    ".type " __stringify(func##_resolver) ", @function          \n" \
-	    __stringify(func) ":            jmp *8b                     \n" \
+	    __stringify(func) ":            " call_prolog "jmp *8b      \n" \
 	    __stringify(func##_resolver) ": push $8b                    \n" \
             "                               push $7b                    \n" \
 	    "                               jmp *__l4_external_resolver \n" \
 	    ".previous                                                  \n" \
 	   )
+
+#define L4_EXTERNAL_FUNC(func)       L4_EXTERNAL_FUNC_GEN(func, "")
+#define L4_EXTERNAL_FUNC_VARGS(func) L4_EXTERNAL_FUNC_GEN(func, RAX_SETUP)
+
 #endif
 
 #endif /* __INCLUDE__ASM_L4__GENERIC__L4LIB_H__ */

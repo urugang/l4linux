@@ -78,6 +78,44 @@ static int mfd_platform_add_cell(struct platform_device *pdev,
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_ACPI)
+static void mfd_acpi_add_device(const struct mfd_cell *cell,
+				struct platform_device *pdev)
+{
+	struct acpi_device *parent_adev;
+	struct acpi_device *adev;
+
+	parent_adev = ACPI_COMPANION(pdev->dev.parent);
+	if (!parent_adev)
+		return;
+
+	/*
+	 * MFD child device gets its ACPI handle either from the ACPI
+	 * device directly under the parent that matches the acpi_pnpid or
+	 * it will use the parent handle if is no acpi_pnpid is given.
+	 */
+	adev = parent_adev;
+	if (cell->acpi_pnpid) {
+		struct acpi_device_id ids[2] = {};
+		struct acpi_device *child_adev;
+
+		strlcpy(ids[0].id, cell->acpi_pnpid, sizeof(ids[0].id));
+		list_for_each_entry(child_adev, &parent_adev->children, node)
+			if (acpi_match_device_ids(child_adev, ids)) {
+				adev = child_adev;
+				break;
+			}
+	}
+
+	ACPI_COMPANION_SET(&pdev->dev, adev);
+}
+#else
+static inline void mfd_acpi_add_device(const struct mfd_cell *cell,
+				       struct platform_device *pdev)
+{
+}
+#endif
+
 static int mfd_add_device(struct device *parent, int id,
 			  const struct mfd_cell *cell, atomic_t *usage_count,
 			  struct resource *mem_base,
@@ -87,9 +125,15 @@ static int mfd_add_device(struct device *parent, int id,
 	struct platform_device *pdev;
 	struct device_node *np = NULL;
 	int ret = -ENOMEM;
+	int platform_id;
 	int r;
 
-	pdev = platform_device_alloc(cell->name, id + cell->id);
+	if (id == PLATFORM_DEVID_AUTO)
+		platform_id = id;
+	else
+		platform_id = id + cell->id;
+
+	pdev = platform_device_alloc(cell->name, platform_id);
 	if (!pdev)
 		goto fail_alloc;
 
@@ -101,6 +145,7 @@ static int mfd_add_device(struct device *parent, int id,
 	pdev->dev.type = &mfd_dev_type;
 	pdev->dev.dma_mask = parent->dma_mask;
 	pdev->dev.dma_parms = parent->dma_parms;
+	pdev->dev.coherent_dma_mask = parent->coherent_dma_mask;
 
 	ret = regulator_bulk_register_supply_alias(
 			&pdev->dev, cell->parent_supplies,
@@ -117,6 +162,8 @@ static int mfd_add_device(struct device *parent, int id,
 			}
 		}
 	}
+
+	mfd_acpi_add_device(cell, pdev);
 
 	if (cell->pdata_size) {
 		ret = platform_device_add_data(pdev,
@@ -160,9 +207,11 @@ static int mfd_add_device(struct device *parent, int id,
 		}
 
 		if (!cell->ignore_resource_conflicts) {
-			ret = acpi_check_resource_conflict(&res[r]);
-			if (ret)
-				goto fail_alias;
+			if (has_acpi_companion(&pdev->dev)) {
+				ret = acpi_check_resource_conflict(&res[r]);
+				if (ret)
+					goto fail_alias;
+			}
 		}
 	}
 
@@ -253,7 +302,7 @@ void mfd_remove_devices(struct device *parent)
 {
 	atomic_t *cnts = NULL;
 
-	device_for_each_child(parent, &cnts, mfd_remove_devices_fn);
+	device_for_each_child_reverse(parent, &cnts, mfd_remove_devices_fn);
 	kfree(cnts);
 }
 EXPORT_SYMBOL(mfd_remove_devices);

@@ -340,7 +340,8 @@ __l4x_ioremap(unsigned long phys_addr, size_t size, unsigned long flags)
 	}
 
 	if ((i = L4XV_FN_i(l4io_request_iomem(reg_start, reg_len,
-	                                      0, (l4_addr_t *)&addr)))) {
+	                                      L4IO_MEM_EAGER_MAP,
+	                                      (l4_addr_t *)&addr)))) {
 		pr_err("ERROR: l4io_request_iomem error(%lx+%lx): %d\n",
 		       reg_start, reg_len, i);
 		return NULL;

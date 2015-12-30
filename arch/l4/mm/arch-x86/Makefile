@@ -16,12 +16,10 @@ obj-$(CONFIG_X86_32)		+= pgtable_32.o
 obj-$(CONFIG_HUGETLB_PAGE)	+= hugetlbpage.o
 obj-$(CONFIG_X86_PTDUMP)	+= dump_pagetables.o
 
-extable-y	+= ../../../x86/mm/extable.o
-mmap-y		+= ../../../x86/mm/mmap.o
-pat-y		+= ../../../x86/mm/pat.o
-pageattr-y	+= ../../../x86/mm/pageattr.o
-pgtable_32-y	+= ../../../x86/mm/pgtable_32.o
-setup_nx-y	+= ../../../x86/mm/setup_nx.o
-hugetlbpage-y	+= ../../../x86/mm/hugetlbpage.o
+include arch/l4/Makefile.lib
+
+$(call L4X_FILEREF, ../../../x86/mm,        \
+       extable mmap pat pageattr pgtable_32 \
+       setup_nx hugetlbpage)
 
 EXTRA_CFLAGS    += -Iarch/x86/mm

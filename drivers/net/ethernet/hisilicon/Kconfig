@@ -7,9 +7,7 @@ config NET_VENDOR_HISILICON
 	default y
 	depends on ARM
 	---help---
-	  If you have a network (Ethernet) card belonging to this class, say Y
-	  and read the Ethernet-HOWTO, available from
-	  <http://www.tldp.org/docs.html#howto>.
+	  If you have a network (Ethernet) card belonging to this class, say Y.
 
 	  Note that the answer to this question doesn't directly affect the
 	  kernel: saying N will just cause the configurator to skip all
@@ -23,5 +21,14 @@ config HIX5HD2_GMAC
 	select PHYLIB
 	help
 	  This selects the hix5hd2 mac family network device.
+
+config HIP04_ETH
+	tristate "HISILICON P04 Ethernet support"
+	select PHYLIB
+	select MARVELL_PHY
+	select MFD_SYSCON
+	---help---
+	  If you wish to compile a kernel for a hardware with hisilicon p04 SoC and
+	  want to use the internal ethernet then you should answer Y to this.
 
 endif # NET_VENDOR_HISILICON

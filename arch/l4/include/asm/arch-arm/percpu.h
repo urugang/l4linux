@@ -39,7 +39,6 @@ static inline void set_my_cpu_offset(unsigned long off)
 static inline unsigned long __my_cpu_offset(void)
 {
 	unsigned long off;
-	register unsigned long *sp asm ("sp");
 
 	/*
 	 * Read TPIDRPRW.
@@ -47,9 +46,11 @@ static inline unsigned long __my_cpu_offset(void)
 	 * instead use a fake stack read to hazard against barrier().
 	 */
 #ifdef CONFIG_L4
-	asm("mrc p15, 0, %0, c13, c0, 3" : "=r" (off) : "Q" (*sp));
+	asm("mrc p15, 0, %0, c13, c0, 3" : "=r" (off)
+		: "Q" (*(const unsigned long *)current_stack_pointer));
 #else
-	asm("mrc p15, 0, %0, c13, c0, 4" : "=r" (off) : "Q" (*sp));
+	asm("mrc p15, 0, %0, c13, c0, 4" : "=r" (off)
+		: "Q" (*(const unsigned long *)current_stack_pointer));
 #endif
 	return off;
 }

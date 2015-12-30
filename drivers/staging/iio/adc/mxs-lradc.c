@@ -1,5 +1,5 @@
 /*
- * Freescale i.MX28 LRADC driver
+ * Freescale MXS LRADC driver
  *
  * Copyright (c) 2012 DENX Software Engineering, GmbH.
  * Marek Vasut <marex@denx.de>
@@ -15,34 +15,30 @@
  * GNU General Public License for more details.
  */
 
-#include <linux/err.h>
-#include <linux/interrupt.h>
+#include <linux/bitops.h>
+#include <linux/clk.h>
+#include <linux/completion.h>
 #include <linux/device.h>
+#include <linux/err.h>
+#include <linux/input.h>
+#include <linux/interrupt.h>
+#include <linux/io.h>
 #include <linux/kernel.h>
-#include <linux/slab.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/sysfs.h>
-#include <linux/list.h>
-#include <linux/io.h>
-#include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/spinlock.h>
-#include <linux/wait.h>
-#include <linux/sched.h>
+#include <linux/slab.h>
 #include <linux/stmp_device.h>
-#include <linux/bitops.h>
-#include <linux/completion.h>
-#include <linux/delay.h>
-#include <linux/input.h>
-#include <linux/clk.h>
+#include <linux/sysfs.h>
 
-#include <linux/iio/iio.h>
-#include <linux/iio/sysfs.h>
 #include <linux/iio/buffer.h>
+#include <linux/iio/iio.h>
 #include <linux/iio/trigger.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
+#include <linux/iio/sysfs.h>
 
 #define DRIVER_NAME		"mxs-lradc"
 
@@ -65,14 +61,14 @@
  * Once the pen touches the touchscreen, the touchscreen switches from
  * IRQ-driven mode to polling mode to prevent interrupt storm. The polling
  * is realized by worker thread, which is called every 20 or so milliseconds.
- * This gives the touchscreen enough fluence and does not strain the system
+ * This gives the touchscreen enough fluency and does not strain the system
  * too much.
  */
 #define LRADC_TS_SAMPLE_DELAY_MS	5
 
 /*
  * The LRADC reads the following amount of samples from each touchscreen
- * channel and the driver then computes avarage of these.
+ * channel and the driver then computes average of these.
  */
 #define LRADC_TS_SAMPLE_AMOUNT		4
 
@@ -214,11 +210,17 @@ struct mxs_lradc {
 	unsigned long		is_divided;
 
 	/*
-	 * Touchscreen LRADC channels receives a private slot in the CTRL4
-	 * register, the slot #7. Therefore only 7 slots instead of 8 in the
-	 * CTRL4 register can be mapped to LRADC channels when using the
-	 * touchscreen.
-	 *
+	 * When the touchscreen is enabled, we give it two private virtual
+	 * channels: #6 and #7. This means that only 6 virtual channels (instead
+	 * of 8) will be available for buffered capture.
+	 */
+#define TOUCHSCREEN_VCHANNEL1		7
+#define TOUCHSCREEN_VCHANNEL2		6
+#define BUFFER_VCHANS_LIMITED		0x3f
+#define BUFFER_VCHANS_ALL		0xff
+	u8			buffer_vchans;
+
+	/*
 	 * Furthermore, certain LRADC channels are shared between touchscreen
 	 * and/or touch-buttons and generic LRADC block. Therefore when using
 	 * either of these, these channels are not available for the regular
@@ -232,12 +234,12 @@ struct mxs_lradc {
 	 * CH5 -- Touch screen YNLR
 	 * CH6 -- Touch screen WIPER (5-wire only)
 	 *
-	 * The bitfields below represents which parts of the LRADC block are
+	 * The bit fields below represents which parts of the LRADC block are
 	 * switched into special mode of operation. These channels can not
 	 * be sampled as regular LRADC channels. The driver will refuse any
 	 * attempt to sample these channels.
 	 */
-#define CHAN_MASK_TOUCHBUTTON		(0x3 << 0)
+#define CHAN_MASK_TOUCHBUTTON		(BIT(1) | BIT(0))
 #define CHAN_MASK_TOUCHSCREEN_4WIRE	(0xf << 2)
 #define CHAN_MASK_TOUCHSCREEN_5WIRE	(0x1f << 2)
 	enum mxs_lradc_ts	use_touchscreen;
@@ -246,7 +248,7 @@ struct mxs_lradc {
 	struct input_dev	*ts_input;
 
 	enum mxs_lradc_id	soc;
-	enum lradc_ts_plate	cur_plate; /* statemachine */
+	enum lradc_ts_plate	cur_plate; /* state machine */
 	bool			ts_valid;
 	unsigned		ts_x_pos;
 	unsigned		ts_y_pos;
@@ -262,20 +264,20 @@ struct mxs_lradc {
 };
 
 #define	LRADC_CTRL0				0x00
-# define LRADC_CTRL0_MX28_TOUCH_DETECT_ENABLE	(1 << 23)
-# define LRADC_CTRL0_MX28_TOUCH_SCREEN_TYPE	(1 << 22)
-# define LRADC_CTRL0_MX28_YNNSW	/* YM */	(1 << 21)
-# define LRADC_CTRL0_MX28_YPNSW	/* YP */	(1 << 20)
-# define LRADC_CTRL0_MX28_YPPSW	/* YP */	(1 << 19)
-# define LRADC_CTRL0_MX28_XNNSW	/* XM */	(1 << 18)
-# define LRADC_CTRL0_MX28_XNPSW	/* XM */	(1 << 17)
-# define LRADC_CTRL0_MX28_XPPSW	/* XP */	(1 << 16)
+# define LRADC_CTRL0_MX28_TOUCH_DETECT_ENABLE	BIT(23)
+# define LRADC_CTRL0_MX28_TOUCH_SCREEN_TYPE	BIT(22)
+# define LRADC_CTRL0_MX28_YNNSW	/* YM */	BIT(21)
+# define LRADC_CTRL0_MX28_YPNSW	/* YP */	BIT(20)
+# define LRADC_CTRL0_MX28_YPPSW	/* YP */	BIT(19)
+# define LRADC_CTRL0_MX28_XNNSW	/* XM */	BIT(18)
+# define LRADC_CTRL0_MX28_XNPSW	/* XM */	BIT(17)
+# define LRADC_CTRL0_MX28_XPPSW	/* XP */	BIT(16)
 
-# define LRADC_CTRL0_MX23_TOUCH_DETECT_ENABLE	(1 << 20)
-# define LRADC_CTRL0_MX23_YM			(1 << 19)
-# define LRADC_CTRL0_MX23_XM			(1 << 18)
-# define LRADC_CTRL0_MX23_YP			(1 << 17)
-# define LRADC_CTRL0_MX23_XP			(1 << 16)
+# define LRADC_CTRL0_MX23_TOUCH_DETECT_ENABLE	BIT(20)
+# define LRADC_CTRL0_MX23_YM			BIT(19)
+# define LRADC_CTRL0_MX23_XM			BIT(18)
+# define LRADC_CTRL0_MX23_YP			BIT(17)
+# define LRADC_CTRL0_MX23_XP			BIT(16)
 
 # define LRADC_CTRL0_MX28_PLATE_MASK \
 		(LRADC_CTRL0_MX28_TOUCH_DETECT_ENABLE | \
@@ -289,12 +291,12 @@ struct mxs_lradc {
 		LRADC_CTRL0_MX23_YP | LRADC_CTRL0_MX23_XP)
 
 #define	LRADC_CTRL1				0x10
-#define	LRADC_CTRL1_TOUCH_DETECT_IRQ_EN		(1 << 24)
+#define	LRADC_CTRL1_TOUCH_DETECT_IRQ_EN		BIT(24)
 #define	LRADC_CTRL1_LRADC_IRQ_EN(n)		(1 << ((n) + 16))
 #define	LRADC_CTRL1_MX28_LRADC_IRQ_EN_MASK	(0x1fff << 16)
 #define	LRADC_CTRL1_MX23_LRADC_IRQ_EN_MASK	(0x01ff << 16)
 #define	LRADC_CTRL1_LRADC_IRQ_EN_OFFSET		16
-#define	LRADC_CTRL1_TOUCH_DETECT_IRQ		(1 << 8)
+#define	LRADC_CTRL1_TOUCH_DETECT_IRQ		BIT(8)
 #define	LRADC_CTRL1_LRADC_IRQ(n)		(1 << (n))
 #define	LRADC_CTRL1_MX28_LRADC_IRQ_MASK		0x1fff
 #define	LRADC_CTRL1_MX23_LRADC_IRQ_MASK		0x01ff
@@ -302,13 +304,13 @@ struct mxs_lradc {
 
 #define	LRADC_CTRL2				0x20
 #define	LRADC_CTRL2_DIVIDE_BY_TWO_OFFSET	24
-#define	LRADC_CTRL2_TEMPSENSE_PWD		(1 << 15)
+#define	LRADC_CTRL2_TEMPSENSE_PWD		BIT(15)
 
 #define	LRADC_STATUS				0x40
-#define	LRADC_STATUS_TOUCH_DETECT_RAW		(1 << 0)
+#define	LRADC_STATUS_TOUCH_DETECT_RAW		BIT(0)
 
 #define	LRADC_CH(n)				(0x50 + (0x10 * (n)))
-#define	LRADC_CH_ACCUMULATE			(1 << 29)
+#define	LRADC_CH_ACCUMULATE			BIT(29)
 #define	LRADC_CH_NUM_SAMPLES_MASK		(0x1f << 24)
 #define	LRADC_CH_NUM_SAMPLES_OFFSET		24
 #define	LRADC_CH_NUM_SAMPLES(x) \
@@ -342,6 +344,9 @@ struct mxs_lradc {
 #define	LRADC_CTRL4				0x140
 #define	LRADC_CTRL4_LRADCSELECT_MASK(n)		(0xf << ((n) * 4))
 #define	LRADC_CTRL4_LRADCSELECT_OFFSET(n)	((n) * 4)
+#define	LRADC_CTRL4_LRADCSELECT(n, x) \
+				(((x) << LRADC_CTRL4_LRADCSELECT_OFFSET(n)) & \
+				LRADC_CTRL4_LRADCSELECT_MASK(n))
 
 #define LRADC_RESOLUTION			12
 #define LRADC_SINGLE_SAMPLE_MASK		((1 << LRADC_RESOLUTION) - 1)
@@ -365,62 +370,63 @@ static u32 mxs_lradc_plate_mask(struct mxs_lradc *lradc)
 {
 	if (lradc->soc == IMX23_LRADC)
 		return LRADC_CTRL0_MX23_PLATE_MASK;
-	else
-		return LRADC_CTRL0_MX28_PLATE_MASK;
+	return LRADC_CTRL0_MX28_PLATE_MASK;
 }
 
 static u32 mxs_lradc_irq_en_mask(struct mxs_lradc *lradc)
 {
 	if (lradc->soc == IMX23_LRADC)
 		return LRADC_CTRL1_MX23_LRADC_IRQ_EN_MASK;
-	else
-		return LRADC_CTRL1_MX28_LRADC_IRQ_EN_MASK;
+	return LRADC_CTRL1_MX28_LRADC_IRQ_EN_MASK;
 }
 
 static u32 mxs_lradc_irq_mask(struct mxs_lradc *lradc)
 {
 	if (lradc->soc == IMX23_LRADC)
 		return LRADC_CTRL1_MX23_LRADC_IRQ_MASK;
-	else
-		return LRADC_CTRL1_MX28_LRADC_IRQ_MASK;
+	return LRADC_CTRL1_MX28_LRADC_IRQ_MASK;
 }
 
 static u32 mxs_lradc_touch_detect_bit(struct mxs_lradc *lradc)
 {
 	if (lradc->soc == IMX23_LRADC)
 		return LRADC_CTRL0_MX23_TOUCH_DETECT_ENABLE;
-	else
-		return LRADC_CTRL0_MX28_TOUCH_DETECT_ENABLE;
+	return LRADC_CTRL0_MX28_TOUCH_DETECT_ENABLE;
 }
 
 static u32 mxs_lradc_drive_x_plate(struct mxs_lradc *lradc)
 {
 	if (lradc->soc == IMX23_LRADC)
 		return LRADC_CTRL0_MX23_XP | LRADC_CTRL0_MX23_XM;
-	else
-		return LRADC_CTRL0_MX28_XPPSW | LRADC_CTRL0_MX28_XNNSW;
+	return LRADC_CTRL0_MX28_XPPSW | LRADC_CTRL0_MX28_XNNSW;
 }
 
 static u32 mxs_lradc_drive_y_plate(struct mxs_lradc *lradc)
 {
 	if (lradc->soc == IMX23_LRADC)
 		return LRADC_CTRL0_MX23_YP | LRADC_CTRL0_MX23_YM;
-	else
-		return LRADC_CTRL0_MX28_YPPSW | LRADC_CTRL0_MX28_YNNSW;
+	return LRADC_CTRL0_MX28_YPPSW | LRADC_CTRL0_MX28_YNNSW;
 }
 
 static u32 mxs_lradc_drive_pressure(struct mxs_lradc *lradc)
 {
 	if (lradc->soc == IMX23_LRADC)
 		return LRADC_CTRL0_MX23_YP | LRADC_CTRL0_MX23_XM;
-	else
-		return LRADC_CTRL0_MX28_YPPSW | LRADC_CTRL0_MX28_XNNSW;
+	return LRADC_CTRL0_MX28_YPPSW | LRADC_CTRL0_MX28_XNNSW;
 }
 
 static bool mxs_lradc_check_touch_event(struct mxs_lradc *lradc)
 {
 	return !!(readl(lradc->base + LRADC_STATUS) &
 					LRADC_STATUS_TOUCH_DETECT_RAW);
+}
+
+static void mxs_lradc_map_channel(struct mxs_lradc *lradc, unsigned vch,
+				  unsigned ch)
+{
+	mxs_lradc_reg_clear(lradc, LRADC_CTRL4_LRADCSELECT_MASK(vch),
+				LRADC_CTRL4);
+	mxs_lradc_reg_set(lradc, LRADC_CTRL4_LRADCSELECT(vch, ch), LRADC_CTRL4);
 }
 
 static void mxs_lradc_setup_ts_channel(struct mxs_lradc *lradc, unsigned ch)
@@ -443,27 +449,31 @@ static void mxs_lradc_setup_ts_channel(struct mxs_lradc *lradc, unsigned ch)
 	 */
 	mxs_lradc_reg_clear(lradc, LRADC_CH_VALUE_MASK, LRADC_CH(ch));
 
-	/* prepare the delay/loop unit according to the oversampling count */
+	/*
+	 * prepare the delay/loop unit according to the oversampling count
+	 *
+	 * from the datasheet:
+	 * "The DELAY fields in HW_LRADC_DELAY0, HW_LRADC_DELAY1,
+	 * HW_LRADC_DELAY2, and HW_LRADC_DELAY3 must be non-zero; otherwise,
+	 * the LRADC will not trigger the delay group."
+	 */
 	mxs_lradc_reg_wrt(lradc, LRADC_DELAY_TRIGGER(1 << ch) |
 		LRADC_DELAY_TRIGGER_DELAYS(0) |
 		LRADC_DELAY_LOOP(lradc->over_sample_cnt - 1) |
 		LRADC_DELAY_DELAY(lradc->over_sample_delay - 1),
 			LRADC_DELAY(3));
 
-	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_LRADC_IRQ(2) |
-			LRADC_CTRL1_LRADC_IRQ(3) | LRADC_CTRL1_LRADC_IRQ(4) |
-			LRADC_CTRL1_LRADC_IRQ(5), LRADC_CTRL1);
+	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_LRADC_IRQ(ch), LRADC_CTRL1);
 
-	/* wake us again, when the complete conversion is done */
-	mxs_lradc_reg_set(lradc, LRADC_CTRL1_LRADC_IRQ_EN(ch), LRADC_CTRL1);
 	/*
 	 * after changing the touchscreen plates setting
 	 * the signals need some initial time to settle. Start the
 	 * SoC's delay unit and start the conversion later
 	 * and automatically.
 	 */
-	mxs_lradc_reg_wrt(lradc, LRADC_DELAY_TRIGGER(0) | /* don't trigger ADC */
-		LRADC_DELAY_TRIGGER_DELAYS(1 << 3) | /* trigger DELAY unit#3 */
+	mxs_lradc_reg_wrt(lradc,
+		LRADC_DELAY_TRIGGER(0) | /* don't trigger ADC */
+		LRADC_DELAY_TRIGGER_DELAYS(BIT(3)) | /* trigger DELAY unit#3 */
 		LRADC_DELAY_KICK |
 		LRADC_DELAY_DELAY(lradc->settling_delay),
 			LRADC_DELAY(2));
@@ -508,20 +518,17 @@ static void mxs_lradc_setup_ts_pressure(struct mxs_lradc *lradc, unsigned ch1,
 		LRADC_DELAY_DELAY(lradc->over_sample_delay - 1),
 					LRADC_DELAY(3));
 
-	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_LRADC_IRQ(2) |
-			LRADC_CTRL1_LRADC_IRQ(3) | LRADC_CTRL1_LRADC_IRQ(4) |
-			LRADC_CTRL1_LRADC_IRQ(5), LRADC_CTRL1);
+	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_LRADC_IRQ(ch2), LRADC_CTRL1);
 
-	/* wake us again, when the conversions are done */
-	mxs_lradc_reg_set(lradc, LRADC_CTRL1_LRADC_IRQ_EN(ch2), LRADC_CTRL1);
 	/*
 	 * after changing the touchscreen plates setting
 	 * the signals need some initial time to settle. Start the
 	 * SoC's delay unit and start the conversion later
 	 * and automatically.
 	 */
-	mxs_lradc_reg_wrt(lradc, LRADC_DELAY_TRIGGER(0) | /* don't trigger ADC */
-		LRADC_DELAY_TRIGGER_DELAYS(1 << 3) | /* trigger DELAY unit#3 */
+	mxs_lradc_reg_wrt(lradc,
+		LRADC_DELAY_TRIGGER(0) | /* don't trigger ADC */
+		LRADC_DELAY_TRIGGER_DELAYS(BIT(3)) | /* trigger DELAY unit#3 */
 		LRADC_DELAY_KICK |
 		LRADC_DELAY_DELAY(lradc->settling_delay), LRADC_DELAY(2));
 }
@@ -578,36 +585,6 @@ static unsigned mxs_lradc_read_ts_pressure(struct mxs_lradc *lradc,
 #define TS_CH_XM 4
 #define TS_CH_YM 5
 
-static int mxs_lradc_read_ts_channel(struct mxs_lradc *lradc)
-{
-	u32 reg;
-	int val;
-
-	reg = readl(lradc->base + LRADC_CTRL1);
-
-	/* only channels 3 to 5 are of interest here */
-	if (reg & LRADC_CTRL1_LRADC_IRQ(TS_CH_YP)) {
-		mxs_lradc_reg_clear(lradc, LRADC_CTRL1_LRADC_IRQ_EN(TS_CH_YP) |
-			LRADC_CTRL1_LRADC_IRQ(TS_CH_YP), LRADC_CTRL1);
-		val = mxs_lradc_read_raw_channel(lradc, TS_CH_YP);
-	} else if (reg & LRADC_CTRL1_LRADC_IRQ(TS_CH_XM)) {
-		mxs_lradc_reg_clear(lradc, LRADC_CTRL1_LRADC_IRQ_EN(TS_CH_XM) |
-			LRADC_CTRL1_LRADC_IRQ(TS_CH_XM), LRADC_CTRL1);
-		val = mxs_lradc_read_raw_channel(lradc, TS_CH_XM);
-	} else if (reg & LRADC_CTRL1_LRADC_IRQ(TS_CH_YM)) {
-		mxs_lradc_reg_clear(lradc, LRADC_CTRL1_LRADC_IRQ_EN(TS_CH_YM) |
-			LRADC_CTRL1_LRADC_IRQ(TS_CH_YM), LRADC_CTRL1);
-		val = mxs_lradc_read_raw_channel(lradc, TS_CH_YM);
-	} else {
-		return -EIO;
-	}
-
-	mxs_lradc_reg_wrt(lradc, 0, LRADC_DELAY(2));
-	mxs_lradc_reg_wrt(lradc, 0, LRADC_DELAY(3));
-
-	return val;
-}
-
 /*
  * YP(open)--+-------------+
  *           |             |--+
@@ -651,7 +628,8 @@ static void mxs_lradc_prepare_x_pos(struct mxs_lradc *lradc)
 	mxs_lradc_reg_set(lradc, mxs_lradc_drive_x_plate(lradc), LRADC_CTRL0);
 
 	lradc->cur_plate = LRADC_SAMPLE_X;
-	mxs_lradc_setup_ts_channel(lradc, TS_CH_YP);
+	mxs_lradc_map_channel(lradc, TOUCHSCREEN_VCHANNEL1, TS_CH_YP);
+	mxs_lradc_setup_ts_channel(lradc, TOUCHSCREEN_VCHANNEL1);
 }
 
 /*
@@ -672,7 +650,8 @@ static void mxs_lradc_prepare_y_pos(struct mxs_lradc *lradc)
 	mxs_lradc_reg_set(lradc, mxs_lradc_drive_y_plate(lradc), LRADC_CTRL0);
 
 	lradc->cur_plate = LRADC_SAMPLE_Y;
-	mxs_lradc_setup_ts_channel(lradc, TS_CH_XM);
+	mxs_lradc_map_channel(lradc, TOUCHSCREEN_VCHANNEL1, TS_CH_XM);
+	mxs_lradc_setup_ts_channel(lradc, TOUCHSCREEN_VCHANNEL1);
 }
 
 /*
@@ -693,7 +672,10 @@ static void mxs_lradc_prepare_pressure(struct mxs_lradc *lradc)
 	mxs_lradc_reg_set(lradc, mxs_lradc_drive_pressure(lradc), LRADC_CTRL0);
 
 	lradc->cur_plate = LRADC_SAMPLE_PRESSURE;
-	mxs_lradc_setup_ts_pressure(lradc, TS_CH_XP, TS_CH_YM);
+	mxs_lradc_map_channel(lradc, TOUCHSCREEN_VCHANNEL1, TS_CH_YM);
+	mxs_lradc_map_channel(lradc, TOUCHSCREEN_VCHANNEL2, TS_CH_XP);
+	mxs_lradc_setup_ts_pressure(lradc, TOUCHSCREEN_VCHANNEL2,
+						TOUCHSCREEN_VCHANNEL1);
 }
 
 static void mxs_lradc_enable_touch_detection(struct mxs_lradc *lradc)
@@ -704,6 +686,19 @@ static void mxs_lradc_enable_touch_detection(struct mxs_lradc *lradc)
 	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_TOUCH_DETECT_IRQ |
 				LRADC_CTRL1_TOUCH_DETECT_IRQ_EN, LRADC_CTRL1);
 	mxs_lradc_reg_set(lradc, LRADC_CTRL1_TOUCH_DETECT_IRQ_EN, LRADC_CTRL1);
+}
+
+static void mxs_lradc_start_touch_event(struct mxs_lradc *lradc)
+{
+	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_TOUCH_DETECT_IRQ_EN,
+				LRADC_CTRL1);
+	mxs_lradc_reg_set(lradc,
+		LRADC_CTRL1_LRADC_IRQ_EN(TOUCHSCREEN_VCHANNEL1), LRADC_CTRL1);
+	/*
+	 * start with the Y-pos, because it uses nearly the same plate
+	 * settings like the touch detection
+	 */
+	mxs_lradc_prepare_y_pos(lradc);
 }
 
 static void mxs_lradc_report_ts_event(struct mxs_lradc *lradc)
@@ -723,10 +718,12 @@ static void mxs_lradc_complete_touch_event(struct mxs_lradc *lradc)
 	 * start a dummy conversion to burn time to settle the signals
 	 * note: we are not interested in the conversion's value
 	 */
-	mxs_lradc_reg_wrt(lradc, 0, LRADC_CH(5));
-	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_LRADC_IRQ(5), LRADC_CTRL1);
-	mxs_lradc_reg_set(lradc, LRADC_CTRL1_LRADC_IRQ_EN(5), LRADC_CTRL1);
-	mxs_lradc_reg_wrt(lradc, LRADC_DELAY_TRIGGER(1 << 5) |
+	mxs_lradc_reg_wrt(lradc, 0, LRADC_CH(TOUCHSCREEN_VCHANNEL1));
+	mxs_lradc_reg_clear(lradc,
+		LRADC_CTRL1_LRADC_IRQ(TOUCHSCREEN_VCHANNEL1) |
+		LRADC_CTRL1_LRADC_IRQ(TOUCHSCREEN_VCHANNEL2), LRADC_CTRL1);
+	mxs_lradc_reg_wrt(lradc,
+		LRADC_DELAY_TRIGGER(1 << TOUCHSCREEN_VCHANNEL1) |
 		LRADC_DELAY_KICK | LRADC_DELAY_DELAY(10), /* waste 5 ms */
 			LRADC_DELAY(2));
 }
@@ -758,59 +755,45 @@ static void mxs_lradc_finish_touch_event(struct mxs_lradc *lradc, bool valid)
 
 	/* if it is released, wait for the next touch via IRQ */
 	lradc->cur_plate = LRADC_TOUCH;
-	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_TOUCH_DETECT_IRQ, LRADC_CTRL1);
+	mxs_lradc_reg_wrt(lradc, 0, LRADC_DELAY(2));
+	mxs_lradc_reg_wrt(lradc, 0, LRADC_DELAY(3));
+	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_TOUCH_DETECT_IRQ |
+		LRADC_CTRL1_LRADC_IRQ_EN(TOUCHSCREEN_VCHANNEL1) |
+		LRADC_CTRL1_LRADC_IRQ(TOUCHSCREEN_VCHANNEL1), LRADC_CTRL1);
 	mxs_lradc_reg_set(lradc, LRADC_CTRL1_TOUCH_DETECT_IRQ_EN, LRADC_CTRL1);
 }
 
 /* touchscreen's state machine */
 static void mxs_lradc_handle_touch(struct mxs_lradc *lradc)
 {
-	int val;
-
 	switch (lradc->cur_plate) {
 	case LRADC_TOUCH:
-		/*
-		 * start with the Y-pos, because it uses nearly the same plate
-		 * settings like the touch detection
-		 */
-		if (mxs_lradc_check_touch_event(lradc)) {
-			mxs_lradc_reg_clear(lradc,
-					LRADC_CTRL1_TOUCH_DETECT_IRQ_EN,
-					LRADC_CTRL1);
-			mxs_lradc_prepare_y_pos(lradc);
-		}
+		if (mxs_lradc_check_touch_event(lradc))
+			mxs_lradc_start_touch_event(lradc);
 		mxs_lradc_reg_clear(lradc, LRADC_CTRL1_TOUCH_DETECT_IRQ,
 					LRADC_CTRL1);
 		return;
 
 	case LRADC_SAMPLE_Y:
-		val = mxs_lradc_read_ts_channel(lradc);
-		if (val < 0) {
-			mxs_lradc_enable_touch_detection(lradc); /* re-start */
-			return;
-		}
-		lradc->ts_y_pos = val;
+		lradc->ts_y_pos = mxs_lradc_read_raw_channel(lradc,
+							TOUCHSCREEN_VCHANNEL1);
 		mxs_lradc_prepare_x_pos(lradc);
 		return;
 
 	case LRADC_SAMPLE_X:
-		val = mxs_lradc_read_ts_channel(lradc);
-		if (val < 0) {
-			mxs_lradc_enable_touch_detection(lradc); /* re-start */
-			return;
-		}
-		lradc->ts_x_pos = val;
+		lradc->ts_x_pos = mxs_lradc_read_raw_channel(lradc,
+							TOUCHSCREEN_VCHANNEL1);
 		mxs_lradc_prepare_pressure(lradc);
 		return;
 
 	case LRADC_SAMPLE_PRESSURE:
-		lradc->ts_pressure =
-			mxs_lradc_read_ts_pressure(lradc, TS_CH_XP, TS_CH_YM);
+		lradc->ts_pressure = mxs_lradc_read_ts_pressure(lradc,
+							TOUCHSCREEN_VCHANNEL2,
+							TOUCHSCREEN_VCHANNEL1);
 		mxs_lradc_complete_touch_event(lradc);
 		return;
 
 	case LRADC_SAMPLE_VALID:
-		val = mxs_lradc_read_ts_channel(lradc); /* ignore the value */
 		mxs_lradc_finish_touch_event(lradc, 1);
 		break;
 	}
@@ -825,7 +808,7 @@ static int mxs_lradc_read_single(struct iio_dev *iio_dev, int chan, int *val)
 	int ret;
 
 	/*
-	 * See if there is no buffered operation in progess. If there is, simply
+	 * See if there is no buffered operation in progress. If there is, simply
 	 * bail out. This can be improved to support both buffered and raw IO at
 	 * the same time, yet the code becomes horribly complicated. Therefore I
 	 * applied KISS principle here.
@@ -842,9 +825,9 @@ static int mxs_lradc_read_single(struct iio_dev *iio_dev, int chan, int *val)
 	 * used if doing raw sampling.
 	 */
 	if (lradc->soc == IMX28_LRADC)
-		mxs_lradc_reg_clear(lradc, LRADC_CTRL1_MX28_LRADC_IRQ_EN_MASK,
+		mxs_lradc_reg_clear(lradc, LRADC_CTRL1_LRADC_IRQ_EN(0),
 			LRADC_CTRL1);
-	mxs_lradc_reg_clear(lradc, 0xff, LRADC_CTRL0);
+	mxs_lradc_reg_clear(lradc, 0x1, LRADC_CTRL0);
 
 	/* Enable / disable the divider per requirement */
 	if (test_bit(chan, &lradc->is_divided))
@@ -863,7 +846,7 @@ static int mxs_lradc_read_single(struct iio_dev *iio_dev, int chan, int *val)
 
 	/* Enable the IRQ and start sampling the channel. */
 	mxs_lradc_reg_set(lradc, LRADC_CTRL1_LRADC_IRQ_EN(0), LRADC_CTRL1);
-	mxs_lradc_reg_set(lradc, 1 << 0, LRADC_CTRL0);
+	mxs_lradc_reg_set(lradc, BIT(0), LRADC_CTRL0);
 
 	/* Wait for completion on the channel, 1 second max. */
 	ret = wait_for_completion_killable_timeout(&lradc->completion, HZ);
@@ -932,11 +915,12 @@ static int mxs_lradc_read_raw(struct iio_dev *iio_dev,
 	case IIO_CHAN_INFO_OFFSET:
 		if (chan->type == IIO_TEMP) {
 			/* The calculated value from the ADC is in Kelvin, we
-			 * want Celsius for hwmon so the offset is
-			 * -272.15 * scale
+			 * want Celsius for hwmon so the offset is -273.15
+			 * The offset is applied before scaling so it is
+			 * actually -213.15 * 4 / 1.012 = -1079.644268
 			 */
-			*val = -1075;
-			*val2 = 691699;
+			*val = -1079;
+			*val2 = 644268;
 
 			return IIO_VAL_INT_PLUS_MICRO;
 		}
@@ -1006,7 +990,7 @@ static ssize_t mxs_lradc_show_scale_available_ch(struct device *dev,
 	int i, len = 0;
 
 	for (i = 0; i < ARRAY_SIZE(lradc->scale_avail[ch]); i++)
-		len += sprintf(buf + len, "%d.%09u ",
+		len += sprintf(buf + len, "%u.%09u ",
 			       lradc->scale_avail[ch][i].integer,
 			       lradc->scale_avail[ch][i].nano);
 
@@ -1088,9 +1072,8 @@ static void mxs_lradc_disable_ts(struct mxs_lradc *lradc)
 {
 	/* stop all interrupts from firing */
 	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_TOUCH_DETECT_IRQ_EN |
-		LRADC_CTRL1_LRADC_IRQ_EN(2) | LRADC_CTRL1_LRADC_IRQ_EN(3) |
-		LRADC_CTRL1_LRADC_IRQ_EN(4) | LRADC_CTRL1_LRADC_IRQ_EN(5),
-		LRADC_CTRL1);
+		LRADC_CTRL1_LRADC_IRQ_EN(TOUCHSCREEN_VCHANNEL1) |
+		LRADC_CTRL1_LRADC_IRQ_EN(TOUCHSCREEN_VCHANNEL2), LRADC_CTRL1);
 
 	/* Power-down touchscreen touch-detect circuitry. */
 	mxs_lradc_reg_clear(lradc, mxs_lradc_plate_mask(lradc), LRADC_CTRL0);
@@ -1156,26 +1139,31 @@ static irqreturn_t mxs_lradc_handle_irq(int irq, void *data)
 	struct iio_dev *iio = data;
 	struct mxs_lradc *lradc = iio_priv(iio);
 	unsigned long reg = readl(lradc->base + LRADC_CTRL1);
+	uint32_t clr_irq = mxs_lradc_irq_mask(lradc);
 	const uint32_t ts_irq_mask =
 		LRADC_CTRL1_TOUCH_DETECT_IRQ |
-		LRADC_CTRL1_LRADC_IRQ(2) |
-		LRADC_CTRL1_LRADC_IRQ(3) |
-		LRADC_CTRL1_LRADC_IRQ(4) |
-		LRADC_CTRL1_LRADC_IRQ(5);
+		LRADC_CTRL1_LRADC_IRQ(TOUCHSCREEN_VCHANNEL1) |
+		LRADC_CTRL1_LRADC_IRQ(TOUCHSCREEN_VCHANNEL2);
 
 	if (!(reg & mxs_lradc_irq_mask(lradc)))
 		return IRQ_NONE;
 
-	if (lradc->use_touchscreen && (reg & ts_irq_mask))
+	if (lradc->use_touchscreen && (reg & ts_irq_mask)) {
 		mxs_lradc_handle_touch(lradc);
 
-	if (iio_buffer_enabled(iio))
-		iio_trigger_poll(iio->trig, iio_get_time_ns());
-	else if (reg & LRADC_CTRL1_LRADC_IRQ(0))
-		complete(&lradc->completion);
+		/* Make sure we don't clear the next conversion's interrupt. */
+		clr_irq &= ~(LRADC_CTRL1_LRADC_IRQ(TOUCHSCREEN_VCHANNEL1) |
+				LRADC_CTRL1_LRADC_IRQ(TOUCHSCREEN_VCHANNEL2));
+	}
 
-	mxs_lradc_reg_clear(lradc, reg & mxs_lradc_irq_mask(lradc),
-			LRADC_CTRL1);
+	if (iio_buffer_enabled(iio)) {
+		if (reg & lradc->buffer_vchans)
+			iio_trigger_poll(iio->trig);
+	} else if (reg & LRADC_CTRL1_LRADC_IRQ(0)) {
+		complete(&lradc->completion);
+	}
+
+	mxs_lradc_reg_clear(lradc, reg & clr_irq, LRADC_CTRL1);
 
 	return IRQ_HANDLED;
 }
@@ -1280,16 +1268,17 @@ static int mxs_lradc_buffer_preenable(struct iio_dev *iio)
 	if (!ret)
 		return -EBUSY;
 
-	lradc->buffer = kmalloc(len * sizeof(*lradc->buffer), GFP_KERNEL);
+	lradc->buffer = kmalloc_array(len, sizeof(*lradc->buffer), GFP_KERNEL);
 	if (!lradc->buffer) {
 		ret = -ENOMEM;
 		goto err_mem;
 	}
 
 	if (lradc->soc == IMX28_LRADC)
-		mxs_lradc_reg_clear(lradc, LRADC_CTRL1_MX28_LRADC_IRQ_EN_MASK,
-							LRADC_CTRL1);
-	mxs_lradc_reg_clear(lradc, 0xff, LRADC_CTRL0);
+		mxs_lradc_reg_clear(lradc,
+			lradc->buffer_vchans << LRADC_CTRL1_LRADC_IRQ_EN_OFFSET,
+			LRADC_CTRL1);
+	mxs_lradc_reg_clear(lradc, lradc->buffer_vchans, LRADC_CTRL0);
 
 	for_each_set_bit(chan, iio->active_scan_mask, LRADC_MAX_TOTAL_CHANS) {
 		ctrl4_set |= chan << LRADC_CTRL4_LRADCSELECT_OFFSET(ofs);
@@ -1322,10 +1311,11 @@ static int mxs_lradc_buffer_postdisable(struct iio_dev *iio)
 	mxs_lradc_reg_clear(lradc, LRADC_DELAY_TRIGGER_LRADCS_MASK |
 					LRADC_DELAY_KICK, LRADC_DELAY(0));
 
-	mxs_lradc_reg_clear(lradc, 0xff, LRADC_CTRL0);
+	mxs_lradc_reg_clear(lradc, lradc->buffer_vchans, LRADC_CTRL0);
 	if (lradc->soc == IMX28_LRADC)
-		mxs_lradc_reg_clear(lradc, LRADC_CTRL1_MX28_LRADC_IRQ_EN_MASK,
-					LRADC_CTRL1);
+		mxs_lradc_reg_clear(lradc,
+			lradc->buffer_vchans << LRADC_CTRL1_LRADC_IRQ_EN_OFFSET,
+			LRADC_CTRL1);
 
 	kfree(lradc->buffer);
 	mutex_unlock(&lradc->lock);
@@ -1351,7 +1341,7 @@ static bool mxs_lradc_validate_scan_mask(struct iio_dev *iio,
 	if (lradc->use_touchbutton)
 		rsvd_chans++;
 	if (lradc->use_touchscreen)
-		rsvd_chans++;
+		rsvd_chans += 2;
 
 	/* Test for attempts to map channels with special mode of operation. */
 	if (bitmap_intersects(mask, &rsvd_mask, LRADC_MAX_TOTAL_CHANS))
@@ -1376,7 +1366,7 @@ static const struct iio_buffer_setup_ops mxs_lradc_buffer_ops = {
  * Driver initialization
  */
 
-#define MXS_ADC_CHAN(idx, chan_type) {				\
+#define MXS_ADC_CHAN(idx, chan_type, name) {			\
 	.type = (chan_type),					\
 	.indexed = 1,						\
 	.scan_index = (idx),					\
@@ -1389,17 +1379,18 @@ static const struct iio_buffer_setup_ops mxs_lradc_buffer_ops = {
 		.realbits = LRADC_RESOLUTION,			\
 		.storagebits = 32,				\
 	},							\
+	.datasheet_name = (name),				\
 }
 
-static const struct iio_chan_spec mxs_lradc_chan_spec[] = {
-	MXS_ADC_CHAN(0, IIO_VOLTAGE),
-	MXS_ADC_CHAN(1, IIO_VOLTAGE),
-	MXS_ADC_CHAN(2, IIO_VOLTAGE),
-	MXS_ADC_CHAN(3, IIO_VOLTAGE),
-	MXS_ADC_CHAN(4, IIO_VOLTAGE),
-	MXS_ADC_CHAN(5, IIO_VOLTAGE),
-	MXS_ADC_CHAN(6, IIO_VOLTAGE),
-	MXS_ADC_CHAN(7, IIO_VOLTAGE),	/* VBATT */
+static const struct iio_chan_spec mx23_lradc_chan_spec[] = {
+	MXS_ADC_CHAN(0, IIO_VOLTAGE, "LRADC0"),
+	MXS_ADC_CHAN(1, IIO_VOLTAGE, "LRADC1"),
+	MXS_ADC_CHAN(2, IIO_VOLTAGE, "LRADC2"),
+	MXS_ADC_CHAN(3, IIO_VOLTAGE, "LRADC3"),
+	MXS_ADC_CHAN(4, IIO_VOLTAGE, "LRADC4"),
+	MXS_ADC_CHAN(5, IIO_VOLTAGE, "LRADC5"),
+	MXS_ADC_CHAN(6, IIO_VOLTAGE, "VDDIO"),
+	MXS_ADC_CHAN(7, IIO_VOLTAGE, "VBATT"),
 	/* Combined Temperature sensors */
 	{
 		.type = IIO_TEMP,
@@ -1410,13 +1401,57 @@ static const struct iio_chan_spec mxs_lradc_chan_spec[] = {
 				      BIT(IIO_CHAN_INFO_SCALE),
 		.channel = 8,
 		.scan_type = {.sign = 'u', .realbits = 18, .storagebits = 32,},
+		.datasheet_name = "TEMP_DIE",
 	},
-	MXS_ADC_CHAN(10, IIO_VOLTAGE),	/* VDDIO */
-	MXS_ADC_CHAN(11, IIO_VOLTAGE),	/* VTH */
-	MXS_ADC_CHAN(12, IIO_VOLTAGE),	/* VDDA */
-	MXS_ADC_CHAN(13, IIO_VOLTAGE),	/* VDDD */
-	MXS_ADC_CHAN(14, IIO_VOLTAGE),	/* VBG */
-	MXS_ADC_CHAN(15, IIO_VOLTAGE),	/* VDD5V */
+	/* Hidden channel to keep indexes */
+	{
+		.type = IIO_TEMP,
+		.indexed = 1,
+		.scan_index = -1,
+		.channel = 9,
+	},
+	MXS_ADC_CHAN(10, IIO_VOLTAGE, NULL),
+	MXS_ADC_CHAN(11, IIO_VOLTAGE, NULL),
+	MXS_ADC_CHAN(12, IIO_VOLTAGE, "USB_DP"),
+	MXS_ADC_CHAN(13, IIO_VOLTAGE, "USB_DN"),
+	MXS_ADC_CHAN(14, IIO_VOLTAGE, "VBG"),
+	MXS_ADC_CHAN(15, IIO_VOLTAGE, "VDD5V"),
+};
+
+static const struct iio_chan_spec mx28_lradc_chan_spec[] = {
+	MXS_ADC_CHAN(0, IIO_VOLTAGE, "LRADC0"),
+	MXS_ADC_CHAN(1, IIO_VOLTAGE, "LRADC1"),
+	MXS_ADC_CHAN(2, IIO_VOLTAGE, "LRADC2"),
+	MXS_ADC_CHAN(3, IIO_VOLTAGE, "LRADC3"),
+	MXS_ADC_CHAN(4, IIO_VOLTAGE, "LRADC4"),
+	MXS_ADC_CHAN(5, IIO_VOLTAGE, "LRADC5"),
+	MXS_ADC_CHAN(6, IIO_VOLTAGE, "LRADC6"),
+	MXS_ADC_CHAN(7, IIO_VOLTAGE, "VBATT"),
+	/* Combined Temperature sensors */
+	{
+		.type = IIO_TEMP,
+		.indexed = 1,
+		.scan_index = 8,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
+				      BIT(IIO_CHAN_INFO_OFFSET) |
+				      BIT(IIO_CHAN_INFO_SCALE),
+		.channel = 8,
+		.scan_type = {.sign = 'u', .realbits = 18, .storagebits = 32,},
+		.datasheet_name = "TEMP_DIE",
+	},
+	/* Hidden channel to keep indexes */
+	{
+		.type = IIO_TEMP,
+		.indexed = 1,
+		.scan_index = -1,
+		.channel = 9,
+	},
+	MXS_ADC_CHAN(10, IIO_VOLTAGE, "VDDIO"),
+	MXS_ADC_CHAN(11, IIO_VOLTAGE, "VTH"),
+	MXS_ADC_CHAN(12, IIO_VOLTAGE, "VDDA"),
+	MXS_ADC_CHAN(13, IIO_VOLTAGE, "VDDD"),
+	MXS_ADC_CHAN(14, IIO_VOLTAGE, "VBG"),
+	MXS_ADC_CHAN(15, IIO_VOLTAGE, "VDD5V"),
 };
 
 static int mxs_lradc_hw_init(struct mxs_lradc *lradc)
@@ -1427,6 +1462,7 @@ static int mxs_lradc_hw_init(struct mxs_lradc *lradc)
 		(LRADC_DELAY_TIMER_PER << LRADC_DELAY_DELAY_OFFSET);
 
 	int ret = stmp_reset_block(lradc->base);
+
 	if (ret)
 		return ret;
 
@@ -1499,20 +1535,38 @@ static int mxs_lradc_probe_touchscreen(struct mxs_lradc *lradc,
 		return -EINVAL;
 	}
 
-	lradc->over_sample_cnt = 4;
-	ret = of_property_read_u32(lradc_node, "fsl,ave-ctrl", &adapt);
-	if (ret == 0)
+	if (of_property_read_u32(lradc_node, "fsl,ave-ctrl", &adapt)) {
+		lradc->over_sample_cnt = 4;
+	} else {
+		if (adapt < 1 || adapt > 32) {
+			dev_err(lradc->dev, "Invalid sample count (%u)\n",
+				adapt);
+			return -EINVAL;
+		}
 		lradc->over_sample_cnt = adapt;
+	}
 
-	lradc->over_sample_delay = 2;
-	ret = of_property_read_u32(lradc_node, "fsl,ave-delay", &adapt);
-	if (ret == 0)
+	if (of_property_read_u32(lradc_node, "fsl,ave-delay", &adapt)) {
+		lradc->over_sample_delay = 2;
+	} else {
+		if (adapt < 2 || adapt > LRADC_DELAY_DELAY_MASK + 1) {
+			dev_err(lradc->dev, "Invalid sample delay (%u)\n",
+				adapt);
+			return -EINVAL;
+		}
 		lradc->over_sample_delay = adapt;
+	}
 
-	lradc->settling_delay = 10;
-	ret = of_property_read_u32(lradc_node, "fsl,settling", &adapt);
-	if (ret == 0)
+	if (of_property_read_u32(lradc_node, "fsl,settling", &adapt)) {
+		lradc->settling_delay = 10;
+	} else {
+		if (adapt < 1 || adapt > LRADC_DELAY_DELAY_MASK) {
+			dev_err(lradc->dev, "Invalid settling delay (%u)\n",
+				adapt);
+			return -EINVAL;
+		}
 		lradc->settling_delay = adapt;
+	}
 
 	return 0;
 }
@@ -1562,17 +1616,24 @@ static int mxs_lradc_probe(struct platform_device *pdev)
 
 	touch_ret = mxs_lradc_probe_touchscreen(lradc, node);
 
+	if (touch_ret == 0)
+		lradc->buffer_vchans = BUFFER_VCHANS_LIMITED;
+	else
+		lradc->buffer_vchans = BUFFER_VCHANS_ALL;
+
 	/* Grab all IRQ sources */
 	for (i = 0; i < of_cfg->irq_count; i++) {
 		lradc->irq[i] = platform_get_irq(pdev, i);
-		if (lradc->irq[i] < 0)
-			return lradc->irq[i];
+		if (lradc->irq[i] < 0) {
+			ret = lradc->irq[i];
+			goto err_clk;
+		}
 
 		ret = devm_request_irq(dev, lradc->irq[i],
 					mxs_lradc_handle_irq, 0,
 					of_cfg->irq_name[i], iio);
 		if (ret)
-			return ret;
+			goto err_clk;
 	}
 
 	lradc->vref_mv = of_cfg->vref_mv;
@@ -1586,15 +1647,21 @@ static int mxs_lradc_probe(struct platform_device *pdev)
 	iio->dev.parent = &pdev->dev;
 	iio->info = &mxs_lradc_iio_info;
 	iio->modes = INDIO_DIRECT_MODE;
-	iio->channels = mxs_lradc_chan_spec;
-	iio->num_channels = ARRAY_SIZE(mxs_lradc_chan_spec);
 	iio->masklength = LRADC_MAX_TOTAL_CHANS;
+
+	if (lradc->soc == IMX23_LRADC) {
+		iio->channels = mx23_lradc_chan_spec;
+		iio->num_channels = ARRAY_SIZE(mx23_lradc_chan_spec);
+	} else {
+		iio->channels = mx28_lradc_chan_spec;
+		iio->num_channels = ARRAY_SIZE(mx28_lradc_chan_spec);
+	}
 
 	ret = iio_triggered_buffer_setup(iio, &iio_pollfunc_store_time,
 				&mxs_lradc_trigger_handler,
 				&mxs_lradc_buffer_ops);
 	if (ret)
-		return ret;
+		goto err_clk;
 
 	ret = mxs_lradc_trigger_init(iio);
 	if (ret)
@@ -1649,6 +1716,8 @@ err_dev:
 	mxs_lradc_trigger_remove(iio);
 err_trig:
 	iio_triggered_buffer_cleanup(iio);
+err_clk:
+	clk_disable_unprepare(lradc->clk);
 	return ret;
 }
 
@@ -1670,7 +1739,6 @@ static int mxs_lradc_remove(struct platform_device *pdev)
 static struct platform_driver mxs_lradc_driver = {
 	.driver	= {
 		.name	= DRIVER_NAME,
-		.owner	= THIS_MODULE,
 		.of_match_table = mxs_lradc_dt_ids,
 	},
 	.probe	= mxs_lradc_probe,
@@ -1680,6 +1748,6 @@ static struct platform_driver mxs_lradc_driver = {
 module_platform_driver(mxs_lradc_driver);
 
 MODULE_AUTHOR("Marek Vasut <marex@denx.de>");
-MODULE_DESCRIPTION("Freescale i.MX28 LRADC driver");
+MODULE_DESCRIPTION("Freescale MXS LRADC driver");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:" DRIVER_NAME);

@@ -48,20 +48,20 @@
 #define DEBUG_SUBSYSTEM S_LOG
 
 
-#include <obd_class.h>
-#include <lustre_log.h>
+#include "../include/obd_class.h"
+#include "../include/lustre_log.h"
 #include "llog_internal.h"
 
 /*
  * Allocate a new log or catalog handle
  * Used inside llog_open().
  */
-struct llog_handle *llog_alloc_handle(void)
+static struct llog_handle *llog_alloc_handle(void)
 {
 	struct llog_handle *loghandle;
 
-	OBD_ALLOC_PTR(loghandle);
-	if (loghandle == NULL)
+	loghandle = kzalloc(sizeof(*loghandle), GFP_NOFS);
+	if (!loghandle)
 		return NULL;
 
 	init_rwsem(&loghandle->lgh_lock);
@@ -75,7 +75,7 @@ struct llog_handle *llog_alloc_handle(void)
 /*
  * Free llog handle and header data if exists. Used in llog_close() only
  */
-void llog_free_handle(struct llog_handle *loghandle)
+static void llog_free_handle(struct llog_handle *loghandle)
 {
 	LASSERT(loghandle != NULL);
 
@@ -88,9 +88,9 @@ void llog_free_handle(struct llog_handle *loghandle)
 	else if (loghandle->lgh_hdr->llh_flags & LLOG_F_IS_CAT)
 		LASSERT(list_empty(&loghandle->u.chd.chd_head));
 	LASSERT(sizeof(*(loghandle->lgh_hdr)) == LLOG_CHUNK_SIZE);
-	OBD_FREE(loghandle->lgh_hdr, LLOG_CHUNK_SIZE);
+	kfree(loghandle->lgh_hdr);
 out:
-	OBD_FREE_PTR(loghandle);
+	kfree(loghandle);
 }
 
 void llog_handle_get(struct llog_handle *loghandle)
@@ -140,7 +140,7 @@ int llog_cancel_rec(const struct lu_env *env, struct llog_handle *loghandle,
 			       loghandle->lgh_ctxt->loc_obd->obd_name,
 			       POSTID(&loghandle->lgh_id.lgl_oi),
 			       loghandle->lgh_id.lgl_ogen, rc);
-			GOTO(out_err, rc);
+			goto out_err;
 		}
 		return 1;
 	}
@@ -153,7 +153,7 @@ int llog_cancel_rec(const struct lu_env *env, struct llog_handle *loghandle,
 		       loghandle->lgh_ctxt->loc_obd->obd_name,
 		       POSTID(&loghandle->lgh_id.lgl_oi),
 		       loghandle->lgh_id.lgl_ogen, rc);
-		GOTO(out_err, rc);
+		goto out_err;
 	}
 	return 0;
 out_err:
@@ -188,7 +188,7 @@ static int llog_read_header(const struct lu_env *env,
 		llh->llh_hdr.lrh_type = LLOG_HDR_MAGIC;
 		llh->llh_hdr.lrh_len = llh->llh_tail.lrt_len = LLOG_CHUNK_SIZE;
 		llh->llh_hdr.lrh_index = llh->llh_tail.lrt_index = 0;
-		llh->llh_timestamp = cfs_time_current_sec();
+		llh->llh_timestamp = get_seconds();
 		if (uuid)
 			memcpy(&llh->llh_tgtuuid, uuid,
 			       sizeof(llh->llh_tgtuuid));
@@ -207,8 +207,8 @@ int llog_init_handle(const struct lu_env *env, struct llog_handle *handle,
 
 	LASSERT(handle->lgh_hdr == NULL);
 
-	OBD_ALLOC_PTR(llh);
-	if (llh == NULL)
+	llh = kzalloc(sizeof(*llh), GFP_NOFS);
+	if (!llh)
 		return -ENOMEM;
 	handle->lgh_hdr = llh;
 	/* first assign flags to use llog_client_ops */
@@ -224,7 +224,8 @@ int llog_init_handle(const struct lu_env *env, struct llog_handle *handle,
 			       llh->llh_flags & LLOG_F_IS_CAT ?
 			       "catalog" : "plain",
 			       flags & LLOG_F_IS_CAT ? "catalog" : "plain");
-			GOTO(out, rc = -EINVAL);
+			rc = -EINVAL;
+			goto out;
 		} else if (llh->llh_flags &
 			   (LLOG_F_IS_PLAIN | LLOG_F_IS_CAT)) {
 			/*
@@ -235,7 +236,8 @@ int llog_init_handle(const struct lu_env *env, struct llog_handle *handle,
 		} else {
 			/* for some reason the llh_flags has no type set */
 			CERROR("llog type is not specified!\n");
-			GOTO(out, rc = -EINVAL);
+			rc = -EINVAL;
+			goto out;
 		}
 		if (unlikely(uuid &&
 			     !obd_uuid_equals(uuid, &llh->llh_tgtuuid))) {
@@ -243,7 +245,8 @@ int llog_init_handle(const struct lu_env *env, struct llog_handle *handle,
 			       handle->lgh_ctxt->loc_obd->obd_name,
 			       (char *)uuid->uuid,
 			       (char *)llh->llh_tgtuuid.uuid);
-			GOTO(out, rc = -EEXIST);
+			rc = -EEXIST;
+			goto out;
 		}
 	}
 	if (flags & LLOG_F_IS_CAT) {
@@ -258,7 +261,7 @@ int llog_init_handle(const struct lu_env *env, struct llog_handle *handle,
 	}
 out:
 	if (rc) {
-		OBD_FREE_PTR(llh);
+		kfree(llh);
 		handle->lgh_hdr = NULL;
 	}
 	return rc;
@@ -280,7 +283,7 @@ static int llog_process_thread(void *arg)
 
 	LASSERT(llh);
 
-	OBD_ALLOC(buf, LLOG_CHUNK_SIZE);
+	buf = kzalloc(LLOG_CHUNK_SIZE, GFP_NOFS);
 	if (!buf) {
 		lpi->lpi_rc = -ENOMEM;
 		return 0;
@@ -316,7 +319,7 @@ repeat:
 		rc = llog_next_block(lpi->lpi_env, loghandle, &saved_index,
 				     index, &cur_offset, buf, LLOG_CHUNK_SIZE);
 		if (rc)
-			GOTO(out, rc);
+			goto out;
 
 		/* NB: when rec->lrh_len is accessed it is already swabbed
 		 * since it is used at the "end" of the loop and the rec
@@ -336,16 +339,18 @@ repeat:
 
 			if (rec->lrh_index == 0) {
 				/* probably another rec just got added? */
+				rc = 0;
 				if (index <= loghandle->lgh_last_idx)
-					GOTO(repeat, rc = 0);
-				GOTO(out, rc = 0); /* no more records */
+					goto repeat;
+				goto out; /* no more records */
 			}
 			if (rec->lrh_len == 0 ||
 			    rec->lrh_len > LLOG_CHUNK_SIZE) {
-				CWARN("invalid length %d in llog record for "
-				      "index %d/%d\n", rec->lrh_len,
+				CWARN("invalid length %d in llog record for index %d/%d\n",
+				      rec->lrh_len,
 				      rec->lrh_index, index);
-				GOTO(out, rc = -EINVAL);
+				rc = -EINVAL;
+				goto out;
 			}
 
 			if (rec->lrh_index < index) {
@@ -369,7 +374,7 @@ repeat:
 						 lpi->lpi_cbdata);
 				last_called_index = index;
 				if (rc == LLOG_PROC_BREAK) {
-					GOTO(out, rc);
+					goto out;
 				} else if (rc == LLOG_DEL_RECORD) {
 					llog_cancel_rec(lpi->lpi_env,
 							loghandle,
@@ -377,15 +382,17 @@ repeat:
 					rc = 0;
 				}
 				if (rc)
-					GOTO(out, rc);
+					goto out;
 			} else {
 				CDEBUG(D_OTHER, "Skipped index %d\n", index);
 			}
 
 			/* next record, still in buffer? */
 			++index;
-			if (index > last_index)
-				GOTO(out, rc = 0);
+			if (index > last_index) {
+				rc = 0;
+				goto out;
+			}
 		}
 	}
 
@@ -393,7 +400,7 @@ out:
 	if (cd != NULL)
 		cd->lpcd_last_idx = last_called_index;
 
-	OBD_FREE(buf, LLOG_CHUNK_SIZE);
+	kfree(buf);
 	lpi->lpi_rc = rc;
 	return 0;
 }
@@ -427,8 +434,8 @@ int llog_process_or_fork(const struct lu_env *env,
 	struct llog_process_info *lpi;
 	int		      rc;
 
-	OBD_ALLOC_PTR(lpi);
-	if (lpi == NULL) {
+	lpi = kzalloc(sizeof(*lpi), GFP_NOFS);
+	if (!lpi) {
 		CERROR("cannot alloc pointer\n");
 		return -ENOMEM;
 	}
@@ -447,7 +454,7 @@ int llog_process_or_fork(const struct lu_env *env,
 		if (IS_ERR_VALUE(rc)) {
 			CERROR("%s: cannot start thread: rc = %d\n",
 			       loghandle->lgh_ctxt->loc_obd->obd_name, rc);
-			OBD_FREE_PTR(lpi);
+			kfree(lpi);
 			return rc;
 		}
 		wait_for_completion(&lpi->lpi_completion);
@@ -456,7 +463,7 @@ int llog_process_or_fork(const struct lu_env *env,
 		llog_process_thread(lpi);
 	}
 	rc = lpi->lpi_rc;
-	OBD_FREE_PTR(lpi);
+	kfree(lpi);
 	return rc;
 }
 EXPORT_SYMBOL(llog_process_or_fork);
@@ -477,7 +484,7 @@ int llog_reverse_process(const struct lu_env *env,
 	void *buf;
 	int rc = 0, first_index = 1, index, idx;
 
-	OBD_ALLOC(buf, LLOG_CHUNK_SIZE);
+	buf = kzalloc(LLOG_CHUNK_SIZE, GFP_NOFS);
 	if (!buf)
 		return -ENOMEM;
 
@@ -506,7 +513,7 @@ int llog_reverse_process(const struct lu_env *env,
 		rc = llog_prev_block(env, loghandle, index, buf,
 				     LLOG_CHUNK_SIZE);
 		if (rc)
-			GOTO(out, rc);
+			goto out;
 
 		rec = buf;
 		idx = rec->lrh_index;
@@ -522,8 +529,11 @@ int llog_reverse_process(const struct lu_env *env,
 
 		/* process records in buffer, starting where we found one */
 		while ((void *)tail > buf) {
-			if (tail->lrt_index == 0)
-				GOTO(out, rc = 0); /* no more records */
+			if (tail->lrt_index == 0) {
+				/* no more records */
+				rc = 0;
+				goto out;
+			}
 
 			/* if set, process the callback on this record */
 			if (ext2_test_bit(index, llh->llh_bitmap)) {
@@ -532,27 +542,28 @@ int llog_reverse_process(const struct lu_env *env,
 
 				rc = cb(env, loghandle, rec, data);
 				if (rc == LLOG_PROC_BREAK) {
-					GOTO(out, rc);
+					goto out;
 				} else if (rc == LLOG_DEL_RECORD) {
 					llog_cancel_rec(env, loghandle,
 							tail->lrt_index);
 					rc = 0;
 				}
 				if (rc)
-					GOTO(out, rc);
+					goto out;
 			}
 
 			/* previous record, still in buffer? */
 			--index;
-			if (index < first_index)
-				GOTO(out, rc = 0);
+			if (index < first_index) {
+				rc = 0;
+				goto out;
+			}
 			tail = (void *)tail - tail->lrt_len;
 		}
 	}
 
 out:
-	if (buf)
-		OBD_FREE(buf, LLOG_CHUNK_SIZE);
+	kfree(buf);
 	return rc;
 }
 EXPORT_SYMBOL(llog_reverse_process);
@@ -750,8 +761,10 @@ int llog_open_create(const struct lu_env *env, struct llog_ctxt *ctxt,
 	d = lu2dt_dev((*res)->lgh_obj->do_lu.lo_dev);
 
 	th = dt_trans_create(env, d);
-	if (IS_ERR(th))
-		GOTO(out, rc = PTR_ERR(th));
+	if (IS_ERR(th)) {
+		rc = PTR_ERR(th);
+		goto out;
+	}
 
 	rc = llog_declare_create(env, *res, th);
 	if (rc == 0) {
@@ -820,11 +833,11 @@ int llog_write(const struct lu_env *env, struct llog_handle *loghandle,
 
 	rc = llog_declare_write_rec(env, loghandle, rec, idx, th);
 	if (rc)
-		GOTO(out_trans, rc);
+		goto out_trans;
 
 	rc = dt_trans_start_local(env, dt, th);
 	if (rc)
-		GOTO(out_trans, rc);
+		goto out_trans;
 
 	down_write(&loghandle->lgh_lock);
 	rc = llog_write_rec(env, loghandle, rec, reccookie,
@@ -878,9 +891,11 @@ int llog_close(const struct lu_env *env, struct llog_handle *loghandle)
 
 	rc = llog_handle2ops(loghandle, &lop);
 	if (rc)
-		GOTO(out, rc);
-	if (lop->lop_close == NULL)
-		GOTO(out, rc = -EOPNOTSUPP);
+		goto out;
+	if (lop->lop_close == NULL) {
+		rc = -EOPNOTSUPP;
+		goto out;
+	}
 	rc = lop->lop_close(env, loghandle);
 out:
 	llog_handle_put(loghandle);
@@ -892,18 +907,18 @@ int llog_is_empty(const struct lu_env *env, struct llog_ctxt *ctxt,
 		  char *name)
 {
 	struct llog_handle	*llh;
-	int			 rc = 0;
+	int			 rc;
 
 	rc = llog_open(env, ctxt, &llh, NULL, name, LLOG_OPEN_EXISTS);
 	if (rc < 0) {
 		if (likely(rc == -ENOENT))
 			rc = 0;
-		GOTO(out, rc);
+		goto out;
 	}
 
 	rc = llog_init_handle(env, llh, LLOG_F_IS_PLAIN, NULL);
 	if (rc)
-		GOTO(out_close, rc);
+		goto out_close;
 	rc = llog_get_size(llh);
 
 out_close:
@@ -948,19 +963,19 @@ int llog_backup(const struct lu_env *env, struct obd_device *obd,
 
 	rc = llog_init_handle(env, llh, LLOG_F_IS_PLAIN, NULL);
 	if (rc)
-		GOTO(out_close, rc);
+		goto out_close;
 
 	/* Make sure there's no old backup log */
 	rc = llog_erase(env, bctxt, NULL, backup);
 	if (rc < 0 && rc != -ENOENT)
-		GOTO(out_close, rc);
+		goto out_close;
 
 	/* open backup log */
 	rc = llog_open_create(env, bctxt, &bllh, NULL, backup);
 	if (rc) {
 		CERROR("%s: failed to open backup logfile %s: rc = %d\n",
 		       obd->obd_name, backup, rc);
-		GOTO(out_close, rc);
+		goto out_close;
 	}
 
 	/* check that backup llog is not the same object as original one */
@@ -968,12 +983,13 @@ int llog_backup(const struct lu_env *env, struct obd_device *obd,
 		CERROR("%s: backup llog %s to itself (%s), objects %p/%p\n",
 		       obd->obd_name, name, backup, llh->lgh_obj,
 		       bllh->lgh_obj);
-		GOTO(out_backup, rc = -EEXIST);
+		rc = -EEXIST;
+		goto out_backup;
 	}
 
 	rc = llog_init_handle(env, bllh, LLOG_F_IS_PLAIN, NULL);
 	if (rc)
-		GOTO(out_backup, rc);
+		goto out_backup;
 
 	/* Copy log record by record */
 	rc = llog_process_or_fork(env, llh, llog_copy_handler, (void *)bllh,

@@ -6,7 +6,7 @@
 #include <l4/sys/utcb.h>
 
 enum l4x_cpu_modes {
-	L4X_MODE_KERNEL = SYSTEM_MODE,
+	L4X_MODE_KERNEL = SVC_MODE,
 	L4X_MODE_USER   = USR_MODE,
 };
 
@@ -31,8 +31,8 @@ static inline unsigned long l4x_get_cpu_mode(struct pt_regs *r)
 }
 
 #ifdef CONFIG_L4_VCPU
-static inline void vcpu_to_ptregs(l4_vcpu_state_t *v,
-                                  struct pt_regs *regs)
+static inline void vcpu_to_ptregs_common(l4_vcpu_state_t *v,
+                                         struct pt_regs *regs)
 {
 	regs->uregs[0]  = v->r.r[0];
 	regs->uregs[1]  = v->r.r[1];
@@ -54,11 +54,21 @@ static inline void vcpu_to_ptregs(l4_vcpu_state_t *v,
 		regs->ARM_cpsr = v->r.flags & ~PSR_I_BIT;
 	else
 		regs->ARM_cpsr = v->r.flags | PSR_I_BIT;
+}
+
+static inline void vcpu_to_ptregs_kern(l4_vcpu_state_t *v,
+                                       struct pt_regs *regs)
+{
+	vcpu_to_ptregs_common(v, regs);
+	regs->ARM_cpsr = (regs->ARM_cpsr & ~MODE_MASK) | SVC_MODE;
+}
+
+static inline void vcpu_to_ptregs_user(l4_vcpu_state_t *v,
+                                       struct pt_regs *regs)
+{
+	vcpu_to_ptregs_common(v, regs);
 	// disable IRQ and FIQ, for valid_user_regs(regsp) + mode
-	if (v->saved_state & L4_VCPU_F_USER_MODE)
-		regs->ARM_cpsr &= ~(PSR_F_BIT | PSR_I_BIT | (MODE_MASK ^ USR_MODE));
-	else
-		regs->ARM_cpsr = (regs->ARM_cpsr & ~MODE_MASK) | SVC_MODE;
+	regs->ARM_cpsr &= ~(PSR_F_BIT | PSR_I_BIT | (MODE_MASK ^ USR_MODE));
 }
 
 static inline void ptregs_to_vcpu(l4_vcpu_state_t *v,

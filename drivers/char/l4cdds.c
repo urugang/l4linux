@@ -22,7 +22,7 @@ MODULE_LICENSE("GPL");
 enum { NR_DEVS = 4 };
 
 static int  devs_pos;
-static int major_num = 240;
+static int major_num;
 module_param(major_num, int, 0);
 
 
@@ -224,7 +224,7 @@ static int __init init_one(unsigned idx)
 			return ret;
 		}
 	} else {
-		if ((ret = l4x_query_and_get_ds(device[idx].name, "l4bdds",
+		if ((ret = l4x_query_and_get_ds(device[idx].name, "l4cdds",
 		                                &device[idx].dscap,
 		                                &device[idx].addr, &stat))) {
 			printk("Failed to get file: %s(%d)\n",
@@ -251,7 +251,8 @@ static int __init l4cdds_init(void)
 		return 0;
 	}
 
-	if (register_chrdev(major_num, "l4cdds", &fops)) {
+	major_num = register_chrdev(major_num, "l4cdds", &fops);
+	if (major_num <= 0) {
 		printk("l4cdds: Unable to register chrdev\n");
 		return -ENODEV;
 	}

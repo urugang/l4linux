@@ -21,7 +21,7 @@
 #define WM5110_NUM_AOD_ISR 2
 #define WM5110_NUM_ISR 5
 
-static const struct reg_default wm5110_reva_patch[] = {
+static const struct reg_sequence wm5110_reva_patch[] = {
 	{ 0x80, 0x3 },
 	{ 0x44, 0x20 },
 	{ 0x45, 0x40 },
@@ -134,7 +134,7 @@ static const struct reg_default wm5110_reva_patch[] = {
 	{ 0x209, 0x002A },
 };
 
-static const struct reg_default wm5110_revb_patch[] = {
+static const struct reg_sequence wm5110_revb_patch[] = {
 	{ 0x80, 0x3 },
 	{ 0x36e, 0x0210 },
 	{ 0x370, 0x0210 },
@@ -224,7 +224,7 @@ static const struct reg_default wm5110_revb_patch[] = {
 	{ 0x80, 0x0 },
 };
 
-static const struct reg_default wm5110_revd_patch[] = {
+static const struct reg_sequence wm5110_revd_patch[] = {
 	{ 0x80, 0x3 },
 	{ 0x80, 0x3 },
 	{ 0x393, 0x27 },
@@ -249,6 +249,16 @@ static const struct reg_default wm5110_revd_patch[] = {
 	{ 0x80, 0x0 },
 };
 
+/* Add extra headphone write sequence locations */
+static const struct reg_default wm5110_reve_patch[] = {
+	{ 0x80, 0x3 },
+	{ 0x80, 0x3 },
+	{ 0x4b, 0x138 },
+	{ 0x4c, 0x13d },
+	{ 0x80, 0x0 },
+	{ 0x80, 0x0 },
+};
+
 /* We use a function so we can use ARRAY_SIZE() */
 int wm5110_patch(struct arizona *arizona)
 {
@@ -266,7 +276,9 @@ int wm5110_patch(struct arizona *arizona)
 					     wm5110_revd_patch,
 					     ARRAY_SIZE(wm5110_revd_patch));
 	default:
-		return 0;
+		return regmap_register_patch(arizona->regmap,
+					     wm5110_reve_patch,
+					     ARRAY_SIZE(wm5110_reve_patch));
 	}
 }
 EXPORT_SYMBOL_GPL(wm5110_patch);
@@ -340,11 +352,11 @@ static const struct regmap_irq wm5110_irqs[ARIZONA_NUM_IRQ] = {
 		.reg_offset = 1, .mask = ARIZONA_DSP_IRQ1_EINT1
 	},
 
-	[ARIZONA_IRQ_SPK_SHUTDOWN_WARN] = {
-		.reg_offset = 2, .mask = ARIZONA_SPK_SHUTDOWN_WARN_EINT1
+	[ARIZONA_IRQ_SPK_OVERHEAT_WARN] = {
+		.reg_offset = 2, .mask = ARIZONA_SPK_OVERHEAT_WARN_EINT1
 	},
-	[ARIZONA_IRQ_SPK_SHUTDOWN] = {
-		.reg_offset = 2, .mask = ARIZONA_SPK_SHUTDOWN_EINT1
+	[ARIZONA_IRQ_SPK_OVERHEAT] = {
+		.reg_offset = 2, .mask = ARIZONA_SPK_OVERHEAT_EINT1
 	},
 	[ARIZONA_IRQ_HPDET] = {
 		.reg_offset = 2, .mask = ARIZONA_HPDET_EINT1
@@ -416,15 +428,27 @@ static const struct regmap_irq wm5110_irqs[ARIZONA_NUM_IRQ] = {
 	[ARIZONA_IRQ_ISRC2_CFG_ERR] = {
 		.reg_offset = 3, .mask = ARIZONA_ISRC2_CFG_ERR_EINT1
 	},
+	[ARIZONA_IRQ_HP3R_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP3R_DONE_EINT1
+	},
+	[ARIZONA_IRQ_HP3L_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP3L_DONE_EINT1
+	},
+	[ARIZONA_IRQ_HP2R_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP2R_DONE_EINT1
+	},
+	[ARIZONA_IRQ_HP2L_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP2L_DONE_EINT1
+	},
+	[ARIZONA_IRQ_HP1R_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP1R_DONE_EINT1
+	},
+	[ARIZONA_IRQ_HP1L_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP1L_DONE_EINT1
+	},
 
 	[ARIZONA_IRQ_BOOT_DONE] = {
 		.reg_offset = 4, .mask = ARIZONA_BOOT_DONE_EINT1
-	},
-	[ARIZONA_IRQ_DCS_DAC_DONE] = {
-		.reg_offset = 4, .mask = ARIZONA_DCS_DAC_DONE_EINT1
-	},
-	[ARIZONA_IRQ_DCS_HP_DONE] = {
-		.reg_offset = 4, .mask = ARIZONA_DCS_HP_DONE_EINT1
 	},
 	[ARIZONA_IRQ_FLL2_CLOCK_OK] = {
 		.reg_offset = 4, .mask = ARIZONA_FLL2_CLOCK_OK_EINT1
@@ -445,15 +469,215 @@ const struct regmap_irq_chip wm5110_irq = {
 };
 EXPORT_SYMBOL_GPL(wm5110_irq);
 
+static const struct regmap_irq wm5110_revd_irqs[ARIZONA_NUM_IRQ] = {
+	[ARIZONA_IRQ_GP4] = { .reg_offset = 0, .mask = ARIZONA_GP4_EINT1 },
+	[ARIZONA_IRQ_GP3] = { .reg_offset = 0, .mask = ARIZONA_GP3_EINT1 },
+	[ARIZONA_IRQ_GP2] = { .reg_offset = 0, .mask = ARIZONA_GP2_EINT1 },
+	[ARIZONA_IRQ_GP1] = { .reg_offset = 0, .mask = ARIZONA_GP1_EINT1 },
+
+	[ARIZONA_IRQ_DSP4_RAM_RDY] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP4_RAM_RDY_EINT1
+	},
+	[ARIZONA_IRQ_DSP3_RAM_RDY] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP3_RAM_RDY_EINT1
+	},
+	[ARIZONA_IRQ_DSP2_RAM_RDY] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP2_RAM_RDY_EINT1
+	},
+	[ARIZONA_IRQ_DSP1_RAM_RDY] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP1_RAM_RDY_EINT1
+	},
+	[ARIZONA_IRQ_DSP_IRQ8] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP_IRQ8_EINT1
+	},
+	[ARIZONA_IRQ_DSP_IRQ7] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP_IRQ7_EINT1
+	},
+	[ARIZONA_IRQ_DSP_IRQ6] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP_IRQ6_EINT1
+	},
+	[ARIZONA_IRQ_DSP_IRQ5] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP_IRQ5_EINT1
+	},
+	[ARIZONA_IRQ_DSP_IRQ4] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP_IRQ4_EINT1
+	},
+	[ARIZONA_IRQ_DSP_IRQ3] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP_IRQ3_EINT1
+	},
+	[ARIZONA_IRQ_DSP_IRQ2] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP_IRQ2_EINT1
+	},
+	[ARIZONA_IRQ_DSP_IRQ1] = {
+		.reg_offset = 1, .mask = ARIZONA_DSP_IRQ1_EINT1
+	},
+
+	[ARIZONA_IRQ_SPK_OVERHEAT_WARN] = {
+		.reg_offset = 2, .mask = ARIZONA_SPK_OVERHEAT_WARN_EINT1
+	},
+	[ARIZONA_IRQ_SPK_OVERHEAT] = {
+		.reg_offset = 2, .mask = ARIZONA_SPK_OVERHEAT_EINT1
+	},
+	[ARIZONA_IRQ_HPDET] = {
+		.reg_offset = 2, .mask = ARIZONA_HPDET_EINT1
+	},
+	[ARIZONA_IRQ_MICDET] = {
+		.reg_offset = 2, .mask = ARIZONA_MICDET_EINT1
+	},
+	[ARIZONA_IRQ_WSEQ_DONE] = {
+		.reg_offset = 2, .mask = ARIZONA_WSEQ_DONE_EINT1
+	},
+	[ARIZONA_IRQ_DRC2_SIG_DET] = {
+		.reg_offset = 2, .mask = ARIZONA_DRC2_SIG_DET_EINT1
+	},
+	[ARIZONA_IRQ_DRC1_SIG_DET] = {
+		.reg_offset = 2, .mask = ARIZONA_DRC1_SIG_DET_EINT1
+	},
+	[ARIZONA_IRQ_ASRC2_LOCK] = {
+		.reg_offset = 2, .mask = ARIZONA_ASRC2_LOCK_EINT1
+	},
+	[ARIZONA_IRQ_ASRC1_LOCK] = {
+		.reg_offset = 2, .mask = ARIZONA_ASRC1_LOCK_EINT1
+	},
+	[ARIZONA_IRQ_UNDERCLOCKED] = {
+		.reg_offset = 2, .mask = ARIZONA_UNDERCLOCKED_EINT1
+	},
+	[ARIZONA_IRQ_OVERCLOCKED] = {
+		.reg_offset = 2, .mask = ARIZONA_OVERCLOCKED_EINT1
+	},
+	[ARIZONA_IRQ_FLL2_LOCK] = {
+		.reg_offset = 2, .mask = ARIZONA_FLL2_LOCK_EINT1
+	},
+	[ARIZONA_IRQ_FLL1_LOCK] = {
+		.reg_offset = 2, .mask = ARIZONA_FLL1_LOCK_EINT1
+	},
+	[ARIZONA_IRQ_CLKGEN_ERR] = {
+		.reg_offset = 2, .mask = ARIZONA_CLKGEN_ERR_EINT1
+	},
+	[ARIZONA_IRQ_CLKGEN_ERR_ASYNC] = {
+		.reg_offset = 2, .mask = ARIZONA_CLKGEN_ERR_ASYNC_EINT1
+	},
+
+	[ARIZONA_IRQ_CTRLIF_ERR] = {
+		.reg_offset = 3, .mask = ARIZONA_V2_CTRLIF_ERR_EINT1
+	},
+	[ARIZONA_IRQ_MIXER_DROPPED_SAMPLES] = {
+		.reg_offset = 3, .mask = ARIZONA_V2_MIXER_DROPPED_SAMPLE_EINT1
+	},
+	[ARIZONA_IRQ_ASYNC_CLK_ENA_LOW] = {
+		.reg_offset = 3, .mask = ARIZONA_V2_ASYNC_CLK_ENA_LOW_EINT1
+	},
+	[ARIZONA_IRQ_SYSCLK_ENA_LOW] = {
+		.reg_offset = 3, .mask = ARIZONA_V2_SYSCLK_ENA_LOW_EINT1
+	},
+	[ARIZONA_IRQ_ISRC1_CFG_ERR] = {
+		.reg_offset = 3, .mask = ARIZONA_V2_ISRC1_CFG_ERR_EINT1
+	},
+	[ARIZONA_IRQ_ISRC2_CFG_ERR] = {
+		.reg_offset = 3, .mask = ARIZONA_V2_ISRC2_CFG_ERR_EINT1
+	},
+	[ARIZONA_IRQ_ISRC3_CFG_ERR] = {
+		.reg_offset = 3, .mask = ARIZONA_V2_ISRC3_CFG_ERR_EINT1
+	},
+	[ARIZONA_IRQ_HP3R_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP3R_DONE_EINT1
+	},
+	[ARIZONA_IRQ_HP3L_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP3L_DONE_EINT1
+	},
+	[ARIZONA_IRQ_HP2R_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP2R_DONE_EINT1
+	},
+	[ARIZONA_IRQ_HP2L_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP2L_DONE_EINT1
+	},
+	[ARIZONA_IRQ_HP1R_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP1R_DONE_EINT1
+	},
+	[ARIZONA_IRQ_HP1L_DONE] = {
+		.reg_offset = 3, .mask = ARIZONA_HP1L_DONE_EINT1
+	},
+
+	[ARIZONA_IRQ_BOOT_DONE] = {
+		.reg_offset = 4, .mask = ARIZONA_BOOT_DONE_EINT1
+	},
+	[ARIZONA_IRQ_ASRC_CFG_ERR] = {
+		.reg_offset = 4, .mask = ARIZONA_V2_ASRC_CFG_ERR_EINT1
+	},
+	[ARIZONA_IRQ_FLL2_CLOCK_OK] = {
+		.reg_offset = 4, .mask = ARIZONA_FLL2_CLOCK_OK_EINT1
+	},
+	[ARIZONA_IRQ_FLL1_CLOCK_OK] = {
+		.reg_offset = 4, .mask = ARIZONA_FLL1_CLOCK_OK_EINT1
+	},
+
+	[ARIZONA_IRQ_DSP_SHARED_WR_COLL] = {
+		.reg_offset = 5, .mask = ARIZONA_DSP_SHARED_WR_COLL_EINT1
+	},
+	[ARIZONA_IRQ_SPK_SHUTDOWN] = {
+		.reg_offset = 5, .mask = ARIZONA_SPK_SHUTDOWN_EINT1
+	},
+	[ARIZONA_IRQ_SPK1R_SHORT] = {
+		.reg_offset = 5, .mask = ARIZONA_SPK1R_SHORT_EINT1
+	},
+	[ARIZONA_IRQ_SPK1L_SHORT] = {
+		.reg_offset = 5, .mask = ARIZONA_SPK1L_SHORT_EINT1
+	},
+	[ARIZONA_IRQ_HP3R_SC_NEG] = {
+		.reg_offset = 5, .mask = ARIZONA_HP3R_SC_NEG_EINT1
+	},
+	[ARIZONA_IRQ_HP3R_SC_POS] = {
+		.reg_offset = 5, .mask = ARIZONA_HP3R_SC_POS_EINT1
+	},
+	[ARIZONA_IRQ_HP3L_SC_NEG] = {
+		.reg_offset = 5, .mask = ARIZONA_HP3L_SC_NEG_EINT1
+	},
+	[ARIZONA_IRQ_HP3L_SC_POS] = {
+		.reg_offset = 5, .mask = ARIZONA_HP3L_SC_POS_EINT1
+	},
+	[ARIZONA_IRQ_HP2R_SC_NEG] = {
+		.reg_offset = 5, .mask = ARIZONA_HP2R_SC_NEG_EINT1
+	},
+	[ARIZONA_IRQ_HP2R_SC_POS] = {
+		.reg_offset = 5, .mask = ARIZONA_HP2R_SC_POS_EINT1
+	},
+	[ARIZONA_IRQ_HP2L_SC_NEG] = {
+		.reg_offset = 5, .mask = ARIZONA_HP2L_SC_NEG_EINT1
+	},
+	[ARIZONA_IRQ_HP2L_SC_POS] = {
+		.reg_offset = 5, .mask = ARIZONA_HP2L_SC_POS_EINT1
+	},
+	[ARIZONA_IRQ_HP1R_SC_NEG] = {
+		.reg_offset = 5, .mask = ARIZONA_HP1R_SC_NEG_EINT1
+	},
+	[ARIZONA_IRQ_HP1R_SC_POS] = {
+		.reg_offset = 5, .mask = ARIZONA_HP1R_SC_POS_EINT1
+	},
+	[ARIZONA_IRQ_HP1L_SC_NEG] = {
+		.reg_offset = 5, .mask = ARIZONA_HP1L_SC_NEG_EINT1
+	},
+	[ARIZONA_IRQ_HP1L_SC_POS] = {
+		.reg_offset = 5, .mask = ARIZONA_HP1L_SC_POS_EINT1
+	},
+};
+
+const struct regmap_irq_chip wm5110_revd_irq = {
+	.name = "wm5110 IRQ",
+	.status_base = ARIZONA_INTERRUPT_STATUS_1,
+	.mask_base = ARIZONA_INTERRUPT_STATUS_1_MASK,
+	.ack_base = ARIZONA_INTERRUPT_STATUS_1,
+	.num_regs = 6,
+	.irqs = wm5110_revd_irqs,
+	.num_irqs = ARRAY_SIZE(wm5110_revd_irqs),
+};
+EXPORT_SYMBOL_GPL(wm5110_revd_irq);
+
 static const struct reg_default wm5110_reg_default[] = {
 	{ 0x00000008, 0x0019 },    /* R8     - Ctrl IF SPI CFG 1 */
 	{ 0x00000009, 0x0001 },    /* R9     - Ctrl IF I2C1 CFG 1 */
 	{ 0x0000000A, 0x0001 },    /* R10    - Ctrl IF I2C2 CFG 1 */
 	{ 0x0000000B, 0x0036 },    /* R11    - Ctrl IF I2C1 CFG 2 */
 	{ 0x0000000C, 0x0036 },    /* R12    - Ctrl IF I2C2 CFG 2 */
-	{ 0x00000016, 0x0000 },    /* R22    - Write Sequencer Ctrl 0 */
-	{ 0x00000017, 0x0000 },    /* R23    - Write Sequencer Ctrl 1 */
-	{ 0x00000018, 0x0000 },    /* R24    - Write Sequencer Ctrl 2 */
 	{ 0x00000020, 0x0000 },    /* R32    - Tone Generator 1 */
 	{ 0x00000021, 0x1000 },    /* R33    - Tone Generator 2 */
 	{ 0x00000022, 0x0000 },    /* R34    - Tone Generator 3 */
@@ -464,6 +688,7 @@ static const struct reg_default wm5110_reg_default[] = {
 	{ 0x00000032, 0x0100 },    /* R50    - PWM Drive 3 */
 	{ 0x00000040, 0x0000 },    /* R64    - Wake control */
 	{ 0x00000041, 0x0000 },    /* R65    - Sequence control */
+	{ 0x00000042, 0x0000 },    /* R66    - Spare Triggers */
 	{ 0x00000061, 0x01FF },    /* R97    - Sample Rate Sequence Select 1 */
 	{ 0x00000062, 0x01FF },    /* R98    - Sample Rate Sequence Select 2 */
 	{ 0x00000063, 0x01FF },    /* R99    - Sample Rate Sequence Select 3 */
@@ -490,6 +715,7 @@ static const struct reg_default wm5110_reg_default[] = {
 	{ 0x00000104, 0x0011 },    /* R260   - Sample rate 3 */
 	{ 0x00000112, 0x0305 },    /* R274   - Async clock 1 */
 	{ 0x00000113, 0x0011 },    /* R275   - Async sample rate 1 */
+	{ 0x00000114, 0x0011 },    /* R276   - Async sample rate 2 */
 	{ 0x00000149, 0x0000 },    /* R329   - Output system clock */
 	{ 0x0000014A, 0x0000 },    /* R330   - Output async clock */
 	{ 0x00000152, 0x0000 },    /* R338   - Rate Estimator 1 */
@@ -541,11 +767,9 @@ static const struct reg_default wm5110_reg_default[] = {
 	{ 0x0000021A, 0x01A6 },    /* R538   - Mic Bias Ctrl 3 */
 	{ 0x00000293, 0x0000 },    /* R659   - Accessory Detect Mode 1 */
 	{ 0x0000029B, 0x0028 },    /* R667   - Headphone Detect 1 */
-	{ 0x0000029C, 0x0000 },    /* R668   - Headphone Detect 2 */
 	{ 0x000002A2, 0x0000 },    /* R674   - Micd clamp control */
 	{ 0x000002A3, 0x1102 },    /* R675   - Mic Detect 1 */
 	{ 0x000002A4, 0x009F },    /* R676   - Mic Detect 2 */
-	{ 0x000002A5, 0x0000 },    /* R677   - Mic Detect 3 */
 	{ 0x000002A6, 0x3737 },    /* R678   - Mic Detect Level 1 */
 	{ 0x000002A7, 0x372C },    /* R679   - Mic Detect Level 2 */
 	{ 0x000002A8, 0x1422 },    /* R680   - Mic Detect Level 3 */
@@ -635,8 +859,6 @@ static const struct reg_default wm5110_reg_default[] = {
 	{ 0x00000440, 0x8FFF },    /* R1088  - DRE Enable */
 	{ 0x00000450, 0x0000 },    /* R1104  - DAC AEC Control 1 */
 	{ 0x00000458, 0x0000 },    /* R1112  - Noise Gate Control */
-	{ 0x00000480, 0x0040 },    /* R1152  - Class W ANC Threshold 1 */
-	{ 0x00000481, 0x0040 },    /* R1153  - Class W ANC Threshold 2 */
 	{ 0x00000490, 0x0069 },    /* R1168  - PDM SPK1 CTRL 1 */
 	{ 0x00000491, 0x0000 },    /* R1169  - PDM SPK1 CTRL 2 */
 	{ 0x00000492, 0x0069 },    /* R1170  - PDM SPK2 CTRL 1 */
@@ -682,8 +904,16 @@ static const struct reg_default wm5110_reg_default[] = {
 	{ 0x00000548, 0x1818 },    /* R1352  - AIF2 Frame Ctrl 2 */
 	{ 0x00000549, 0x0000 },    /* R1353  - AIF2 Frame Ctrl 3 */
 	{ 0x0000054A, 0x0001 },    /* R1354  - AIF2 Frame Ctrl 4 */
+	{ 0x0000054B, 0x0002 },    /* R1355  - AIF2 Frame Ctrl 5 */
+	{ 0x0000054C, 0x0003 },    /* R1356  - AIF2 Frame Ctrl 6 */
+	{ 0x0000054D, 0x0004 },    /* R1357  - AIF2 Frame Ctrl 7 */
+	{ 0x0000054E, 0x0005 },    /* R1358  - AIF2 Frame Ctrl 8 */
 	{ 0x00000551, 0x0000 },    /* R1361  - AIF2 Frame Ctrl 11 */
 	{ 0x00000552, 0x0001 },    /* R1362  - AIF2 Frame Ctrl 12 */
+	{ 0x00000553, 0x0002 },    /* R1363  - AIF2 Frame Ctrl 13 */
+	{ 0x00000554, 0x0003 },    /* R1364  - AIF2 Frame Ctrl 14 */
+	{ 0x00000555, 0x0004 },    /* R1365  - AIF2 Frame Ctrl 15 */
+	{ 0x00000556, 0x0005 },    /* R1366  - AIF2 Frame Ctrl 16 */
 	{ 0x00000559, 0x0000 },    /* R1369  - AIF2 Tx Enables */
 	{ 0x0000055A, 0x0000 },    /* R1370  - AIF2 Rx Enables */
 	{ 0x00000580, 0x000C },    /* R1408  - AIF3 BCLK Ctrl */
@@ -1274,18 +1504,19 @@ static const struct reg_default wm5110_reg_default[] = {
 	{ 0x00000D0A, 0xFFFF },    /* R3338  - Interrupt Status 3 Mask */
 	{ 0x00000D0B, 0xFFFF },    /* R3339  - Interrupt Status 4 Mask */
 	{ 0x00000D0C, 0xFEFF },    /* R3340  - Interrupt Status 5 Mask */
+	{ 0x00000D0D, 0xFFFF },    /* R3341  - Interrupt Status 6 Mask */
 	{ 0x00000D0F, 0x0000 },    /* R3343  - Interrupt Control */
 	{ 0x00000D18, 0xFFFF },    /* R3352  - IRQ2 Status 1 Mask */
 	{ 0x00000D19, 0xFFFF },    /* R3353  - IRQ2 Status 2 Mask */
 	{ 0x00000D1A, 0xFFFF },    /* R3354  - IRQ2 Status 3 Mask */
 	{ 0x00000D1B, 0xFFFF },    /* R3355  - IRQ2 Status 4 Mask */
 	{ 0x00000D1C, 0xFFFF },    /* R3356  - IRQ2 Status 5 Mask */
+	{ 0x00000D1D, 0xFFFF },    /* R3357  - IRQ2 Status 6 Mask */
 	{ 0x00000D1F, 0x0000 },    /* R3359  - IRQ2 Control */
 	{ 0x00000D53, 0xFFFF },    /* R3411  - AOD IRQ Mask IRQ1 */
 	{ 0x00000D54, 0xFFFF },    /* R3412  - AOD IRQ Mask IRQ2 */
 	{ 0x00000D56, 0x0000 },    /* R3414  - Jack detect debounce */
 	{ 0x00000E00, 0x0000 },    /* R3584  - FX_Ctrl1 */
-	{ 0x00000E01, 0x0000 },    /* R3585  - FX_Ctrl2 */
 	{ 0x00000E10, 0x6318 },    /* R3600  - EQ1_1 */
 	{ 0x00000E11, 0x6300 },    /* R3601  - EQ1_2 */
 	{ 0x00000E12, 0x0FC8 },    /* R3602  - EQ1_3 */
@@ -1402,14 +1633,9 @@ static const struct reg_default wm5110_reg_default[] = {
 	{ 0x00000F00, 0x0000 },    /* R3840  - Clock Control */
 	{ 0x00000F01, 0x0000 },    /* R3841  - ANC_SRC */
 	{ 0x00001100, 0x0010 },    /* R4352  - DSP1 Control 1 */
-	{ 0x00001101, 0x0000 },    /* R4353  - DSP1 Clocking 1 */
 	{ 0x00001200, 0x0010 },    /* R4608  - DSP2 Control 1 */
-	{ 0x00001201, 0x0000 },    /* R4609  - DSP2 Clocking 1 */
 	{ 0x00001300, 0x0010 },    /* R4864  - DSP3 Control 1 */
-	{ 0x00001301, 0x0000 },    /* R4865  - DSP3 Clocking 1 */
 	{ 0x00001400, 0x0010 },    /* R5120  - DSP4 Control 1 */
-	{ 0x00001401, 0x0000 },    /* R5121  - DSP4 Clocking 1 */
-	{ 0x00001404, 0x0000 },    /* R5124  - DSP4 Status 1 */
 };
 
 static bool wm5110_is_rev_b_adsp_memory(unsigned int reg)
@@ -1493,6 +1719,7 @@ static bool wm5110_readable_register(struct device *dev, unsigned int reg)
 	case ARIZONA_PWM_DRIVE_3:
 	case ARIZONA_WAKE_CONTROL:
 	case ARIZONA_SEQUENCE_CONTROL:
+	case ARIZONA_SPARE_TRIGGERS:
 	case ARIZONA_SAMPLE_RATE_SEQUENCE_SELECT_1:
 	case ARIZONA_SAMPLE_RATE_SEQUENCE_SELECT_2:
 	case ARIZONA_SAMPLE_RATE_SEQUENCE_SELECT_3:
@@ -1524,6 +1751,8 @@ static bool wm5110_readable_register(struct device *dev, unsigned int reg)
 	case ARIZONA_ASYNC_CLOCK_1:
 	case ARIZONA_ASYNC_SAMPLE_RATE_1:
 	case ARIZONA_ASYNC_SAMPLE_RATE_1_STATUS:
+	case ARIZONA_ASYNC_SAMPLE_RATE_2:
+	case ARIZONA_ASYNC_SAMPLE_RATE_2_STATUS:
 	case ARIZONA_OUTPUT_SYSTEM_CLOCK:
 	case ARIZONA_OUTPUT_ASYNC_CLOCK:
 	case ARIZONA_RATE_ESTIMATOR_1:
@@ -1573,6 +1802,8 @@ static bool wm5110_readable_register(struct device *dev, unsigned int reg)
 	case ARIZONA_MIC_BIAS_CTRL_1:
 	case ARIZONA_MIC_BIAS_CTRL_2:
 	case ARIZONA_MIC_BIAS_CTRL_3:
+	case ARIZONA_HP_CTRL_1L:
+	case ARIZONA_HP_CTRL_1R:
 	case ARIZONA_ACCESSORY_DETECT_MODE_1:
 	case ARIZONA_HEADPHONE_DETECT_1:
 	case ARIZONA_HEADPHONE_DETECT_2:
@@ -1717,8 +1948,16 @@ static bool wm5110_readable_register(struct device *dev, unsigned int reg)
 	case ARIZONA_AIF2_FRAME_CTRL_2:
 	case ARIZONA_AIF2_FRAME_CTRL_3:
 	case ARIZONA_AIF2_FRAME_CTRL_4:
+	case ARIZONA_AIF2_FRAME_CTRL_5:
+	case ARIZONA_AIF2_FRAME_CTRL_6:
+	case ARIZONA_AIF2_FRAME_CTRL_7:
+	case ARIZONA_AIF2_FRAME_CTRL_8:
 	case ARIZONA_AIF2_FRAME_CTRL_11:
 	case ARIZONA_AIF2_FRAME_CTRL_12:
+	case ARIZONA_AIF2_FRAME_CTRL_13:
+	case ARIZONA_AIF2_FRAME_CTRL_14:
+	case ARIZONA_AIF2_FRAME_CTRL_15:
+	case ARIZONA_AIF2_FRAME_CTRL_16:
 	case ARIZONA_AIF2_TX_ENABLES:
 	case ARIZONA_AIF2_RX_ENABLES:
 	case ARIZONA_AIF3_BCLK_CTRL:
@@ -2311,22 +2550,26 @@ static bool wm5110_readable_register(struct device *dev, unsigned int reg)
 	case ARIZONA_INTERRUPT_STATUS_3:
 	case ARIZONA_INTERRUPT_STATUS_4:
 	case ARIZONA_INTERRUPT_STATUS_5:
+	case ARIZONA_INTERRUPT_STATUS_6:
 	case ARIZONA_INTERRUPT_STATUS_1_MASK:
 	case ARIZONA_INTERRUPT_STATUS_2_MASK:
 	case ARIZONA_INTERRUPT_STATUS_3_MASK:
 	case ARIZONA_INTERRUPT_STATUS_4_MASK:
 	case ARIZONA_INTERRUPT_STATUS_5_MASK:
+	case ARIZONA_INTERRUPT_STATUS_6_MASK:
 	case ARIZONA_INTERRUPT_CONTROL:
 	case ARIZONA_IRQ2_STATUS_1:
 	case ARIZONA_IRQ2_STATUS_2:
 	case ARIZONA_IRQ2_STATUS_3:
 	case ARIZONA_IRQ2_STATUS_4:
 	case ARIZONA_IRQ2_STATUS_5:
+	case ARIZONA_IRQ2_STATUS_6:
 	case ARIZONA_IRQ2_STATUS_1_MASK:
 	case ARIZONA_IRQ2_STATUS_2_MASK:
 	case ARIZONA_IRQ2_STATUS_3_MASK:
 	case ARIZONA_IRQ2_STATUS_4_MASK:
 	case ARIZONA_IRQ2_STATUS_5_MASK:
+	case ARIZONA_IRQ2_STATUS_6_MASK:
 	case ARIZONA_IRQ2_CONTROL:
 	case ARIZONA_INTERRUPT_RAW_STATUS_2:
 	case ARIZONA_INTERRUPT_RAW_STATUS_3:
@@ -2335,6 +2578,7 @@ static bool wm5110_readable_register(struct device *dev, unsigned int reg)
 	case ARIZONA_INTERRUPT_RAW_STATUS_6:
 	case ARIZONA_INTERRUPT_RAW_STATUS_7:
 	case ARIZONA_INTERRUPT_RAW_STATUS_8:
+	case ARIZONA_INTERRUPT_RAW_STATUS_9:
 	case ARIZONA_IRQ_PIN_STATUS:
 	case ARIZONA_AOD_WKUP_AND_TRIG:
 	case ARIZONA_AOD_IRQ1:
@@ -2593,12 +2837,18 @@ static bool wm5110_volatile_register(struct device *dev, unsigned int reg)
 	switch (reg) {
 	case ARIZONA_SOFTWARE_RESET:
 	case ARIZONA_DEVICE_REVISION:
+	case ARIZONA_WRITE_SEQUENCER_CTRL_0:
+	case ARIZONA_WRITE_SEQUENCER_CTRL_1:
+	case ARIZONA_WRITE_SEQUENCER_CTRL_2:
 	case ARIZONA_HAPTICS_STATUS:
 	case ARIZONA_SAMPLE_RATE_1_STATUS:
 	case ARIZONA_SAMPLE_RATE_2_STATUS:
 	case ARIZONA_SAMPLE_RATE_3_STATUS:
 	case ARIZONA_ASYNC_SAMPLE_RATE_1_STATUS:
+	case ARIZONA_ASYNC_SAMPLE_RATE_2_STATUS:
 	case ARIZONA_MIC_DETECT_3:
+	case ARIZONA_HP_CTRL_1L:
+	case ARIZONA_HP_CTRL_1R:
 	case ARIZONA_HEADPHONE_DETECT_2:
 	case ARIZONA_INPUT_ENABLES_STATUS:
 	case ARIZONA_OUTPUT_STATUS_1:
@@ -2610,11 +2860,13 @@ static bool wm5110_volatile_register(struct device *dev, unsigned int reg)
 	case ARIZONA_INTERRUPT_STATUS_3:
 	case ARIZONA_INTERRUPT_STATUS_4:
 	case ARIZONA_INTERRUPT_STATUS_5:
+	case ARIZONA_INTERRUPT_STATUS_6:
 	case ARIZONA_IRQ2_STATUS_1:
 	case ARIZONA_IRQ2_STATUS_2:
 	case ARIZONA_IRQ2_STATUS_3:
 	case ARIZONA_IRQ2_STATUS_4:
 	case ARIZONA_IRQ2_STATUS_5:
+	case ARIZONA_IRQ2_STATUS_6:
 	case ARIZONA_INTERRUPT_RAW_STATUS_2:
 	case ARIZONA_INTERRUPT_RAW_STATUS_3:
 	case ARIZONA_INTERRUPT_RAW_STATUS_4:
@@ -2622,6 +2874,7 @@ static bool wm5110_volatile_register(struct device *dev, unsigned int reg)
 	case ARIZONA_INTERRUPT_RAW_STATUS_6:
 	case ARIZONA_INTERRUPT_RAW_STATUS_7:
 	case ARIZONA_INTERRUPT_RAW_STATUS_8:
+	case ARIZONA_INTERRUPT_RAW_STATUS_9:
 	case ARIZONA_IRQ_PIN_STATUS:
 	case ARIZONA_AOD_WKUP_AND_TRIG:
 	case ARIZONA_AOD_IRQ1:
@@ -2758,6 +3011,8 @@ const struct regmap_config wm5110_spi_regmap = {
 	.reg_bits = 32,
 	.pad_bits = 16,
 	.val_bits = 16,
+	.reg_format_endian = REGMAP_ENDIAN_BIG,
+	.val_format_endian = REGMAP_ENDIAN_BIG,
 
 	.max_register = WM5110_MAX_REGISTER,
 	.readable_reg = wm5110_readable_register,
@@ -2772,6 +3027,8 @@ EXPORT_SYMBOL_GPL(wm5110_spi_regmap);
 const struct regmap_config wm5110_i2c_regmap = {
 	.reg_bits = 32,
 	.val_bits = 16,
+	.reg_format_endian = REGMAP_ENDIAN_BIG,
+	.val_format_endian = REGMAP_ENDIAN_BIG,
 
 	.max_register = WM5110_MAX_REGISTER,
 	.readable_reg = wm5110_readable_register,

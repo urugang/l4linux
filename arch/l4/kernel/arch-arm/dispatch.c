@@ -123,12 +123,8 @@ static inline int l4x_msgtag_fpu(unsigned cpu)
 static void l4x_fpu_get_info(l4_utcb_t *utcb)
 {
 	struct l4x_arch_cpu_fpu_state *x = l4x_fpu_get(smp_processor_id());
-#ifdef CONFIG_L4_NAEC
 	x->fpexc   = (l4_utcb_mr_u(utcb)->mr[21] & ~0x40000000)
 	             | (x->fpexc & 0x40000000);
-#else
-	x->fpexc   = l4_utcb_mr_u(utcb)->mr[21];
-#endif
 	x->fpinst  = l4_utcb_mr_u(utcb)->mr[22];
 	x->fpinst2 = l4_utcb_mr_u(utcb)->mr[23];
 }
@@ -143,9 +139,16 @@ static inline int l4x_msgtag_copy_ureg(l4_utcb_t *u)
 	return 0;
 }
 
-static inline int l4x_is_triggered_exception(l4_umword_t val)
+enum { L4X_TRIGGERED_EXCEPTION_VAL = 0x3e };
+
+static inline int l4x_is_triggered_exception_from_err(l4_umword_t err)
 {
-	return (val & 0x00f00000) == 0x00500000;
+	return (err >> 26) == L4X_TRIGGERED_EXCEPTION_VAL;
+}
+
+static inline int l4x_is_triggered_exception_from_val(l4_umword_t val)
+{
+	return val == L4X_TRIGGERED_EXCEPTION_VAL;
 }
 
 static inline unsigned long regs_pc(struct task_struct *p)
@@ -172,14 +175,8 @@ static inline void l4x_arch_do_syscall_trace(struct task_struct *p)
 static inline int l4x_hybrid_check_after_syscall(l4_utcb_t *utcb)
 {
 	l4_exc_regs_t *exc = l4_utcb_exc_u(utcb);
-#ifdef CONFIG_L4_NAEC
-	return exc->err == ((0x20 << 26) | 0x40) // after L4 syscall
-	       || (exc->err >> 26) == 0x3e; // L4 syscall exr
-#else
-	return exc->err == 0x00310000 // after L4 syscall
-	       //|| exc->err == 0x00200000
-	       || exc->err == 0x00500000; // L4 syscall exr
-#endif
+	return exc->err == ((0x3d << 26) | 0x40) // after L4 syscall
+	       || (exc->err >> 26) == L4X_TRIGGERED_EXCEPTION_VAL; // L4 syscall exr
 }
 
 #ifdef CONFIG_L4_VCPU
@@ -200,20 +197,23 @@ static inline l4_umword_t l4x_l4pfa(struct thread_struct *t)
 
 static inline int l4x_iswrpf(unsigned long error_code)
 {
-#ifdef CONFIG_L4_NAEC
 	return error_code & (1 << 6);
-#else
-	return error_code & (1 << 11);
-#endif
 }
 
-static inline int l4x_ispf(struct thread_struct *t)
+static inline int l4x_ispf(unsigned long error_code)
 {
-#ifdef CONFIG_L4_NAEC
-	return ((t->error_code >> 26) & 0x30) == 0x20;
-#else
-	return t->error_code & 0x00010000;
-#endif
+	// ((ec >> 26) & 0x30) == 0x20 && (ec & 0x3f) < 0x10
+	return (error_code & 0xc0000030) == 0x80000000;
+}
+
+static inline int l4x_ispf_t(struct thread_struct *t)
+{
+	return l4x_ispf(t->error_code);
+}
+
+static inline int l4x_ispf_v(l4_vcpu_state_t *vcpu)
+{
+	return l4x_ispf(vcpu->r.err);
 }
 
 void l4x_finish_task_switch(struct task_struct *prev);
@@ -223,22 +223,6 @@ DEFINE_PER_CPU(struct thread_info *, l4x_current_ti) = &init_thread_info;
 DEFINE_PER_CPU(struct thread_info *, l4x_current_proc_run);
 #ifndef CONFIG_L4_VCPU
 static DEFINE_PER_CPU(unsigned, utcb_snd_size);
-#endif
-
-
-#if 0
-asm(
-".section .text				\n"
-".global ret_from_fork			\n"
-"ret_from_fork:				\n"
-"	bl	schedule_tail		\n"
-#ifdef CONFIG_L4_VCPU
-"	b	l4x_vcpu_ret_from_fork  \n"
-#else
-"	bl	l4x_user_dispatcher	\n"
-#endif
-".previous				\n"
-);
 #endif
 
 void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
@@ -329,11 +313,7 @@ state_to_vcpu(l4_vcpu_state_t *vcpu, struct pt_regs *regs,
               struct task_struct *p)
 {
 	ptregs_to_vcpu(vcpu, regs);
-#ifdef CONFIG_L4_NAEC
 	vcpu->arch_state.user_tpidruro = task_thread_info(p)->tp_value[0];
-#else
-	vcpu->r.reserved = task_thread_info(p)->tp_value[0];
-#endif
 }
 
 static inline void vcpu_to_thread_struct(l4_vcpu_state_t *v,
@@ -491,6 +471,8 @@ static inline void call_system_call_args(syscall_t *sctbl,
 		printk("sigreturn: pid: %d(%s)\n", current->pid, current->comm);
 	if (0 && show_syscalls && syscall == 120)
 		printk("clone: pid: %d(%s)\n", current->pid, current->comm);
+	if (0 && show_syscalls && syscall == 168)
+		printk("poll: pid: %d(%s)\n", current->pid, current->comm);
 	if (0 && show_syscalls && syscall == 190)
 		printk("vfork: pid: %d(%s)\n", current->pid, current->comm);
 	if (0 && show_syscalls && syscall == 192)
@@ -503,6 +485,10 @@ static inline void call_system_call_args(syscall_t *sctbl,
 		       IS_ERR(path) ? "INVALID" : path->name, arg1);
 		putname(path);
 	}
+	if (0 && show_syscalls && syscall == 217)
+		printk("getdents64: pid: %d(%s): (%ld, %lx, %ld)\n",
+		       current->pid, current->comm,
+		       arg1, arg2, arg3);
 	if (0 && show_syscalls && syscall == 221) {
 		printk("fcntl64: pid: %d(%s): (%lx, %lx, %lx)\n",
 		       current->pid, current->comm,
@@ -604,7 +590,6 @@ local_restart:
 
 static char *l4x_arm_decode_error_code(unsigned long error_code)
 {
-#ifdef CONFIG_L4_NAEC
 	switch (error_code >> 26) {
 		case 0x0:
 			return "Undefined instruction";
@@ -624,20 +609,6 @@ static char *l4x_arm_decode_error_code(unsigned long error_code)
 		case 0x3f:
 			return "IRQ";
 	}
-#else
-	switch (error_code & 0x00f00000) {
-		case 0x00100000:
-			return "Undefined instruction";
-		case 0x00200000:
-			return "SWI";
-		case 0x00400000:
-			if (error_code & 0x00020000)
-				return "Data abort (read)";
-			return "Data abort";
-		case 0x00500000:
-			return "Forced exception";
-	}
-#endif
 	return "Unknown";
 }
 
@@ -718,7 +689,8 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
                                          struct thread_struct *t,
                                          unsigned long err,
                                          unsigned long trapno,
-                                         struct pt_regs *regs)
+                                         struct pt_regs *regs,
+                                         unsigned long pfa)
 {
 	int handled = 0;
 
@@ -728,7 +700,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	l4x_debug_stats_exceptions_hit();
 
 #ifndef CONFIG_L4_VCPU
-	if (l4x_is_triggered_exception(t->error_code)) {
+	if (l4x_is_triggered_exception_from_err(err)) {
 		/* we come here for suspend events */
 		TBUF_LOG_SUSPEND(fiasco_tbuf_log_3val("dsp susp", TBUF_TID(t->user_thread_id), regs->ARM_pc, 0));
 
@@ -742,14 +714,9 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	// adjust pc to point at the insn
 	regs->ARM_pc -= thumb_mode(regs) ? 2 : 4;
 
-	//fiasco_tbuf_log_3val("EXC", TBUF_TID(t->user_thread_id), regs->ARM_pc, t->error_code);
+	//fiasco_tbuf_log_3val("EXC", TBUF_TID(t->user_thread_id), regs->ARM_pc, err);
 
-#ifdef CONFIG_L4_NAEC
-	if ((t->error_code >> 26) == 0x11)
-#else
-	if ((t->error_code & 0x00f00000) == 0x00200000)
-#endif
-	{
+	if ((err >> 26) == 0x11) {
 #if defined(CONFIG_OABI_COMPAT) || defined(CONFIG_ARM_THUMB) || !defined(CONFIG_AEABI)
 		unsigned long ret = 0;
 #endif
@@ -843,29 +810,26 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		BUG_ON(p != current);
 
 		return 1;
+	} else if (err >> 26 == 0x24) {
+		unsigned long fsr = err & 0x7f; /* FSR_FS5_0 + FSR_WRITE */
+		regs->ARM_pc += thumb_mode(regs) ? 2 : 4;
+		do_DataAbort(pfa, fsr, regs);
+		return 0;
 
 #ifndef CONFIG_L4_VCPU
-#ifdef CONFIG_L4_NAEC
-	} else if (t->error_code >> 26 == 0x20) {
-#else
-	} else if (t->error_code == 0x00300000) {
-#endif
+	} else if (err >> 26 == 0x3d) {
 		/* Syscall alien exception */
 		if (l4x_hybrid_begin(p, t))
 			return 0;
 #endif
 	}
 
-	TBUF_LOG_EXCP(fiasco_tbuf_log_3val("except ", TBUF_TID(t->user_thread_id), t->error_code, regs->ARM_pc));
+	TBUF_LOG_EXCP(fiasco_tbuf_log_3val("except ", TBUF_TID(t->user_thread_id), err, regs->ARM_pc));
 
 #ifdef CONFIG_VFP
-#ifdef CONFIG_L4_NAEC
-	if ((t->error_code >> 26) == 0x07
-	    && (   ((t->error_code & 0xe) == 10)
-	        || (t->error_code & (1 << 5)))) {
-#else
-	if ((t->error_code & 0x01f00000) == 0x01100000) {
-#endif
+	if ((err >> 26) == 0x07
+	    && (   ((err & 0xe) == 10)
+	        || (err & (1 << 5)))) {
 		unsigned long insn;
 		int ret;
 		l4x_fpu_get_info(l4_utcb());
@@ -957,11 +921,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	if (likely(handled))
 		return 0; /* handled */
 
-#ifdef CONFIG_L4_NAEC
-	if ((t->error_code >> 26) == 0) {
-#else
-	if ((t->error_code & 0x00f00000) == 0x00100000) {
-#endif
+	if ((err >> 26) == 0) {
 		asmlinkage void do_undefinstr(struct pt_regs *regs);
 		do_undefinstr(regs);
 		return 0;
@@ -972,14 +932,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 #ifdef CONFIG_L4_DEBUG_SEGFAULTS
 	l4x_print_regs(thread_val_err(t), thread_val_trapno(t), regs);
 
-#ifdef CONFIG_L4_NAEC
-	if ((t->error_code >> 26) == 0)
-#else
-	if (   t->error_code == 0x00100000
-	    || t->error_code == 0x00110000
-	    || t->error_code == 0x00200000)
-#endif
-	{
+	if ((err >> 26) == 0) {
 		unsigned long val;
 		int ret;
 
@@ -995,7 +948,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 		}
 		printk(" %s/%d: Undefined instruction at"
 		       " %08lx with content %08lx, err %08lx\n",
-		       p->comm, p->pid, regs->ARM_pc, val, t->error_code);
+		       p->comm, p->pid, regs->ARM_pc, val, err);
 		l4x_print_vm_area_maps(p, regs->ARM_pc);
 		l4x_print_regs(thread_val_err(&p->thread),
 		               thread_val_trapno(&p->thread), regs);
@@ -1004,6 +957,11 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	}
 #endif
 
+	if (!user_mode(regs)) {
+		die("Exception", regs, err);
+		return 0;
+	}
+
 	if (l4x_deliver_signal(0))
 		return 0; /* handled signal, reply */
 
@@ -1011,7 +969,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 go_away:
 #endif
 
-	printk("Error code: %s\n", l4x_arm_decode_error_code(t->error_code));
+	printk("Error code: %s\n", l4x_arm_decode_error_code(err));
 	printk("(Unknown) EXCEPTION\n");
 	l4x_print_regs(thread_val_err(t), thread_val_trapno(t), regs);
 
@@ -1025,6 +983,23 @@ go_away:
 	return 0;
 }
 
+static inline void l4x_set_kuser_tls_ver(struct pt_regs *regs,
+                                         unsigned long pfa, int targetreg,
+                                         unsigned long op, unsigned long pc,
+                                         int thumb)
+{
+	if (targetreg == -1) {
+		LOG_printf("Lx: Unknown %sopcode %lx at %lx\n",
+		           thumb ? "thumb " : "", op, pc);
+		return;
+	}
+
+	if ((pfa & 0xf) == 0xc)
+		regs->uregs[targetreg] = *(unsigned long *)(upage_addr + 0xffc);
+	else
+		regs->uregs[targetreg] = current_thread_info()->tp_value[0];
+}
+
 static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
                                                        struct pt_regs *regs)
 {
@@ -1034,7 +1009,8 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
 
 	l4x_kuser_cmpxchg_check_and_fixup(regs);
 
-	if (l4x_l4pfa(t) == 0xffff0ff0) {
+	// software TLS value and __kuser_helper_version
+	if (l4x_l4pfa(t) == 0xffff0ff0 || l4x_l4pfa(t) == 0xffff0ffc) {
 		unsigned long pc = regs->ARM_pc;
 		int targetreg = -1;
 
@@ -1043,10 +1019,9 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
 			get_user(op, (unsigned short *)pc);
 			if ((op & 0xf800) == 0x6800) // ldr
 				targetreg = op & 7;
-			if (targetreg != -1)
-				regs->uregs[targetreg] = current_thread_info()->tp_value[0];
-			else
-				LOG_printf("Lx: Unknown thumb opcode %hx at %lx\n", op, pc);
+
+			l4x_set_kuser_tls_ver(regs, l4x_l4pfa(t), targetreg,
+			                      op, pc, 1);
 			regs->ARM_pc += 2;
 		} else {
 			unsigned long op;
@@ -1054,10 +1029,8 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
 			if ((op & 0x0e100000) == 0x04100000)
 				targetreg = (op >> 12) & 0xf;
 
-			if (targetreg != -1)
-				regs->uregs[targetreg] = current_thread_info()->tp_value[0];
-			else
-				LOG_printf("Lx: Unknown opcode %lx at %lx\n", op, pc);
+			l4x_set_kuser_tls_ver(regs, l4x_l4pfa(t), targetreg,
+			                      op, pc, 0);
 			regs->ARM_pc += 4;
 		}
 		return 1; // handled
@@ -1133,7 +1106,7 @@ static inline int l4x_handle_page_fault_with_exception(struct thread_struct *t,
 
 			regs->ARM_pc = tlsfunc;
 			if (USER_PATCH_GETTLS_SHOW)
-				printk("  handled (1)\n");
+				printk("  handled (1) -> %lx\n", regs->ARM_pc);
 			return 1; // handled
 		}
 

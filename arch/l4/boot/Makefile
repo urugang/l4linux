@@ -37,10 +37,8 @@ ifeq ($(CC),)
   $(error Error: L4_CC variable empty. Rebuild L4 tree)
 endif
 
-KBUILD_CFLAGS   := $(filter-out -mregparm=3,$(KBUILD_CFLAGS))
-KBUILD_CFLAGS   := $(filter-out -mabi=aapcs-linux,$(KBUILD_CFLAGS))
-KBUILD_CFLAGS   := $(filter-out -mapcs,$(KBUILD_CFLAGS))
-KBUILD_CFLAGS   := $(filter-out -msoft-float,$(KBUILD_CFLAGS))
+# we compile an L4 program, so we use L4 options for the compiler
+KBUILD_CFLAGS   := $(L4_CFLAGS_MINIMAL)
 
 KBUILD_CFLAGS	+= $(L4INC) -I$(L4OBJ)/include/uclibc \
 		   -Wall -fno-strict-aliasing -O2 -pipe \

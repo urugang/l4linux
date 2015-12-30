@@ -107,7 +107,7 @@ int skb_ether_to_p80211(wlandevice_t *wlandev, u32 ethconv,
 			struct p80211_metawep *p80211_wep)
 {
 
-	u16 fc;
+	__le16 fc;
 	u16 proto;
 	struct wlan_ethhdr e_hdr;
 	struct wlan_llc *e_llc;
@@ -129,7 +129,7 @@ int skb_ether_to_p80211(wlandevice_t *wlandev, u32 ethconv,
 	} else {
 		/* step 1: classify ether frame, DIX or 802.3? */
 		proto = ntohs(e_hdr.type);
-		if (proto <= 1500) {
+		if (proto <= ETH_DATA_LEN) {
 			pr_debug("802.3 len: %d\n", skb->len);
 			/* codes <= 1500 reserved for 802.3 lengths */
 			/* it's 802.3, pass ether payload unchanged,  */
@@ -198,7 +198,6 @@ int skb_ether_to_p80211(wlandevice_t *wlandev, u32 ethconv,
 		netdev_err(wlandev->netdev,
 			   "Error: Converting eth to wlan in unknown mode.\n");
 		return 1;
-		break;
 	}
 
 	p80211_wep->data = NULL;
@@ -208,6 +207,8 @@ int skb_ether_to_p80211(wlandevice_t *wlandev, u32 ethconv,
 		/* XXXX need to pick keynum other than default? */
 
 		p80211_wep->data = kmalloc(skb->len, GFP_ATOMIC);
+		if (!p80211_wep->data)
+			return -ENOMEM;
 		foo = wep_encrypt(wlandev, skb->data, p80211_wep->data,
 				  skb->len,
 				  (wlandev->hostwep & HOSTWEP_DEFAULTKEY_MASK),
@@ -512,7 +513,7 @@ int skb_p80211_to_ether(wlandevice_t *wlandev, u32 ethconv,
 * protocol.
 *
 * Arguments:
-*	proto	protocl number (in host order) to search for.
+*	proto	protocol number (in host order) to search for.
 *
 * Returns:
 *	1 - if the table is empty or a match is found.
@@ -530,7 +531,7 @@ int p80211_stt_findproto(u16 proto)
 	   Need to do some testing to confirm.
 	 */
 
-	if (proto == 0x80f3)	/* APPLETALK */
+	if (proto == ETH_P_AARP)	/* APPLETALK */
 		return 1;
 
 	return 0;

@@ -1,4 +1,5 @@
-#include <l4/cxx/ipc_server>
+#define L4_RPC_DISABLE_LEGACY_DISPATCH 1
+#include <l4/sys/cxx/ipc_epiface>
 #include <l4/log/log.h>
 #include <l4/re/event>
 #include <l4/libfdx/fdx>
@@ -11,21 +12,17 @@
 #include <asm/server/fdx-srv.h>
 #include <asm/server/util.h>
 
-#include <l4/sys/ktrace.h>
-
 #include <cassert>
 #include <stdlib.h>
 
 #include <l4/sys/factory>
 
-class Fdx_factory : public l4x_srv_object_tmpl<Fdx_factory>
+class Fdx_factory : public l4x_srv_epiface_t<Fdx_factory, L4::Factory>
 {
 public:
 	explicit Fdx_factory(l4x_fdx_srv_factory_ops *ops)
 	: ops(ops)
 	{}
-
-	int dispatch(l4_umword_t obj, L4::Ipc::Iostream &ios);
 
 	void *operator new(size_t size, void *p)
 	{
@@ -33,28 +30,14 @@ public:
 		return p;
 	}
 
+	int op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &obj,
+	              long proto, L4::Ipc::Varg_list_ref args);
+
 private:
 	l4x_fdx_srv_factory_ops *ops;
 
-	int dispatch_factory(L4::Ipc::Iostream &ios);
 	int get_unsigned(L4::Ipc::Varg o, const char *param, unsigned &result);
 };
-
-int
-Fdx_factory::dispatch(l4_umword_t, L4::Ipc::Iostream &ios)
-{
-	l4_msgtag_t tag;
-	ios >> tag;
-
-	switch (tag.label()) {
-		case L4::Meta::Protocol:
-			return L4::Util::handle_meta_request<L4::Factory>(ios);
-		case L4::Factory::Protocol:
-			return dispatch_factory(ios);
-		default:
-			return -L4_EBADPROTO;
-	}
-}
 
 int Fdx_factory::get_unsigned(L4::Ipc::Varg o, const char *param,
                               unsigned &result)
@@ -73,18 +56,14 @@ int Fdx_factory::get_unsigned(L4::Ipc::Varg o, const char *param,
 	return 0;
 }
 
-int Fdx_factory::dispatch_factory(L4::Ipc::Iostream &ios)
+int Fdx_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &obj,
+                           long, L4::Ipc::Varg_list_ref _args)
 {
-	L4::Opcode op;
-	ios >> op;
-
-	// ignore op value
-
-	l4x_srv_factory_create_data data;
+	L4::Ipc::Varg_list<> args(_args);
+	l4x_fdx_srv_factory_create_data data;
 	data.opt_flags = 0;
 
-	L4::Ipc::Varg o;
-	while (ios.get(&o)) {
+	for (L4::Ipc::Varg o = args.next(); !o.is_nil(); o = args.next()) {
 		if (!o.is_of<char const *>()) {
 			LOG_printf("blk-srv: Invalid option\n");
 			continue;
@@ -101,14 +80,19 @@ int Fdx_factory::dispatch_factory(L4::Ipc::Iostream &ios)
 			data.opt_flags |= L4X_FDX_SRV_FACTORY_HAS_FLAG_NOGROW;
 		} else if (o.length() > 9
 		           && !strncmp(o.value<char const *>(), "basepath=", 9)) {
-			data.basepath_len = o.length() - 9;
+			data.basepath_len = o.length() - 9 - 1;
 			data.basepath = o.value<char const *>() + 9;
 			data.opt_flags |= L4X_FDX_SRV_FACTORY_HAS_BASEPATH;
 		} else if (o.length() > 11
 		           && !strncmp(o.value<char const *>(), "filterpath=", 11)) {
-			data.filterpath_len = o.length() - 11;
+			data.filterpath_len = o.length() - 11 - 1;
 			data.filterpath = o.value<char const *>() + 11;
 			data.opt_flags |= L4X_FDX_SRV_FACTORY_HAS_FILTERPATH;
+		} else if (o.length() > 11
+		           && !strncmp(o.value<char const *>(), "clientname=", 11)) {
+			data.clientname_len = o.length() - 11 - 1;
+			data.clientname = o.value<char const *>() + 11;
+			data.opt_flags |= L4X_FDX_SRV_FACTORY_HAS_CLIENTNAME;
 		} else {
 			LOG_printf("blk-srv: Unknown option '%.*s'\n",
 			           o.length(), o.value<char const *>());
@@ -119,9 +103,8 @@ int Fdx_factory::dispatch_factory(L4::Ipc::Iostream &ios)
 	int r = ops->create(&data, &client_cap);
 	if (r < 0)
 		return r;
-
-	L4::Cap<void> objcap(client_cap);
-	ios << objcap;
+	obj = L4::Ipc::make_cap(L4::Cap<L4::Kobject>(client_cap),
+	                        L4_CAP_FPAGE_RWSD);
 
 	return 0;
 }
@@ -153,42 +136,31 @@ l4x_fdx_factory_objsize()
 
 
 class Fdx_server : public L4Re::Util::Event_svr<Fdx_server>,
-                   public l4x_srv_object_tmpl<Fdx_server>,
+                   public l4x_srv_epiface_t<Fdx_server, Fdx>,
                    public l4fdx_srv_struct
 {
 public:
 	l4x_fdx_srv_ops *ops;
 
-	enum Opcodes {
-		Op_open         = 0,
-		Op_close        = 1,
-		Op_read         = 2,
-		Op_write        = 3,
-		Op_getshm_read  = 4,
-		Op_getshm_write = 5,
-		Op_fstat        = 6,
-		Op_ping         = 7,
-	};
-
 	enum {
-		Size_shm_read  = L4_PAGESIZE * 16,
-		Size_shm_write = L4_PAGESIZE * 16,
+		Size_shm = 512 << 10,
 	};
 
 	int init();
-	int dispatch(l4_umword_t obj, L4::Ipc::Iostream &ios);
 
 	void reset_event_buffer() {}
 
-	void *shm_base_read() const { return _shm_base_read; }
-	void *shm_base_write() const { return _shm_base_write; }
-	void add(struct l4x_fdx_srv_result_t *);
+	unsigned long shm_base() const
+	{ return (unsigned long)_shm_base; }
+	void add(struct l4fdx_result_t *);
 	void trigger() const
 	{
 		if (l4_ipc_error(_irq.cap()->trigger(), l4_utcb()))
-			LOG_printf("TRIGGER FAILED\n");
+			LOG_printf("l4fdx-srv: Notification failed.\n");
 	}
-	L4::Cap<L4::Kobject> rcv_cap() { return l4x_srv_rcv_cap(); }
+
+	L4::Ipc_svr::Server_iface *server_iface() const
+	{ return l4x_srv_get_server_data(); }
 
 	l4x_fdx_srv_data srv_data;
 
@@ -198,26 +170,36 @@ public:
 		return p;
 	}
 
-private:
-	int dispatch_fdx(l4_umword_t obj, L4::Ipc::Iostream &ios);
+	int op_request_open(Fdx::Rights, unsigned req_id, L4::Ipc::String<> const &path,
+	                    int flags, unsigned mode);
+	int op_request_read(Fdx::Rights, unsigned req_id, unsigned fid,
+	                    unsigned long long offset,
+	                    unsigned sz, unsigned shm_offset);
+	int op_request_write(Fdx::Rights, unsigned req_id, unsigned fid,
+	                     unsigned long long offset,
+	                     unsigned sz, unsigned shm_offset);
+	int op_request_close(Fdx::Rights, unsigned req_id, unsigned fid);
+	int op_getshm(Fdx::Rights, L4::Ipc::Cap<L4Re::Dataspace> &ds)
+	{
+		ds = L4::Ipc::make_cap(_shm_ds, L4_CAP_FPAGE_RW);
+		return 0;
+	}
 
-	int dispatch_open(l4_umword_t obj, L4::Ipc::Iostream &ios);
-	int dispatch_read(l4_umword_t obj, L4::Ipc::Iostream &ios);
-	int dispatch_write(l4_umword_t obj, L4::Ipc::Iostream &ios);
-	int dispatch_close(l4_umword_t obj, L4::Ipc::Iostream &ios);
-	int dispatch_getshm_read(l4_umword_t obj, L4::Ipc::Iostream &ios);
-	int dispatch_getshm_write(l4_umword_t obj, L4::Ipc::Iostream &ios);
-	int dispatch_fstat(l4_umword_t obj, L4::Ipc::Iostream &ios);
+	int op_ping(Fdx::Rights)
+	{
+		return 0;
+	}
 
+	int op_request_fstat(Fdx::Rights, unsigned req_id, unsigned fid,
+	                     unsigned shm_offset);
 	int alloc_shm(L4::Cap<L4Re::Dataspace> *ds,
                       void **addr, unsigned size);
 	void free_shm(void *addr);
 
-	L4Re::Util::Event_buffer_t<l4x_fdx_srv_result_payload_t> _evbuf;
-	L4::Cap<L4Re::Dataspace> _shm_ds_read, _shm_ds_write;
-	void *_shm_base_read;
-	void *_shm_base_write;
-
+	typedef L4Re::Util::Event_buffer_t<l4fdx_result_payload_t> Evbuf;
+	Evbuf _evbuf;
+	L4::Cap<L4Re::Dataspace> _shm_ds;
+	void *_shm_base;
 };
 
 int
@@ -235,7 +217,8 @@ Fdx_server::alloc_shm(L4::Cap<L4Re::Dataspace> *ds,
 
 	*addr = 0;
 	r = L4Re::Env::env()->rm()->attach(addr, size,
-	                                   L4Re::Rm::Search_addr, d.get());
+	                                   L4Re::Rm::Search_addr,
+	                                   L4::Ipc::make_cap_rw(d.get()));
 	if (r < 0) {
 		L4Re::Env::env()->mem_alloc()->free(d.get());
 		return r;
@@ -262,147 +245,58 @@ Fdx_server::init()
 	if (r)
 		return r;
 
-	r = alloc_shm(&_shm_ds_read, &_shm_base_read, Size_shm_read);
+	r = alloc_shm(&_shm_ds, &_shm_base, Size_shm);
 	if (r)
 		goto out_free_ev;
 
-	r = alloc_shm(&_shm_ds_write, &_shm_base_write, Size_shm_write);
-	if (r)
-		goto out_free_read_shm;
-
-	static_assert(sizeof(Fdx_conn::Result_payload)
-	              == sizeof(l4x_fdx_srv_result_payload_t),
-	              "Fdx_conn::Result_payload vs."
-		      " l4x_fdx_srv_result_payload_t size mismatch");
-
-	static_assert(sizeof(L4Re::Event_buffer_t<Fdx_conn::Result_payload>::Event)
-	              == sizeof(l4x_fdx_srv_result_t),
-	              "Fdx_conn::Request_buf vs."
-		      " l4x_fdx_srv_result_t size mismatch");
-
 	return 0;
 
-out_free_read_shm:
-	free_shm(_shm_base_read);
 out_free_ev:
 	L4x_server_util::free_event_buffer(&_evbuf, _ds);
 	return r;
 }
 
 int
-Fdx_server::dispatch_open(l4_umword_t, L4::Ipc::Iostream &ios)
+Fdx_server::op_request_open(Fdx::Rights, unsigned req_id, L4::Ipc::String<> const &path,
+                            int flags, unsigned mode)
 {
-	char *p = 0;
-	unsigned long len;
-	unsigned mode;
-	int flags;
-
-	ios >> L4::Ipc::buf_in(p, len) >> flags >> mode;
-
-	int i = ops->open(this, p, len, flags, mode);
-	if (i < 0)
-		return i;
-	ios << i;
-
-	return L4_EOK;
+	return ops->open(this, req_id, path.data, path.length, flags, mode);
 }
 
 int
-Fdx_server::dispatch_close(l4_umword_t, L4::Ipc::Iostream &ios)
+Fdx_server::op_request_close(Fdx::Rights, unsigned req_id, unsigned fid)
 {
-	unsigned fid;
-	ios >> fid;
-	return ops->close(this, fid);
+	return ops->close(this, req_id, fid);
 }
 
 int
-Fdx_server::dispatch_getshm_read(l4_umword_t, L4::Ipc::Iostream &ios)
+Fdx_server::op_request_read(Fdx::Rights, unsigned req_id, unsigned fid,
+                            unsigned long long start,
+                            unsigned size, unsigned shm_offset)
 {
-	ios << _shm_ds_read;
-	return L4_EOK;
+	return ops->read(this, req_id, fid, start, size, shm_offset);
 }
 
 int
-Fdx_server::dispatch_getshm_write(l4_umword_t, L4::Ipc::Iostream &ios)
+Fdx_server::op_request_write(Fdx::Rights, unsigned req_id, unsigned fid,
+                             unsigned long long start,
+                             unsigned size, unsigned shm_offset)
 {
-	ios << _shm_ds_write;
-	return L4_EOK;
+	return ops->write(this, req_id, fid, start, size, shm_offset);
 }
 
 int
-Fdx_server::dispatch_read(l4_umword_t, L4::Ipc::Iostream &ios)
+Fdx_server::op_request_fstat(Fdx::Rights, unsigned req_id, unsigned fid,
+                             unsigned shm_offset)
 {
-	unsigned fid, size;
-	l4_uint64_t start;
-	ios >> fid >> start >> size;
-	return ops->read(this, fid, start, size);
-}
-
-int
-Fdx_server::dispatch_write(l4_umword_t, L4::Ipc::Iostream &ios)
-{
-	unsigned fid, shm_offset, size;
-	l4_uint64_t start;
-	ios >> fid >> start >> size >> shm_offset;
-	return ops->write(this, fid, start, size, shm_offset);
-}
-
-int
-Fdx_server::dispatch_fstat(l4_umword_t, L4::Ipc::Iostream &ios)
-{
-	unsigned fid;
-	ios >> fid;
-	return ops->fstat(this, fid);
-}
-
-int
-Fdx_server::dispatch_fdx(l4_umword_t obj, L4::Ipc::Iostream &ios)
-{
-	L4::Opcode op;
-
-	ios >> op;
-
-	switch (op) {
-		case Op_open: return dispatch_open(obj, ios);
-		case Op_read: return dispatch_read(obj, ios);
-		case Op_write: return dispatch_write(obj, ios);
-		case Op_close: return dispatch_close(obj, ios);
-		case Op_getshm_read: return dispatch_getshm_read(obj, ios);
-		case Op_getshm_write: return dispatch_getshm_write(obj, ios);
-		case Op_fstat: return dispatch_fstat(obj, ios);
-		case Op_ping: return 0; break;
-		default:
-			return -L4_ENOSYS;
-	};
-}
-
-int
-Fdx_server::dispatch(l4_umword_t obj, L4::Ipc::Iostream &ios)
-{
-	l4_msgtag_t tag;
-	ios >> tag;
-
-	switch (tag.label()) {
-		case L4::Meta::Protocol:
-			return L4::Util::handle_meta_request<L4Re::Event>(ios);
-		case L4Re::Protocol::Event:
-		case L4::Protocol::Irq:
-			return L4Re::Util::Event_svr<Fdx_server>::dispatch(obj, ios);
-		case 19:
-			return dispatch_fdx(obj, ios);
-		default:
-			LOG_printf("unknown proto %ld\n", tag.label());
-			return -L4_EBADPROTO;
-	}
-
-	return -L4_EBADPROTO;
+	return ops->fstat(this, req_id, fid, shm_offset);
 }
 
 void
-Fdx_server::add(struct l4x_fdx_srv_result_t *e)
+Fdx_server::add(struct l4fdx_result_t *e)
 {
-	// check return value
-	_evbuf.put(*reinterpret_cast<L4Re::Event_buffer_t<l4x_fdx_srv_result_payload_t>::Event const *>(e));
+	if (L4_UNLIKELY(!_evbuf.put(*reinterpret_cast<Evbuf::Event const *>(e))))
+		LOG_printf("l4fdx-srv: Posting message failed.\n");
 }
 
 static l4fdx_srv_obj
@@ -410,21 +304,19 @@ __l4x_fdx_srv_create(l4_cap_idx_t thread, struct l4x_fdx_srv_ops *ops,
                      struct l4fdx_client *client, void *objmem,
                      l4_cap_idx_t *client_cap, const char *capname)
 {
-	int err;
+	long err;
 
 	Fdx_server *fdx = new (objmem) Fdx_server();
 
 	if ((err = fdx->init()) < 0) {
-		LOG_printf("l4x-fdx-srv: Initialization failed (%d)\n", err);
+		LOG_printf("l4x-fdx-srv: Initialization failed (%ld)\n", err);
 		return (l4fdx_srv_obj)err;
 	}
 
 	fdx->ops = ops;
 
-	fdx->srv_data.shm_base_read  = fdx->shm_base_read();
-	fdx->srv_data.shm_base_write = fdx->shm_base_write();
-	fdx->srv_data.shm_size_read  = fdx->Size_shm_read;
-	fdx->srv_data.shm_size_write = fdx->Size_shm_write;
+	fdx->srv_data.shm_base = fdx->shm_base();
+	fdx->srv_data.shm_size = fdx->Size_shm;
 
 	fdx->client = client;
 
@@ -480,7 +372,7 @@ static inline Fdx_server *cast_to(l4fdx_srv_obj o)
 }
 
 C_FUNC void
-l4x_fdx_srv_add_event(l4fdx_srv_obj fdxobjp, struct l4x_fdx_srv_result_t *e)
+l4x_fdx_srv_add_event(l4fdx_srv_obj fdxobjp, struct l4fdx_result_t *e)
 {
 	cast_to(fdxobjp)->add(e);
 }

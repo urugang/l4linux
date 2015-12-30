@@ -20,7 +20,6 @@
 #include <linux/input.h>
 #include <linux/platform_device.h>
 #include <linux/screen_info.h>
-#include <linux/interrupt.h>
 #include <asm/uaccess.h>
 #include <linux/bitops.h>
 
@@ -164,7 +163,7 @@ static void l4fb_init_screen(struct l4fb_screen *screen)
 {
 	screen->goos = L4_INVALID_CAP;
 
-	screen->refresh_sleep = HZ / 10;
+	screen->refresh_sleep = msecs_to_jiffies(100);
 	screen->refresh_enabled = 1;
 
 	/* Input event part */
@@ -984,7 +983,8 @@ static int l4fb_init_session(struct fb_info *fb, struct l4fb_screen *screen)
 
 	ret = L4XV_FN_i(l4re_rm_attach(&fb_addr, fix->smem_len,
 	                               L4RE_RM_SEARCH_ADDR,
-	                               screen->fb_cap, 0, 20));
+	                               screen->fb_cap | L4_CAP_FPAGE_RW,
+	                               0, 20));
 
 	if (ret < 0) {
 		dev_err(scr2dev(screen), "cannot map fb memory (%d)\n", ret);
@@ -1125,11 +1125,8 @@ static int l4fb_probe(struct platform_device *dev)
 		return -ENODEV;
 
 	/* Process module parameters */
-	if (refreshsleep >= 0) {
-		u64 t = HZ * refreshsleep;
-		do_div(t, 1000);
-		screen->refresh_sleep = t;
-	}
+	if (refreshsleep >= 0)
+		screen->refresh_sleep = msecs_to_jiffies(refreshsleep);
 
 	info = framebuffer_alloc(0, &dev->dev);
 	if (!info)
@@ -1242,6 +1239,8 @@ static int l4fb_alloc_screen(int id, char const *cap)
 		kfree(screen);
 		return ret;
 	}
+	/* l4fb events are wakeups per default */
+	device_init_wakeup(&screen->platform_device.dev, true);
 	return 0;
 }
 
@@ -1264,11 +1263,35 @@ static int l4fb_remove(struct platform_device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_PM_SLEEP
+static int l4fb_resume(struct device *dev)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct l4fb_screen *screen = container_of(pdev, struct l4fb_screen,
+	                                          platform_device);
+	if (device_may_wakeup(dev))
+		l4x_event_source_enable_wakeup(&screen->input, false);
+	l4x_event_poll_source(&screen->input);
+	return 0;
+}
+
+static int l4fb_suspend(struct device *dev)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct l4fb_screen *screen = container_of(pdev, struct l4fb_screen,
+	                                          platform_device);
+	l4x_event_source_enable_wakeup(&screen->input, device_may_wakeup(dev));
+	return 0;
+}
+#endif
+
+static SIMPLE_DEV_PM_OPS(l4fb_pm, l4fb_suspend, l4fb_resume);
 static struct platform_driver l4fb_driver = {
 	.probe   = l4fb_probe,
 	.remove  = l4fb_remove,
 	.driver  = {
 		.name = "l4fb",
+		.pm   = &l4fb_pm,
 	},
 };
 

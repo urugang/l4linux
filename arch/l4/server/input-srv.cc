@@ -1,17 +1,18 @@
+#define L4_RPC_DISABLE_LEGACY_DISPATCH 1
 #include <l4/re/event>
 #include <l4/re/util/event_svr>
 #include <l4/re/util/event_buffer>
 #include <l4/re/util/meta>
 #include <l4/cxx/ipc_server>
 #include <l4/log/log.h>
-
+#include <l4/sys/cxx/ipc_epiface>
 #include <asm/server/server.h>
 #include <asm/server/input-srv.h>
 
 #include <asm/server/util.h>
 
 class Input : public L4Re::Util::Event_svr<Input>,
-              public l4x_srv_object_tmpl<Input>
+              public l4x_srv_epiface_t<Input, L4Re::Event>
 {
 public:
 	l4x_input_srv_ops *ops;
@@ -20,13 +21,16 @@ public:
 	int get_num_streams();
 	int get_stream_info(int idx, L4Re::Event_stream_info *);
 	int get_stream_info_for_id(l4_umword_t id, L4Re::Event_stream_info *);
-	int get_axis_info(l4_umword_t id, unsigned naxes, unsigned *axis,
+	int get_axis_info(l4_umword_t id, unsigned naxes, unsigned const *axis,
 	                  L4Re::Event_absinfo *i);
 
-	int dispatch(l4_umword_t obj, L4::Ipc::Iostream &ios);
 	void add(struct l4x_input_event const *);
 	void trigger() const { _irq.trigger(); }
-	L4::Cap<L4::Kobject> rcv_cap() { return l4x_srv_rcv_cap(); }
+
+	L4::Ipc_svr::Server_iface *server_iface() const
+	{
+		return l4x_srv_get_server_data();
+	}
 
 	void reset_event_buffer() { _evbuf.reset(); }
 
@@ -65,27 +69,10 @@ Input::get_stream_info_for_id(l4_umword_t id, L4Re::Event_stream_info *si)
 }
 
 int
-Input::get_axis_info(l4_umword_t id, unsigned naxes, unsigned *axis,
+Input::get_axis_info(l4_umword_t id, unsigned naxes, unsigned const *axis,
                      L4Re::Event_absinfo *i)
 {
 	return ops->axis_info(id, naxes, axis, i);
-}
-
-int
-Input::dispatch(l4_umword_t obj, L4::Ipc::Iostream &ios)
-{
-	l4_msgtag_t tag;
-	ios >> tag;
-
-	switch (tag.label()) {
-		case L4::Meta::Protocol:
-			return L4::Util::handle_meta_request<L4Re::Event>(ios);
-		case L4Re::Protocol::Event:
-		case L4_PROTO_IRQ:
-			return L4Re::Util::Event_svr<Input>::dispatch(obj, ios);
-		default:
-			return -L4_EBADPROTO;
-	}
 }
 
 static Input _input;

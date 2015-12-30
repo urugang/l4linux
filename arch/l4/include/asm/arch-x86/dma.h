@@ -3,6 +3,6 @@
 #include <asm-x86/dma.h>
 
 #undef MAX_DMA_PFN
-#define MAX_DMA_PFN 0
+#define MAX_DMA_PFN 0UL
 
 #endif /* ! __ASM__ARCH_X86__DMA_H__ */

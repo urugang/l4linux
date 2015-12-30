@@ -99,8 +99,11 @@ struct ti_qspi {
 #define QSPI_INVAL			(4 << 16)
 #define QSPI_WC_CMD_INT_EN			(1 << 14)
 #define QSPI_FLEN(n)			((n - 1) << 0)
+#define QSPI_WLEN_MAX_BITS		128
+#define QSPI_WLEN_MAX_BYTES		16
 
 /* STATUS REGISTER */
+#define BUSY				0x01
 #define WC				0x02
 
 /* INTERRUPT REGISTER */
@@ -199,23 +202,65 @@ static void ti_qspi_restore_ctx(struct ti_qspi *qspi)
 	ti_qspi_write(qspi, ctx_reg->clkctrl, QSPI_SPI_CLOCK_CNTRL_REG);
 }
 
+static inline u32 qspi_is_busy(struct ti_qspi *qspi)
+{
+	u32 stat;
+	unsigned long timeout = jiffies + QSPI_COMPLETION_TIMEOUT;
+
+	stat = ti_qspi_read(qspi, QSPI_SPI_STATUS_REG);
+	while ((stat & BUSY) && time_after(timeout, jiffies)) {
+		cpu_relax();
+		stat = ti_qspi_read(qspi, QSPI_SPI_STATUS_REG);
+	}
+
+	WARN(stat & BUSY, "qspi busy\n");
+	return stat & BUSY;
+}
+
 static int qspi_write_msg(struct ti_qspi *qspi, struct spi_transfer *t)
 {
-	int wlen, count, ret;
+	int wlen, count, xfer_len;
 	unsigned int cmd;
 	const u8 *txbuf;
+	u32 data;
 
 	txbuf = t->tx_buf;
 	cmd = qspi->cmd | QSPI_WR_SNGL;
 	count = t->len;
 	wlen = t->bits_per_word >> 3;	/* in bytes */
+	xfer_len = wlen;
 
 	while (count) {
+		if (qspi_is_busy(qspi))
+			return -EBUSY;
+
 		switch (wlen) {
 		case 1:
 			dev_dbg(qspi->dev, "tx cmd %08x dc %08x data %02x\n",
 					cmd, qspi->dc, *txbuf);
-			writeb(*txbuf, qspi->base + QSPI_SPI_DATA_REG);
+			if (count >= QSPI_WLEN_MAX_BYTES) {
+				u32 *txp = (u32 *)txbuf;
+
+				data = cpu_to_be32(*txp++);
+				writel(data, qspi->base +
+				       QSPI_SPI_DATA_REG_3);
+				data = cpu_to_be32(*txp++);
+				writel(data, qspi->base +
+				       QSPI_SPI_DATA_REG_2);
+				data = cpu_to_be32(*txp++);
+				writel(data, qspi->base +
+				       QSPI_SPI_DATA_REG_1);
+				data = cpu_to_be32(*txp++);
+				writel(data, qspi->base +
+				       QSPI_SPI_DATA_REG);
+				xfer_len = QSPI_WLEN_MAX_BYTES;
+				cmd |= QSPI_WLEN(QSPI_WLEN_MAX_BITS);
+			} else {
+				writeb(*txbuf, qspi->base + QSPI_SPI_DATA_REG);
+				cmd = qspi->cmd | QSPI_WR_SNGL;
+				xfer_len = wlen;
+				cmd |= QSPI_WLEN(wlen);
+			}
 			break;
 		case 2:
 			dev_dbg(qspi->dev, "tx cmd %08x dc %08x data %04x\n",
@@ -230,14 +275,13 @@ static int qspi_write_msg(struct ti_qspi *qspi, struct spi_transfer *t)
 		}
 
 		ti_qspi_write(qspi, cmd, QSPI_SPI_CMD_REG);
-		ret = wait_for_completion_timeout(&qspi->transfer_complete,
-						  QSPI_COMPLETION_TIMEOUT);
-		if (ret == 0) {
+		if (!wait_for_completion_timeout(&qspi->transfer_complete,
+						 QSPI_COMPLETION_TIMEOUT)) {
 			dev_err(qspi->dev, "write timed out\n");
 			return -ETIMEDOUT;
 		}
-		txbuf += wlen;
-		count -= wlen;
+		txbuf += xfer_len;
+		count -= xfer_len;
 	}
 
 	return 0;
@@ -245,7 +289,7 @@ static int qspi_write_msg(struct ti_qspi *qspi, struct spi_transfer *t)
 
 static int qspi_read_msg(struct ti_qspi *qspi, struct spi_transfer *t)
 {
-	int wlen, count, ret;
+	int wlen, count;
 	unsigned int cmd;
 	u8 *rxbuf;
 
@@ -267,10 +311,12 @@ static int qspi_read_msg(struct ti_qspi *qspi, struct spi_transfer *t)
 
 	while (count) {
 		dev_dbg(qspi->dev, "rx cmd %08x dc %08x\n", cmd, qspi->dc);
+		if (qspi_is_busy(qspi))
+			return -EBUSY;
+
 		ti_qspi_write(qspi, cmd, QSPI_SPI_CMD_REG);
-		ret = wait_for_completion_timeout(&qspi->transfer_complete,
-				QSPI_COMPLETION_TIMEOUT);
-		if (ret == 0) {
+		if (!wait_for_completion_timeout(&qspi->transfer_complete,
+						 QSPI_COMPLETION_TIMEOUT)) {
 			dev_err(qspi->dev, "read timed out\n");
 			return -ETIMEDOUT;
 		}
@@ -567,7 +613,6 @@ static struct platform_driver ti_qspi_driver = {
 	.remove = ti_qspi_remove,
 	.driver = {
 		.name	= "ti-qspi",
-		.owner	= THIS_MODULE,
 		.pm =   &ti_qspi_pm_ops,
 		.of_match_table = ti_qspi_match,
 	}

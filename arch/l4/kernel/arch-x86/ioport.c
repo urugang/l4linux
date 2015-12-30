@@ -33,8 +33,10 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 	if (turn_on && !capable(CAP_SYS_RAWIO))
 		return -EPERM;
 
+#ifdef CONFIG_L4
 	if (!l4x_x86_handle_user_port_request(current, from, num))
 		return -EPERM;
+#endif
 
 	/*
 	 * If it's the first ioperm() call in this thread's lifetime, set the
@@ -59,7 +61,7 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 	 * because the ->io_bitmap_max value must match the bitmap
 	 * contents:
 	 */
-	tss = &per_cpu(init_tss, get_cpu());
+	tss = &per_cpu(cpu_tss, get_cpu());
 
 	if (turn_on)
 		bitmap_clear(t->io_bitmap_ptr, from, num);

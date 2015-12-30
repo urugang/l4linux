@@ -593,14 +593,9 @@ static void ttusb_dec_process_packet(struct ttusb_dec *dec)
 
 static void swap_bytes(u8 *b, int length)
 {
-	u8 c;
-
 	length -= length % 2;
-	for (; length; b += 2, length -= 2) {
-		c = *b;
-		*b = *(b + 1);
-		*(b + 1) = c;
-	}
+	for (; length; b += 2, length -= 2)
+		swap(*b, *(b + 1));
 }
 
 static void ttusb_dec_process_urb_frame(struct ttusb_dec *dec, u8 *b,
@@ -1151,20 +1146,15 @@ static int ttusb_dec_alloc_iso_urbs(struct ttusb_dec *dec)
 
 	dprintk("%s\n", __func__);
 
-	dec->iso_buffer = pci_alloc_consistent(NULL,
-					       ISO_FRAME_SIZE *
-					       (FRAMES_PER_ISO_BUF *
-						ISO_BUF_COUNT),
-					       &dec->iso_dma_handle);
+	dec->iso_buffer = pci_zalloc_consistent(NULL,
+						ISO_FRAME_SIZE * (FRAMES_PER_ISO_BUF * ISO_BUF_COUNT),
+						&dec->iso_dma_handle);
 
 	if (!dec->iso_buffer) {
 		dprintk("%s: pci_alloc_consistent - not enough memory\n",
 			__func__);
 		return -ENOMEM;
 	}
-
-	memset(dec->iso_buffer, 0,
-	       ISO_FRAME_SIZE * (FRAMES_PER_ISO_BUF * ISO_BUF_COUNT));
 
 	for (i = 0; i < ISO_BUF_COUNT; i++) {
 		struct urb *urb;
@@ -1436,8 +1426,8 @@ static int ttusb_dec_init_stb(struct ttusb_dec *dec)
 			       __func__, model);
 			return -ENOENT;
 		}
-			if (version >= 0x01770000)
-				dec->can_playback = 1;
+		if (version >= 0x01770000)
+			dec->can_playback = 1;
 	}
 	return 0;
 }

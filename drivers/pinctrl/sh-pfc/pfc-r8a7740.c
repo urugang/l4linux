@@ -22,10 +22,6 @@
 #include <linux/kernel.h>
 #include <linux/pinctrl/pinconf-generic.h>
 
-#ifndef CONFIG_ARCH_MULTIPLATFORM
-#include <mach/irqs.h>
-#endif
-
 #include "core.h"
 #include "sh_pfc.h"
 
@@ -258,7 +254,7 @@ enum {
 	/* SCIFA7 */
 	SCIFA7_TXD_MARK,	SCIFA7_RXD_MARK,
 
-	/* SCIFAB */
+	/* SCIFB */
 	SCIFB_SCK_PORT190_MARK, /* MSEL5CR_17_0 */
 	SCIFB_RXD_PORT191_MARK,
 	SCIFB_TXD_PORT192_MARK,
@@ -3752,14 +3748,14 @@ static void r8a7740_pinmux_set_bias(struct sh_pfc *pfc, unsigned int pin,
 	iowrite8(value, addr);
 }
 
-static const struct sh_pfc_soc_operations r8a7740_pinmux_ops = {
+static const struct sh_pfc_soc_operations r8a7740_pfc_ops = {
 	.get_bias = r8a7740_pinmux_get_bias,
 	.set_bias = r8a7740_pinmux_set_bias,
 };
 
 const struct sh_pfc_soc_info r8a7740_pinmux_info = {
 	.name		= "r8a7740_pfc",
-	.ops		= &r8a7740_pinmux_ops,
+	.ops		= &r8a7740_pfc_ops,
 
 	.input		= { PINMUX_INPUT_BEGIN,
 			    PINMUX_INPUT_END },

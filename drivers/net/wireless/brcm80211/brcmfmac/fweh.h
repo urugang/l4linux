@@ -85,7 +85,6 @@ struct brcmf_event;
 	BRCMF_ENUM_DEF(IF, 54) \
 	BRCMF_ENUM_DEF(P2P_DISC_LISTEN_COMPLETE, 55) \
 	BRCMF_ENUM_DEF(RSSI, 56) \
-	BRCMF_ENUM_DEF(PFN_SCAN_COMPLETE, 57) \
 	BRCMF_ENUM_DEF(EXTLOG_MSG, 58) \
 	BRCMF_ENUM_DEF(ACTION_FRAME, 59) \
 	BRCMF_ENUM_DEF(ACTION_FRAME_COMPLETE, 60) \
@@ -102,8 +101,8 @@ struct brcmf_event;
 	BRCMF_ENUM_DEF(DCS_REQUEST, 73) \
 	BRCMF_ENUM_DEF(FIFO_CREDIT_MAP, 74) \
 	BRCMF_ENUM_DEF(ACTION_FRAME_RX, 75) \
-	BRCMF_ENUM_DEF(BCMC_CREDIT_SUPPORT, 127) \
-	BRCMF_ENUM_DEF(PSTA_PRIMARY_INTF_IND, 128)
+	BRCMF_ENUM_DEF(TDLS_PEER_EVENT, 92) \
+	BRCMF_ENUM_DEF(BCMC_CREDIT_SUPPORT, 127)
 
 #define BRCMF_ENUM_DEF(id, val) \
 	BRCMF_E_##id = (val),
@@ -111,7 +110,11 @@ struct brcmf_event;
 /* firmware event codes sent by the dongle */
 enum brcmf_fweh_event_code {
 	BRCMF_FWEH_EVENT_ENUM_DEFLIST
-	BRCMF_E_LAST
+	/* this determines event mask length which must match
+	 * minimum length check in device firmware so it is
+	 * hard-coded here.
+	 */
+	BRCMF_E_LAST = 139
 };
 #undef BRCMF_ENUM_DEF
 
@@ -155,6 +158,10 @@ enum brcmf_fweh_event_code {
 #define BRCMF_E_REASON_TSPEC_REJECTED		7
 #define BRCMF_E_REASON_BETTER_AP		8
 
+#define BRCMF_E_REASON_TDLS_PEER_DISCOVERED	0
+#define BRCMF_E_REASON_TDLS_PEER_CONNECTED	1
+#define BRCMF_E_REASON_TDLS_PEER_DISCONNECTED	2
+
 /* action field values for brcmf_ifevent */
 #define BRCMF_E_IF_ADD				1
 #define BRCMF_E_IF_DEL				2
@@ -167,6 +174,8 @@ enum brcmf_fweh_event_code {
 #define BRCMF_E_IF_ROLE_STA			0
 #define BRCMF_E_IF_ROLE_AP			1
 #define BRCMF_E_IF_ROLE_WDS			2
+#define BRCMF_E_IF_ROLE_P2P_GO			3
+#define BRCMF_E_IF_ROLE_P2P_CLIENT		4
 
 /**
  * definitions for event packet validation.
