@@ -38,9 +38,13 @@ EXPORT_SYMBOL(__copy_user_nocache);
 EXPORT_SYMBOL(_copy_from_user);
 EXPORT_SYMBOL(_copy_to_user);
 
+EXPORT_SYMBOL_GPL(memcpy_mcsafe);
+#endif /* L4 */
+
 EXPORT_SYMBOL(copy_page);
 EXPORT_SYMBOL(clear_page);
 
+#ifndef CONFIG_L4
 EXPORT_SYMBOL(csum_partial);
 #endif /* L4 */
 

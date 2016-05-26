@@ -313,7 +313,7 @@ state_to_vcpu(l4_vcpu_state_t *vcpu, struct pt_regs *regs,
               struct task_struct *p)
 {
 	ptregs_to_vcpu(vcpu, regs);
-	vcpu->arch_state.user_tpidruro = task_thread_info(p)->tp_value[0];
+	vcpu->r.tpidruro = task_thread_info(p)->tp_value[0];
 }
 
 static inline void vcpu_to_thread_struct(l4_vcpu_state_t *v,

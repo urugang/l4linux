@@ -4,6 +4,9 @@
 
 b := ../../../x86/lib
 
+# Produces uninteresting flaky coverage.
+KCOV_INSTRUMENT_delay.o	:= n
+
 inat_tables_script = $(srctree)/arch/x86/tools/gen-insn-attr-x86.awk
 inat_tables_maps = $(srctree)/arch/x86/lib/x86-opcode-map.txt
 quiet_cmd_inat_tables = GEN     $@
@@ -21,7 +24,7 @@ obj-$(CONFIG_SMP) += msr-smp.o cache-smp.o
 KBUILD_CFLAGS += -Iarch/x86/lib
 KBUILD_CFLAGS += -Iarch/l4/lib/arch-x86
 
-lib-y := delay.o misc.o cmdline.o
+lib-y := delay.o misc.o cmdline.o cpu.o
 lib-y += usercopy.o
 lib-y += memcpy_$(BITS).o
 lib-$(CONFIG_RWSEM_XCHGADD_ALGORITHM) += rwsem.o
@@ -61,7 +64,7 @@ $(call L4X_FILEREF, $(b),                                     \
        iomap_copy_64 misc msr msr-reg msr-reg-export msr-smp)
 
 lib-y := $(call L4X_PREFIX_IF, $(b), $(lib-y),                  \
-                delay misc cmdline memcpy_$(BITS) \
+                delay misc cmdline cpu memcpy_$(BITS)           \
 	        usercopy rwsem insn inat atomic64_cx8_32        \
 	        strstr_32 string_32 atomic64_386_32 mmx_32      \
 	        csum-partial_64 csum-copy_64 clear_page_64      \

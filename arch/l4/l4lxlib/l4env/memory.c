@@ -13,9 +13,27 @@
 #include <asm/generic/memory.h>
 #include <asm/generic/vcpu.h>
 #include <asm/generic/log.h>
+#include <asm/generic/setup.h>
 
 #include <l4/re/c/rm.h>
 #include <l4/sys/err.h>
+
+#include <l4/sys/kdebug.h>
+
+struct reg_search_data {
+	l4_cap_idx_t ds;
+	l4_addr_t virt;
+};
+
+static void reg_cb(l4_addr_t phys, void *virt,
+                   l4_size_t size, l4_cap_idx_t ds,
+                   l4_addr_t ds_offset, void *data)
+{
+	struct reg_search_data *d = (struct reg_search_data *)data;
+
+	if (d->ds == ds)
+		d->virt = (l4_addr_t)virt;
+}
 
 int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte)
 {
@@ -35,6 +53,8 @@ int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte)
 		return -1;
 	}
 
+	BUG_ON(flags & L4RE_RM_IN_AREA);
+
 	offset += (pte_val(pte) & L4X_PHYSICAL_PAGE_MASK) - addr;
 	addr    = address & PAGE_MASK;
 	rw      = pte_write(pte);
@@ -45,24 +65,26 @@ int l4lx_memory_map_virtual_page(unsigned long address, pte_t pte)
 	                                  offset, L4_PAGESHIFT)))) {
 
 		if (r == -L4_EADDRNOTAVAIL) {
-			l4_addr_t a = addr;
-			l4_addr_t q = (unsigned long)l4x_main_memory_start;
-			l4re_ds_t ds2;
+			l4_addr_t a = address & PAGE_MASK;
+			l4_addr_t q;
+			struct reg_search_data data = { .virt = ~0ul };
 
 			size = 1;
 			if (L4XV_FN_i(l4re_rm_find(&a, &size, &offset,
-			                           &flags, &ds2))) {
+			                           &flags, &data.ds))) {
 				l4x_early_pr_err("%s: Failed to query address %lx\n",
 				                 __func__, a);
 				return -1;
 			}
 
-			q += offset;
+			l4x_v2p_for_each(reg_cb, &data);
+
+			q = data.virt + offset;
 
 			/* Return all ok if it's the same address
 			 * The cap check is not perfect but will do. */
 			if (q == (pte_val(pte) & L4X_PHYSICAL_PAGE_MASK)
-			    && (ds & L4_CAP_MASK) == (ds2 & L4_CAP_MASK))
+			    && (ds & L4_CAP_MASK) == (data.ds & L4_CAP_MASK))
 				return 0;
 
 			l4x_early_pr_err("%s: Already used, existing is %lx\n",

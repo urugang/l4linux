@@ -18,10 +18,10 @@ extern unsigned l4x_fiasco_user_cs;
 extern unsigned l4x_fiasco_user_ds;
 
 #undef loadsegment
-#define loadsegment(seg, v) l4x_current_vcpu()->arch_state.user_##seg = (v)
+#define loadsegment(seg, v) l4x_current_vcpu()->r.seg = (v)
 
 #undef savesegment
-#define savesegment(seg, v) (v) = l4x_current_vcpu()->arch_state.user_##seg
+#define savesegment(seg, v) (v) = l4x_current_vcpu()->r.seg
 
 #undef __USER32_DS
 #define __USER32_DS (l4x_fiasco_user_ds)

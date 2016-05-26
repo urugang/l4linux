@@ -203,7 +203,6 @@ csum_partial_copy_to_user(const void *src, void __user *dst,
 }
 EXPORT_SYMBOL(csum_partial_copy_to_user);
 
-
 /**
  * csum_partial_copy_nocheck - Copy and checksum.
  * @src: source address
@@ -222,7 +221,7 @@ EXPORT_SYMBOL(csum_partial_copy_nocheck);
 
 __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 			const struct in6_addr *daddr,
-			__u32 len, unsigned short proto, __wsum sum)
+			__u32 len, __u8 proto, __wsum sum)
 {
 	__u64 rest, sum64;
 

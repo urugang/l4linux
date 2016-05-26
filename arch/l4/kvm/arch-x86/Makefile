@@ -17,7 +17,7 @@ kvm-$(CONFIG_KVM_ASYNC_PF)	+= $(KVM)/async_pf.o
 
 kvm-y			+= x86.o mmu.o $(b)/emulate.o $(b)/i8259.o $(b)/irq.o $(b)/lapic.o \
 			   $(b)/i8254.o $(b)/ioapic.o $(b)/irq_comm.o $(b)/cpuid.o $(b)/pmu.o $(b)/mtrr.o \
-			   $(b)/hyperv.o
+			   $(b)/hyperv.o $(b)/page_track.o
 
 kvm-$(CONFIG_KVM_DEVICE_ASSIGNMENT)	+= $(b)/assigned-dev.o $(b)/iommu.o
 kvm-y			+= kvm-l4.o

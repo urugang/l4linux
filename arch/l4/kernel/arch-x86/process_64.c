@@ -48,6 +48,7 @@
 #include <asm/syscalls.h>
 #include <asm/debugreg.h>
 #include <asm/switch_to.h>
+#include <asm/xen/hypervisor.h>
 
 #include <asm/generic/stack_id.h>
 
@@ -133,6 +134,8 @@ void __show_regs(struct pt_regs *regs, int all)
 	printk(KERN_DEFAULT "DR3: %016lx DR6: %016lx DR7: %016lx\n", d3, d6, d7);
 #endif /* L4 */
 
+	if (boot_cpu_has(X86_FEATURE_OSPKE))
+		printk(KERN_DEFAULT "PKRU: %08x\n", read_pkru());
 }
 
 void release_thread(struct task_struct *dead_task)
@@ -142,7 +145,7 @@ void release_thread(struct task_struct *dead_task)
 		if (dead_task->mm->context.ldt) {
 			pr_warn("WARNING: dead process %s still has LDT? <%p/%d>\n",
 				dead_task->comm,
-				dead_task->mm->context.ldt,
+				dead_task->mm->context.ldt->entries,
 				dead_task->mm->context.ldt->size);
 			BUG();
 		}
@@ -187,20 +190,20 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 
 #ifdef CONFIG_L4
 	vcpu = l4x_vcpu_ptr[get_cpu()];
-	p->thread.gsindex = vcpu->arch_state.user_gs;
+	p->thread.gsindex = vcpu->r.gs;
 #else
 	savesegment(gs, p->thread.gsindex);
 #endif
 	p->thread.gs = p->thread.gsindex ? 0 : me->thread.gs;
 #ifdef CONFIG_L4
-	p->thread.fsindex = vcpu->arch_state.user_fs;
+	p->thread.fsindex = vcpu->r.fs;
 #else
 	savesegment(fs, p->thread.fsindex);
 #endif
 	p->thread.fs = p->thread.fsindex ? 0 : me->thread.fs;
 #ifdef CONFIG_L4
-	p->thread.es = vcpu->arch_state.user_es;
-	p->thread.ds = vcpu->arch_state.user_ds;
+	p->thread.es = vcpu->r.es;
+	p->thread.ds = vcpu->r.ds;
 	put_cpu();
 #else
 	savesegment(es, p->thread.es);
@@ -329,8 +332,8 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 */
 #ifdef CONFIG_L4
 #ifdef CONFIG_L4_VCPU
-	fsindex = vcpu->arch_state.user_fs;
-	gsindex = vcpu->arch_state.user_gs;
+	fsindex = vcpu->r.fs;
+	gsindex = vcpu->r.gs;
 #endif
 #else
 	savesegment(fs, fsindex);
@@ -376,25 +379,25 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 * those are saved and restored as part of pt_regs.
 	 */
 #ifdef CONFIG_L4
-	prev->es = vcpu->arch_state.user_es;
+	prev->es = vcpu->r.es;
 #else
 	savesegment(es, prev->es);
 #endif
 	if (unlikely(next->es | prev->es))
 #ifdef CONFIG_L4
-		vcpu->arch_state.user_es = next->es;
+		vcpu->r.es = next->es;
 #else
 		loadsegment(es, next->es);
 #endif
 
 #ifdef CONFIG_L4
-	prev->ds = vcpu->arch_state.user_ds;
+	prev->ds = vcpu->r.ds;
 #else
 	savesegment(ds, prev->ds);
 #endif
 	if (unlikely(next->ds | prev->ds))
 #ifdef CONFIG_L4
-		vcpu->arch_state.user_ds = next->ds;
+		vcpu->r.ds = next->ds;
 #else
 		loadsegment(ds, next->ds);
 #endif
@@ -402,7 +405,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	/*
 	 * Switch FS and GS.
 	 *
-	 * These are even more complicated than FS and GS: they have
+	 * These are even more complicated than DS and ES: they have
 	 * 64-bit bases are that controlled by arch_prctl.  Those bases
 	 * only differ from the values in the GDT or LDT if the selector
 	 * is 0.
@@ -436,7 +439,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 */
 	if (unlikely(fsindex | next->fsindex | prev->fs)) {
 #ifdef CONFIG_L4
-		vcpu->arch_state.user_fs = next->fsindex;
+		vcpu->r.fs = next->fsindex;
 #else
 		loadsegment(fs, next->fsindex);
 #endif
@@ -455,7 +458,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	}
 	if (next->fs)
 #ifdef CONFIG_L4
-		vcpu->arch_state.user_fs_base = next->fs;
+		vcpu->r.fs_base = next->fs;
 #else
 		wrmsrl(MSR_FS_BASE, next->fs);
 #endif
@@ -463,7 +466,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 
 	if (unlikely(gsindex | next->gsindex | prev->gs)) {
 #ifdef CONFIG_L4
-		vcpu->arch_state.user_gs = next->gsindex;
+		vcpu->r.gs = next->gsindex;
 #else
 		load_gs_index(next->gsindex);
 #endif
@@ -474,7 +477,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	}
 	if (next->gs)
 #ifdef CONFIG_L4
-		vcpu->arch_state.user_gs_base = next->gs;
+		vcpu->r.gs_base = next->gs;
 #else
 		wrmsrl(MSR_KERNEL_GS_BASE, next->gs);
 #endif
@@ -488,14 +491,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 */
 	this_cpu_write(current_task, next_p);
 
-	/*
-	 * If it were not for PREEMPT_ACTIVE we could guarantee that the
-	 * preempt_count of all tasks was equal here and this would not be
-	 * needed.
-	 */
-	task_thread_info(prev_p)->saved_preempt_count = this_cpu_read(__preempt_count);
-	this_cpu_write(__preempt_count, task_thread_info(next_p)->saved_preempt_count);
-
 	/* Reload esp0 and ss1.  This changes current_thread_info(). */
 	load_sp0(tss, next);
 
@@ -505,6 +500,17 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	if (unlikely(task_thread_info(next_p)->flags & _TIF_WORK_CTXSW_NEXT ||
 		     task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV))
 		__switch_to_xtra(prev_p, next_p, tss);
+
+#ifdef CONFIG_XEN
+	/*
+	 * On Xen PV, IOPL bits in pt_regs->flags have no effect, and
+	 * current_pt_regs()->flags may not match the current task's
+	 * intended IOPL.  We need to switch it manually.
+	 */
+	if (unlikely(static_cpu_has(X86_FEATURE_XENPV) &&
+		     prev->iopl != next->iopl))
+		xen_set_iopl_mask(next->iopl);
+#endif
 
 #ifndef CONFIG_L4
 	if (static_cpu_has_bug(X86_BUG_SYSRET_SS_ATTRS)) {
@@ -584,7 +590,7 @@ void set_personality_ia32(bool x32)
 		if (current->mm)
 			current->mm->context.ia32_compat = TIF_X32;
 		current->personality &= ~READ_IMPLIES_EXEC;
-		/* is_compat_task() uses the presence of the x32
+		/* in_compat_syscall() uses the presence of the x32
 		   syscall bit flag to determine compat status */
 		current_thread_info()->status &= ~TS_COMPAT;
 	} else {
@@ -626,7 +632,7 @@ long do_arch_prctl(struct task_struct *task, int code, unsigned long addr)
 			if (doit) {
 				load_gs_index(0);
 #ifdef CONFIG_L4
-				l4x_current_vcpu()->arch_state.user_gs_base = addr;
+				l4x_current_vcpu()->r.gs_base = addr;
 #else
 				ret = wrmsrl_safe(MSR_KERNEL_GS_BASE, addr);
 #endif
@@ -658,7 +664,7 @@ long do_arch_prctl(struct task_struct *task, int code, unsigned long addr)
 				   __switch_to */
 				loadsegment(fs, 0);
 #ifdef CONFIG_L4
-				l4x_current_vcpu()->arch_state.user_fs_base = addr;
+				l4x_current_vcpu()->r.fs_base = addr;
 #else
 				ret = wrmsrl_safe(MSR_FS_BASE, addr);
 #endif
@@ -672,7 +678,7 @@ long do_arch_prctl(struct task_struct *task, int code, unsigned long addr)
 			base = read_32bit_tls(task, FS_TLS);
 		else if (doit)
 #ifdef CONFIG_L4
-			base = l4x_vcpu_ptr[smp_processor_id()]->arch_state.user_fs_base;
+			base = l4x_vcpu_ptr[smp_processor_id()]->r.fs_base;
 #else
 			rdmsrl(MSR_FS_BASE, base);
 #endif
@@ -690,7 +696,7 @@ long do_arch_prctl(struct task_struct *task, int code, unsigned long addr)
 			savesegment(gs, gsindex);
 			if (gsindex)
 #ifdef CONFIG_L4
-				base = l4x_vcpu_ptr[smp_processor_id()]->arch_state.user_gs_base;
+				base = l4x_vcpu_ptr[smp_processor_id()]->r.gs_base;
 #else
 				rdmsrl(MSR_KERNEL_GS_BASE, base);
 #endif

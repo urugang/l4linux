@@ -725,8 +725,8 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	} else if (likely(l4x_is_linux_syscall(err, trapno, regs))) {
 		TBUF_LOG_INT80(fiasco_tbuf_log_3val("int80  ", TBUF_TID(t->user_thread_id), regs->ip, regs->ax));
 
-		/* set after int 0x80, before syscall so the forked childs
-		 * get the increase too */
+		/* set after int 0x80 / syscall, before doing the system
+		 * call so the forked childs get the increase too */
 		regs->ip += 2;
 
 		dispatch_system_call(p, regs);
@@ -749,7 +749,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	}
 
 	switch (trapno) {
-		case  X86_TRAP_MF:
+		case X86_TRAP_MF:
 			do_coprocessor_error(regs, err);
 			break;
 		case X86_TRAP_XF:

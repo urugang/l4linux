@@ -98,6 +98,9 @@ static char *get_klog_buff(unsigned int *klen)
 	char *buff;
 
 	len = klogctl(CMD_ACTION_SIZE_BUFFER, NULL, 0);
+	if (len < 0)
+		return NULL;
+
 	buff = malloc(len);
 	if (!buff)
 		return NULL;
@@ -156,8 +159,8 @@ static void put_log_buff(char *buff)
 	free(buff);
 }
 
-static int get_last_jit_image(char *haystack, size_t hlen,
-			      uint8_t *image, size_t ilen)
+static unsigned int get_last_jit_image(char *haystack, size_t hlen,
+				       uint8_t *image, size_t ilen)
 {
 	char *ptr, *pptr, *tmp;
 	off_t off = 0;

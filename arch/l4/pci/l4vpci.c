@@ -4,6 +4,9 @@
 #include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <asm/pci.h>
+#ifdef CONFIG_X86
+#include <asm/pci_x86.h>
+#endif
 
 #include <l4/vbus/vbus.h>
 #include <l4/vbus/vbus_pci.h>
@@ -201,7 +204,9 @@ static int __init l4vpci_x86_init(void)
 	for_each_pci_dev(dev)
 		l4vpci_irq_enable(dev);
 
+#ifdef CONFIG_X86
 	pcibios_resource_survey();
+#endif
 
 	return 0;
 }

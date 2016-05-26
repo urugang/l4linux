@@ -309,9 +309,9 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 */
 #ifndef CONFIG_L4
 	lazy_save_gs(prev->gs);
-#else
+#else /* L4 */
 	(void)prev;
-#endif
+#endif /* L4 */
 
 	/*
 	 * Load the per-thread Thread-Local Storage descriptor.
@@ -320,7 +320,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 #ifndef CONFIG_L4_VCPU
 	    && !l4_is_invalid_cap(next->user_thread_id)
 	    && next->user_thread_id
-#endif
+#endif /* L4_VCPU */
 	   )
 	load_TLS(next, cpu);
 
@@ -333,15 +333,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 */
 	if (get_kernel_rpl() && unlikely(prev->iopl != next->iopl))
 		set_iopl_mask(next->iopl);
-#endif
-
-	/*
-	 * If it were not for PREEMPT_ACTIVE we could guarantee that the
-	 * preempt_count of all tasks was equal here and this would not be
-	 * needed.
-	 */
-	task_thread_info(prev_p)->saved_preempt_count = this_cpu_read(__preempt_count);
-	this_cpu_write(__preempt_count, task_thread_info(next_p)->saved_preempt_count);
+#endif /* L4 */
 
 	/*
 	 * Now maybe handle debug registers and/or IO bitmaps
@@ -384,7 +376,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	next->user_thread_id = next->user_thread_ids[cpu];
 	l4x_stack_struct_get(next_p->stack)->utcb
 		= l4x_stack_struct_get(prev_p->stack)->utcb;
-#endif
+#endif /* SMP && !L4_VCPU */
 
 #ifdef CONFIG_L4_VCPU
 	l4x_vcpu_ptr[cpu]->entry_sp = (unsigned long)task_pt_regs(next_p);

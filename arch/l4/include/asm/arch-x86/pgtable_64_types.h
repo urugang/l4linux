@@ -59,7 +59,7 @@ typedef struct { pteval_t pte; } pte_t;
 #define VMALLOC_END      _AC(0x0000087fffffffff, UL)
 #define VMEMMAP_START	 _AC(0x0000088000000000, UL)
 #define L4X_VMEMMAP_END  _AC(0x000008a000000000, UL)
-#define MODULES_VADDR    _AC(0x0000000002000000, UL)
+#define MODULES_VADDR    (__START_KERNEL_map + KERNEL_IMAGE_SIZE)
 #define MODULES_END      _AC(0x0000000010000000, UL)
 #else
 #define VMALLOC_START    _AC(0xffffc90000000000, UL)

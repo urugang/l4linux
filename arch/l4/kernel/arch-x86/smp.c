@@ -32,6 +32,11 @@
 #include <asm/nmi.h>
 #include <asm/mce.h>
 #include <asm/trace/irq_vectors.h>
+
+#ifdef CONFIG_L4
+#include <asm/l4x/smp.h>
+#endif
+
 /*
  *	Some notes on x86 processor bugs affecting SMP operation:
  *
@@ -125,12 +130,12 @@ static void native_smp_send_reschedule(int cpu)
 		WARN_ON(1);
 		return;
 	}
-	apic->send_IPI_mask(cpumask_of(cpu), RESCHEDULE_VECTOR);
+	apic->send_IPI(cpu, RESCHEDULE_VECTOR);
 }
 
 void native_send_call_func_single_ipi(int cpu)
 {
-	apic->send_IPI_mask(cpumask_of(cpu), CALL_FUNCTION_SINGLE_VECTOR);
+	apic->send_IPI(cpu, CALL_FUNCTION_SINGLE_VECTOR);
 }
 
 void native_send_call_func_ipi(const struct cpumask *mask)

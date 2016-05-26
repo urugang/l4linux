@@ -26,9 +26,6 @@
 #define MCE_STACK 4
 #define N_EXCEPTION_STACKS 4  /* hw limit: 7 */
 
-#define PUD_PAGE_SIZE		(_AC(1, UL) << PUD_SHIFT)
-#define PUD_PAGE_MASK		(~(PUD_PAGE_SIZE-1))
-
 /*
  * Set __PAGE_OFFSET to the most negative possible address +
  * PGDIR_SIZE*16 (pgd slot 272).  The gap is to allow a space for a
@@ -57,7 +54,7 @@
  * kernel page table mapping, reducing the size of the modules area.
  */
 #ifdef CONFIG_L4
-#define KERNEL_IMAGE_SIZE	(16 * 1024 * 1024)
+#define KERNEL_IMAGE_SIZE	(64 * 1024 * 1024)
 #else
 #define KERNEL_IMAGE_SIZE_DEFAULT      (512 * 1024 * 1024)
 #if defined(CONFIG_RANDOMIZE_BASE) && \
