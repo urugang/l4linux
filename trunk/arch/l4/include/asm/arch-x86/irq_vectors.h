@@ -62,8 +62,6 @@
  *  TLB, reschedule and local APIC vectors are performance-critical.
  */
 
-#ifndef CONFIG_L4
-
 #define SPURIOUS_APIC_VECTOR		0xff
 /*
  * Sanity check
@@ -79,14 +77,6 @@
 #define THERMAL_APIC_VECTOR		0xfa
 #define THRESHOLD_APIC_VECTOR		0xf9
 #define REBOOT_VECTOR			0xf8
-#endif /* L4 */
-
-#ifdef CONFIG_L4
-#define CALL_FUNCTION_VECTOR		0x1
-#define CALL_FUNCTION_SINGLE_VECTOR	0x2
-#define RESCHEDULE_VECTOR		0x3
-#define REBOOT_VECTOR			0x4
-#endif /* L4 */
 
 /*
  * Generic system vector for platform specific use
@@ -157,6 +147,11 @@
 #endif
 
 #ifdef CONFIG_L4
+
+/* For *_VECTOR constants above */
+#define L4X_SMP_IPI_VECTOR_MASK		0x0f
+#define L4X_SMP_IPI_VECTOR_BASE		0xf0
+
 #undef NR_IRQS
 #undef NR_IRQS_LEGACY
 

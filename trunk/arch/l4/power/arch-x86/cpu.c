@@ -23,6 +23,7 @@
 #include <asm/debugreg.h>
 #include <asm/cpu.h>
 #include <asm/mmu_context.h>
+#include <linux/dmi.h>
 
 #ifdef CONFIG_X86_32
 __visible unsigned long saved_context_ebx;
@@ -33,6 +34,29 @@ __visible unsigned long saved_context_eflags;
 struct saved_context saved_context;
 
 #ifndef CONFIG_L4
+static void msr_save_context(struct saved_context *ctxt)
+{
+	struct saved_msr *msr = ctxt->saved_msrs.array;
+	struct saved_msr *end = msr + ctxt->saved_msrs.num;
+
+	while (msr < end) {
+		msr->valid = !rdmsrl_safe(msr->info.msr_no, &msr->info.reg.q);
+		msr++;
+	}
+}
+
+static void msr_restore_context(struct saved_context *ctxt)
+{
+	struct saved_msr *msr = ctxt->saved_msrs.array;
+	struct saved_msr *end = msr + ctxt->saved_msrs.num;
+
+	while (msr < end) {
+		if (msr->valid)
+			wrmsrl(msr->info.msr_no, msr->info.reg.q);
+		msr++;
+	}
+}
+
 /**
  *	__save_processor_state - save CPU registers before creating a
  *		hibernation image and before restoring the memory state from it
@@ -112,6 +136,7 @@ static void __save_processor_state(struct saved_context *ctxt)
 #endif
 	ctxt->misc_enable_saved = !rdmsrl_safe(MSR_IA32_MISC_ENABLE,
 					       &ctxt->misc_enable);
+	msr_save_context(ctxt);
 }
 #endif /* L4 */
 
@@ -234,6 +259,7 @@ static void notrace __restore_processor_state(struct saved_context *ctxt)
 	x86_platform.restore_sched_clock_state();
 	mtrr_bp_restore();
 	perf_restore_debug_store();
+	msr_restore_context(ctxt);
 }
 #endif /* L4 */
 

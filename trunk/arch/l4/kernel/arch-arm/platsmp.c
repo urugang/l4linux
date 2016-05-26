@@ -164,7 +164,7 @@ static void __init l4x_smp_prepare_cpus(unsigned int max_cpus)
 // from hotplug.c
 void l4x_cpu_die(unsigned int cpu);
 
-struct smp_operations l4x_smp_ops __initdata = {
+const struct smp_operations l4x_smp_ops __initconst = {
 	.smp_init_cpus		= l4x_smp_init_cpus,
 	.smp_prepare_cpus       = l4x_smp_prepare_cpus,
 	.smp_secondary_init	= l4x_smp_secondary_init,

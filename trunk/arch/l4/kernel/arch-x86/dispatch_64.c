@@ -47,13 +47,11 @@ static inline int l4x_is_ia32_lx_syscall(unsigned nr)
 	return nr < IA32_NR_syscalls;
 }
 
-extern const syscall32_t ia32_sys_call_table[];
-
 static inline void dispatch_compat_system_call(struct task_struct *p,
                                                struct pt_regs *regsp)
 {
 	unsigned int syscall;
-	syscall32_t syscall_fn = NULL;
+	sys_call_ptr_t syscall_fn = NULL;
 	int show_syscalls = 0;
 
 #ifdef CONFIG_L4_VCPU

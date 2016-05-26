@@ -12,6 +12,7 @@
 #include <linux/genhd.h>
 #include <linux/hdreg.h>
 #include <linux/kernel.h>
+#include <linux/pfn_t.h>
 #include <linux/types.h>
 #include <linux/vmalloc.h>
 
@@ -114,13 +115,13 @@ static int getgeo(struct block_device *bdev, struct hd_geometry *geo)
 }
 
 static long l4bdds_direct_access(struct block_device *bdev, sector_t sector,
-                                 void __pmem **kaddr, unsigned long *pfn)
+                                 void __pmem **kaddr, pfn_t *pfn)
 {
 	struct l4bdds_device *dev = bdev->bd_disk->private_data;
 	loff_t off = sector << KERNEL_SECTOR_SHIFT;
 
 	*kaddr = dev->ds_addr + off;
-	*pfn = __pa(*kaddr) >> PAGE_SHIFT;
+	*pfn = phys_to_pfn_t(__pa(*kaddr), PFN_DEV);
 
 	return dev->ds_size - off;
 }
@@ -160,7 +161,7 @@ static int __init l4bdds_init_one(int nr)
 	}
 
 	ret = -ENODEV;
-	device[nr].ds_size = stat.size;
+	device[nr].ds_size = l4_round_page(stat.size);
 
 	spin_lock_init(&device[nr].lock);
 

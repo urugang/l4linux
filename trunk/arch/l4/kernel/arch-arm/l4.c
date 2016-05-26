@@ -3,6 +3,8 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
+#include <linux/clocksource.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
@@ -21,13 +23,13 @@
 #include <asm/l4lxapi/irq.h>
 #include <asm/api/config.h>
 #include <asm/generic/irq.h>
-#include <asm/generic/devs.h>
 #include <asm/generic/setup.h>
 #include <asm/generic/timer.h>
 #include <asm/generic/util.h>
 
 #include <l4/sys/icu.h>
 #include <l4/sys/cache.h>
+#include <l4/io/io.h>
 
 enum { L4X_PLATFORM_INIT_GENERIC = 1 };
 
@@ -130,7 +132,7 @@ static int domain_xlate_gic(struct irq_domain *d,
                             unsigned long *out_hwirq,
                             unsigned int *out_type)
 {
-	if (d->of_node != controller)
+	if (irq_domain_get_of_node(d) != controller)
 		return -EINVAL;
 
 	if (intsize < 3)
@@ -148,7 +150,7 @@ static int domain_xlate_single(struct irq_domain *d,
                                unsigned long *out_hwirq,
                                unsigned int *out_type)
 {
-	if (d->of_node != controller)
+	if (irq_domain_get_of_node(d) != controller)
 		return -EINVAL;
 
 	if (intsize < 1)
@@ -368,8 +370,6 @@ static void __init l4x_mach_init(void)
 		of_platform_populate(NULL, of_default_bus_match_table,
 		                     NULL, NULL);
 #endif
-
-	l4x_arm_devices_init();
 }
 
 static inline void l4x_stop(enum reboot_mode mode, const char *cmd)
@@ -406,11 +406,16 @@ static void __init l4x_arm_timer_init(void)
 {
 	l4x_timer_init();
 
+#ifdef CONFIG_COMMON_CLK
+	of_clk_init(NULL);
+#endif
+	clocksource_probe();
+
 	if (0)
 		setup_delay_counter();
 }
 
-extern struct smp_operations l4x_smp_ops;
+extern const struct smp_operations l4x_smp_ops;
 
 MACHINE_START(L4, "L4")
 	.atag_offset    = (unsigned long)&l4x_atag - PAGE_OFFSET,

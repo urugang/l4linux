@@ -855,9 +855,11 @@ static struct rk3x_i2c_soc_data soc_data[3] = {
 static const struct of_device_id rk3x_i2c_match[] = {
 	{ .compatible = "rockchip,rk3066-i2c", .data = (void *)&soc_data[0] },
 	{ .compatible = "rockchip,rk3188-i2c", .data = (void *)&soc_data[1] },
+	{ .compatible = "rockchip,rk3228-i2c", .data = (void *)&soc_data[2] },
 	{ .compatible = "rockchip,rk3288-i2c", .data = (void *)&soc_data[2] },
 	{},
 };
+MODULE_DEVICE_TABLE(of, rk3x_i2c_match);
 
 static int rk3x_i2c_probe(struct platform_device *pdev)
 {
@@ -907,7 +909,7 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 				 &i2c->scl_fall_ns))
 		i2c->scl_fall_ns = 300;
 	if (of_property_read_u32(pdev->dev.of_node, "i2c-sda-falling-time-ns",
-				 &i2c->scl_fall_ns))
+				 &i2c->sda_fall_ns))
 		i2c->sda_fall_ns = i2c->scl_fall_ns;
 
 	strlcpy(i2c->adap.name, "rk3x-i2c", sizeof(i2c->adap.name));

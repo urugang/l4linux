@@ -61,6 +61,9 @@ __visible DEFINE_PER_CPU_SHARED_ALIGNED(struct tss_struct, cpu_tss) = {
 	  */
 	.io_bitmap		= { [0 ... IO_BITMAP_LONGS] = ~0 },
 #endif
+#ifdef CONFIG_X86_32
+	.SYSENTER_stack_canary	= STACK_END_MAGIC,
+#endif
 };
 EXPORT_PER_CPU_SYMBOL(cpu_tss);
 
@@ -473,9 +476,9 @@ static void mwait_idle(void)
 	if (!current_set_polling_and_test()) {
 		trace_cpu_idle_rcuidle(1, smp_processor_id());
 		if (this_cpu_has(X86_BUG_CLFLUSH_MONITOR)) {
-			smp_mb(); /* quirk */
+			mb(); /* quirk */
 			clflush((void *)&current_thread_info()->flags);
-			smp_mb(); /* quirk */
+			mb(); /* quirk */
 		}
 
 		__monitor((void *)&current_thread_info()->flags, 0, 0);
@@ -493,13 +496,6 @@ static void mwait_idle(void)
 
 void select_idle_routine(const struct cpuinfo_x86 *c)
 {
-#ifdef CONFIG_L4
-#ifdef CONFIG_L4_VCPU
-	x86_idle = default_idle;
-#else
-	x86_idle = l4x_idle;
-#endif
-#else
 #ifdef CONFIG_SMP
 	if (boot_option_idle_override == IDLE_POLL && smp_num_siblings > 1)
 		pr_warn_once("WARNING: polling idle and HT enabled, performance may degrade\n");
@@ -507,6 +503,13 @@ void select_idle_routine(const struct cpuinfo_x86 *c)
 	if (x86_idle || boot_option_idle_override == IDLE_POLL)
 		return;
 
+#ifdef CONFIG_L4
+#ifdef CONFIG_L4_VCPU
+	x86_idle = default_idle;
+#else
+	x86_idle = l4x_idle;
+#endif
+#else
 	if (cpu_has_bug(c, X86_BUG_AMD_APIC_C1E)) {
 		/* E400: APIC timer interrupt does not wake up CPU from C1e */
 		pr_info("using AMD E400 aware idle routine\n");

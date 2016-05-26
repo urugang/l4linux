@@ -16,9 +16,21 @@ CFLAGS_REMOVE_ftrace.o = -pg
 CFLAGS_REMOVE_early_printk.o = -pg
 endif
 
-KASAN_SANITIZE_head$(BITS).o := n
-KASAN_SANITIZE_dumpstack.o := n
-KASAN_SANITIZE_dumpstack_$(BITS).o := n
+KASAN_SANITIZE_head$(BITS).o				:= n
+KASAN_SANITIZE_dumpstack.o				:= n
+KASAN_SANITIZE_dumpstack_$(BITS).o			:= n
+KASAN_SANITIZE_stacktrace.o := n
+
+OBJECT_FILES_NON_STANDARD_head_$(BITS).o		:= y
+OBJECT_FILES_NON_STANDARD_relocate_kernel_$(BITS).o	:= y
+OBJECT_FILES_NON_STANDARD_mcount_$(BITS).o		:= y
+OBJECT_FILES_NON_STANDARD_test_nx.o			:= y
+
+# If instrumentation of this dir is enabled, boot hangs during first second.
+# Probably could be more selective here, but note that files related to irqs,
+# boot, dumpstack/stacktrace, etc are either non-interesting or can lead to
+# non-deterministic coverage.
+KCOV_INSTRUMENT		:= n
 
 CFLAGS_irq.o := -I$(src)/../include/asm/trace
 
@@ -139,13 +151,9 @@ $(call L4X_FILEREF, ../../../x86/kernel,                         \
        perf_regs preempt probe_roms quirks resource rtc          \
        setup_percpu signal_compat stacktrace step sys_x86_64     \
        syscall_32                                                \
-       syscall_64 sysfb time tls topology trace_clock tsc_msr    \
+       syscall_64 sysfb test_rodata time tls topology            \
+       trace_clock tsc_msr                                       \
        vread_tsc_64 vsmp_64 vsyscall_emu_64 vsyscall_gtod)
-
-# we have our own versions of destroy_context and init_new_context,
-# so rename the original one
-CFLAGS_ldt.o    += -Ddestroy_context=destroy_context_origarch
-CFLAGS_ldt.o    += -Dinit_new_context=init_new_context_origarch
 
 # syscall_table_32.S
 KBUILD_AFLAGS	+= -Iarch/x86/kernel

@@ -21,14 +21,24 @@
 #include <asm/smp_plat.h>
 #ifndef CONFIG_L4
 #include <asm-generic/mm_hooks.h>
-#endif
+#else
+#include <asm/generic/mmu_context.h>
+#endif /* L4 */
 
 void __check_vmalloc_seq(struct mm_struct *mm);
 
 #ifdef CONFIG_CPU_HAS_ASID
 
 void check_and_switch_context(struct mm_struct *mm, struct task_struct *tsk);
-#define init_new_context_origarch(tsk,mm)	({ atomic64_set(&mm->context.id, 0); 0; })
+static inline int
+init_new_context(struct task_struct *tsk, struct mm_struct *mm)
+{
+#ifdef CONFIG_L4
+	l4x_init_new_context(tsk, mm);
+#endif /* L4 */
+	atomic64_set(&mm->context.id, 0);
+	return 0;
+}
 
 /* L4: #ifdef CONFIG_ARM_ERRATA_798181*/
 #ifdef CONFIG_L4
@@ -88,15 +98,21 @@ static inline void finish_arch_post_lock_switch(void)
 
 #endif	/* CONFIG_MMU */
 
-#define init_new_context_origarch(tsk,mm)	0
+static inline int
+init_new_context(struct task_struct *tsk, struct mm_struct *mm)
+{
+#ifdef CONFIG_L4
+	l4x_init_new_context(tsk, mm);
+#endif /* L4 */
+	return 0;
+}
+
 
 #endif	/* CONFIG_CPU_HAS_ASID */
 
 
 #ifdef CONFIG_L4
-int init_new_context(struct task_struct *tsk, struct mm_struct *mm);
-void destroy_context(struct mm_struct *mm);
-#define destroy_context_origarch(mm)		do { } while(0)
+#define destroy_context(mm)		l4x_destroy_context(mm)
 #else
 #define destroy_context(mm)		do { } while(0)
 #endif
@@ -149,6 +165,7 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 
 #define deactivate_mm(tsk,mm)	do { } while (0)
 
+/* This is a (modified) copy of asm-generic/mm_hooks.h */
 
 static inline void arch_exit_mmap(struct mm_struct *mm)
 {
@@ -169,6 +186,19 @@ static inline void arch_unmap(struct mm_struct *mm,
 static inline void arch_bprm_mm_init(struct mm_struct *mm,
                                      struct vm_area_struct *vma)
 {
+}
+
+static inline bool arch_vma_access_permitted(struct vm_area_struct *vma,
+		bool write, bool execute, bool foreign)
+{
+	/* by default, allow everything */
+	return true;
+}
+
+static inline bool arch_pte_access_permitted(pte_t pte, bool write)
+{
+	/* by default, allow everything */
+	return true;
 }
 
 #endif

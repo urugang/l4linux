@@ -32,17 +32,20 @@
 #include <l4/sys/debugger.h>
 #include <l4/sys/irq.h>
 #include <l4/re/c/mem_alloc.h>
+#include <l4/re/c/dma_space.h>
 #include <l4/re/c/rm.h>
 #include <l4/re/c/debug.h>
 #include <l4/re/c/util/cap_alloc.h>
 #include <l4/re/c/namespace.h>
 #include <l4/re/env.h>
+#include <l4/re/protocols.h>
 #include <l4/log/log.h>
 #include <l4/util/cpu.h>
 #include <l4/util/l4_macros.h>
 #include <l4/util/kip.h>
 #include <l4/util/atomic.h>
 #include <l4/io/io.h>
+#include <l4/vbus/vbus.h>
 
 #include <asm/api/config.h>
 #include <asm/api/macros.h>
@@ -90,6 +93,7 @@
 #ifdef CONFIG_L4_EXTERNAL_RTC
 #include <l4/rtc/rtc.h>
 #endif
+#include <asm/l4x/smp.h>
 #endif
 
 L4_CV void l4x_external_exit(int);
@@ -111,6 +115,8 @@ L4_EXTERNAL_FUNC(l4re_util_cap_alloc);
 L4_EXTERNAL_FUNC(l4re_util_cap_free);
 L4_EXTERNAL_FUNC(l4re_debug_obj_debug);
 
+L4_EXTERNAL_FUNC(l4re_dma_space_map);
+L4_EXTERNAL_FUNC(l4re_dma_space_unmap);
 L4_EXTERNAL_FUNC(l4re_ds_size);
 L4_EXTERNAL_FUNC(l4re_ds_phys);
 L4_EXTERNAL_FUNC(l4re_ds_info);
@@ -139,6 +145,7 @@ L4_EXTERNAL_FUNC(l4io_lookup_device);
 L4_EXTERNAL_FUNC(l4io_lookup_resource);
 L4_EXTERNAL_FUNC(l4io_iterate_devices);
 L4_EXTERNAL_FUNC(l4io_has_resource);
+L4_EXTERNAL_FUNC(l4vbus_assign_dma_domain);
 
 #ifdef CONFIG_L4_USE_L4SHMC
 L4_EXTERNAL_FUNC(l4shmc_create);
@@ -201,6 +208,7 @@ l4_cap_idx_t l4x_start_thread_id __nosavedata = L4_INVALID_CAP;
 l4_cap_idx_t l4x_start_thread_pager_id __nosavedata = L4_INVALID_CAP;
 
 enum { NUM_DS_MAINMEM = 10 };
+static l4re_dma_space_t l4x_dma_space;
 static l4re_ds_t l4x_ds_mainmem[NUM_DS_MAINMEM] __nosavedata;
 static bool l4x_phys_mem_disabled;
 void *l4x_main_memory_start;
@@ -219,17 +227,24 @@ struct l4x_debug_stats l4x_debug_stats_data;
 #endif
 
 struct l4x_phys_virt_mem {
-	l4_addr_t phys; /* physical address */
-	void    * virt; /* virtual address */
-	l4_size_t size; /* size of chunk in Bytes */
+	l4_addr_t phys;      /* physical address */
+	void    * virt;      /* virtual address */
+	l4_size_t size;      /* size of chunk in Bytes */
+	l4_cap_idx_t ds;     /* data-sapce capability for this region,
+	                      * if DMA is allowed on this region (including
+	                      * virtio DMA) */
+	l4_addr_t ds_offset; /* offset within the data space that is attached
+	                      * at 'virt' */
 };
 
 enum { L4X_PHYS_VIRT_ADDRS_MAX_ITEMS = 50 };
 
 /* Default memory size */
 static unsigned long l4x_mainmem_size;
+static bool l4x_init_finished;
 
 static struct l4x_phys_virt_mem l4x_phys_virt_addrs[L4X_PHYS_VIRT_ADDRS_MAX_ITEMS] __nosavedata;
+DEFINE_SPINLOCK(l4x_v2p_lock);
 
 #ifdef CONFIG_L4_CONFIG_CHECKS
 static const unsigned long required_kernel_abi_version = 3;
@@ -313,93 +328,121 @@ static void l4x_v2p_init(void)
 {
 }
 
+#define v2p_iterator_begin (l4x_phys_virt_addrs)
+#define v2p_iterator_end   (l4x_phys_virt_addrs + L4X_PHYS_VIRT_ADDRS_MAX_ITEMS)
+
+#define v2p_for_each(i) \
+	for (i = v2p_iterator_begin; i < v2p_iterator_end; ++i)
+
+void l4x_v2p_for_each(void (*cb)(l4_addr_t phys, void *virt,
+                                 l4_size_t size, l4_cap_idx_t ds,
+                                 l4_addr_t ds_offset, void *data), void *data)
+{
+
+	struct l4x_phys_virt_mem *i;
+
+	v2p_for_each(i) {
+		if (!i->size)
+			continue;
+
+		cb(i->phys, i->virt, i->size, i->ds, i->ds_offset, data);
+	}
+}
+EXPORT_SYMBOL(l4x_v2p_for_each);
+
 static bool l4x_v2p_is_registered(void *virt, l4_size_t size)
 {
-	int i;
+	struct l4x_phys_virt_mem *i;
 
-	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
-		if (l4x_phys_virt_addrs[i].size
-		    && l4x_phys_virt_addrs[i].virt <= virt
-		    && virt < l4x_phys_virt_addrs[i].virt
-		              + l4x_phys_virt_addrs[i].size)
+	v2p_for_each(i)
+		if (i->size && i->virt <= virt && virt < i->virt + i->size)
 			return true;
-	}
 
 	return false;
 }
 
-void l4x_v2p_add_item(l4_addr_t phys, void *virt, l4_size_t size)
+void l4x_v2p_add_item_ds(l4_addr_t phys, void *virt, l4_size_t size,
+                         l4_cap_idx_t ds, l4_addr_t ds_offset)
 {
-	unsigned i = 0;
+	struct l4x_phys_virt_mem *i;
 
+	/* may be we should check for mismatching ds and ds_offset */
 	if (l4x_v2p_is_registered(virt, size))
 		return;
 
-	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
-		if (l4x_phys_virt_addrs[i].size)
+	if (likely(l4x_init_finished))
+		spin_lock(&l4x_v2p_lock);
+
+	v2p_for_each(i) {
+		if (i->size)
 			continue;
 
-		l4x_phys_virt_addrs[i]
-			= (struct l4x_phys_virt_mem){.phys = phys, .virt = virt, .size = size};
+		*i = (struct l4x_phys_virt_mem){
+				.phys = phys,
+				.virt = virt,
+				.ds = ds,
+				.ds_offset = ds_offset,
+			};
+		smp_wmb();
+		i->size = size;
 		break;
 	}
+	if (likely(l4x_init_finished))
+		spin_unlock(&l4x_v2p_lock);
 
-	if (i == L4X_PHYS_VIRT_ADDRS_MAX_ITEMS)
+	if (i == v2p_iterator_end)
 		LOG_printf("v2p filled up!\n");
 }
 
 unsigned long l4x_v2p_del_item(void *virt)
 {
-	unsigned i = 0;
+	struct l4x_phys_virt_mem *i;
+	unsigned long r = 0;
 
-	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
-		unsigned long r;
+	if (likely(l4x_init_finished))
+		spin_lock(&l4x_v2p_lock);
 
-		if (!l4x_phys_virt_addrs[i].size
-		    || l4x_phys_virt_addrs[i].virt != virt)
+	v2p_for_each(i) {
+		if (!i->size || i->virt != virt)
 			continue;
 
-		r = l4x_phys_virt_addrs[i].size;
-		l4x_phys_virt_addrs[i].size = 0;
-		l4x_phys_virt_addrs[i].phys = 0;
-		l4x_phys_virt_addrs[i].virt = NULL;
-		return r;
+		r = i->size;
+		i->size = 0;
+		smp_wmb();
+		i->phys = 0;
+		i->virt = NULL;
+		break;
 	}
+	if (likely(l4x_init_finished))
+		spin_unlock(&l4x_v2p_lock);
 
-	return 0;
+	return r;
 }
 
 static void l4x_virt_to_phys_show(void)
 {
-	int i;
-	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
-		if (l4x_phys_virt_addrs[i].virt
-		    || l4x_phys_virt_addrs[i].phys
-		    || l4x_phys_virt_addrs[i].size)
-			l4x_printf("v2p: %d: v:%08lx-%08lx p:%08lx-%08lx sz:%08zx\n",
-			           i,
-			           (unsigned long)l4x_phys_virt_addrs[i].virt,
-			           (unsigned long)l4x_phys_virt_addrs[i].virt + l4x_phys_virt_addrs[i].size,
-			           l4x_phys_virt_addrs[i].phys,
-			           l4x_phys_virt_addrs[i].phys + l4x_phys_virt_addrs[i].size,
-			           l4x_phys_virt_addrs[i].size);
-	}
+	struct l4x_phys_virt_mem *i;
+
+	v2p_for_each(i)
+		if (i->virt || i->phys || i->size)
+			l4x_printf("v2p: %zd: v:%08lx-%08lx p:%08lx-%08lx sz:%08zx\n",
+			           i - v2p_iterator_begin,
+			           (unsigned long)i->virt,
+			           (unsigned long)i->virt + i->size,
+			           i->phys, i->phys + i->size, i->size);
 
 	l4x_ioremap_show();
 }
 
 unsigned long l4x_virt_to_phys(volatile void * address)
 {
-	int i;
+	struct l4x_phys_virt_mem *i;
 	unsigned long p;
 
-	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
-		if (l4x_phys_virt_addrs[i].size
-		    && l4x_phys_virt_addrs[i].virt <= address
-		    && address < l4x_phys_virt_addrs[i].virt
-		                 + l4x_phys_virt_addrs[i].size)
-			return (address - l4x_phys_virt_addrs[i].virt)
-			       + l4x_phys_virt_addrs[i].phys;
+	v2p_for_each(i) {
+		if (i->size
+		    && i->virt <= address && address < i->virt + i->size)
+			return (address - i->virt) + i->phys;
 	}
 
 	p = find_ioremap_entry_phys((unsigned long)address);
@@ -422,17 +465,13 @@ EXPORT_SYMBOL(l4x_virt_to_phys);
 
 void *l4x_phys_to_virt(unsigned long address)
 {
-	int i;
+	struct l4x_phys_virt_mem *i;
 	unsigned long v;
 
-	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
-		if (l4x_phys_virt_addrs[i].size
-		    && l4x_phys_virt_addrs[i].phys <= address
-		    && address < l4x_phys_virt_addrs[i].phys
-		                 + l4x_phys_virt_addrs[i].size) {
-			return (address - l4x_phys_virt_addrs[i].phys)
-			       + l4x_phys_virt_addrs[i].virt;
-		}
+	v2p_for_each(i) {
+		if (i->size
+		    && i->phys <= address && address < i->phys + i->size)
+			return (address - i->phys) + i->virt;
 	}
 
 	v = find_ioremap_entry(address);
@@ -469,12 +508,11 @@ phys_addr_t l4x_dma_phys_low_limit;
 
 static void l4x_init_dma_phys_low_limit(void)
 {
-	int i;
+	struct l4x_phys_virt_mem *e;
 	phys_addr_t v = 0;
 	phys_addr_t limit = 0xfffffffful;
 
-	for (i = 0; i < L4X_PHYS_VIRT_ADDRS_MAX_ITEMS; i++) {
-		struct l4x_phys_virt_mem *e = &l4x_phys_virt_addrs[i];
+	v2p_for_each(e) {
 		phys_addr_t p = e->phys;
 
 		if  (!e->size)
@@ -563,8 +601,7 @@ L4_CV l4_utcb_t *l4_utcb_wrap(void)
 	unsigned long v;
 	asm ("mov %%fs, %0": "=r" (v));
 	if (v == 0x43 || v == 7) {
-		/* also use input for proper insn ordering */
-		asm ("mov %%fs:0, %0" : "=r" (v) : "r" (v));
+		asm volatile ("mov %%fs:0, %0" : "=r" (v));
 		return (l4_utcb_t *)v;
 	}
 	return l4x_utcb_current(current_thread_info_stack());
@@ -1072,36 +1109,61 @@ static __init_refok void l4x_setup_upage(void)
 #endif /* CONFIG_ARM */
 
 static void l4x_register_region(const l4re_ds_t ds, void *start,
-                                int allow_noncontig, const char *tag)
+                                unsigned long ds_offset, unsigned long size,
+                                int allow_noncontig, int may_use_for_dma,
+                                const char *tag)
 {
-	l4_size_t ds_size;
-	l4_addr_t offset = 0;
-	l4_addr_t phys_addr;
+	unsigned long offset = 0;
+	l4_addr_t virt = (l4_addr_t)start;
+	l4re_dma_space_dma_addr_t phys_addr;
 	l4_size_t phys_size;
 
-	ds_size = l4re_ds_size(ds);
+	/* add initial offset to the size we have to encounter */
+	size = min(size, l4_round_page(l4re_ds_size(ds) - ds_offset));
 
-	LOG_printf("%15s: Virt: %p to %p [%zu KiB]\n",
-	           tag, start, start + ds_size - 1, ds_size >> 10);
+	LOG_printf("%15s: Virt: %p to %p [%lu KiB]\n",
+	           tag, start, start + size - 1, size >> 10);
 
-	while (offset < ds_size) {
+	if (l4_is_invalid_cap(l4x_dma_space)) {
+		l4x_v2p_add_item_ds(virt, (void*)virt, size,
+		                    may_use_for_dma ? ds : L4_INVALID_CAP,
+		                    ds_offset);
+		return;
+	}
+
+	while (offset < size) {
+		phys_size = size - offset;
 		if (l4x_phys_mem_disabled
-		    || l4re_ds_phys(ds, offset, &phys_addr, &phys_size)) {
+		    || l4re_dma_space_map(l4x_dma_space, ds | L4_CAP_FPAGE_RW,
+		                          ds_offset, &phys_size,
+		                          0, 0, &phys_addr)) {
 			LOG_printf("error: failed to get physical address for %lx.\n",
-			           (unsigned long)start + offset);
+			           virt);
 			break;
 		}
 
-		if (!allow_noncontig && phys_size != ds_size)
+		/* assume complete pages, even if the DS API may sometimes
+		 * return fractions of a page */
+		phys_size = l4_round_page(phys_size);
+
+		if (!allow_noncontig && phys_size < size)
 			LOG_printf("Noncontiguous region for %s\n", tag);
 
-		LOG_printf("%15s: Phys: 0x%08lx to 0x%08lx, [%zu KiB]\n",
+		/* limit phys size to the locally mapped range */
+		if (offset + phys_size > size)
+			phys_size = size - offset;
+
+		LOG_printf("%15s: Phys: 0x%08llx to 0x%08llx, [%zu KiB]\n",
 		           tag, phys_addr,
 		           phys_addr + phys_size - 1, phys_size >> 10);
 
-		l4x_v2p_add_item(phys_addr, start + offset, phys_size);
+		l4x_v2p_add_item_ds(phys_addr, (void *)virt, phys_size,
+		                    may_use_for_dma ? ds : L4_INVALID_CAP,
+		                    ds_offset);
 
-		offset += phys_size;
+		offset    += phys_size;
+		ds_offset += phys_size;
+		virt      += phys_size;
 	}
 }
 
@@ -1113,8 +1175,8 @@ static void l4x_register_region(const l4re_ds_t ds, void *start,
  *       now
  * Note2:
  */
-static void l4x_register_pointer_section(void *p_in_addr,
-                                         int allow_noncontig,
+static void l4x_register_pointer_section(void *p_in_addr, void *p_in_addr_end,
+                                         int allow_noncontig, int may_use_for_dma,
                                          const char *tag)
 {
 	l4re_ds_t ds;
@@ -1124,15 +1186,20 @@ static void l4x_register_pointer_section(void *p_in_addr,
 	unsigned flags;
 
 	addr = (l4_addr_t)p_in_addr;
-	size = 1;
-	if (l4re_rm_find(&addr, &size, &off, &flags, &ds)) {
-		LOG_printf("Cannot find anything at %p.\n", p_in_addr);
-		l4re_rm_show_lists();
-		enter_kdebug("l4re_rm_find failed");
-		return;
-	}
+	do {
+		size = 1;
+		if (l4re_rm_find(&addr, &size, &off, &flags, &ds)) {
+			LOG_printf("Cannot find anything at %p.\n", p_in_addr);
+			l4re_rm_show_lists();
+			enter_kdebug("l4re_rm_find failed");
+			return;
+		}
 
-	l4x_register_region(ds, (void *)addr, allow_noncontig, tag);
+		l4x_register_region(ds, (void *)addr, off, size,
+		                    allow_noncontig,
+		                    may_use_for_dma, tag);
+		addr += size ;
+	} while (addr < (l4_addr_t)p_in_addr_end);
 }
 
 /* Reserve some part of the virtual address space for vmalloc */
@@ -1401,7 +1468,8 @@ void __init l4x_setup_memory(char *cmdl,
 		if (res)
 			l4x_exit_l4linux_msg("L4x: Error attaching to L4Linux main memory: %ld\n", res);
 
-		l4x_register_region(l4x_ds_mainmem[p_i], a, 0, "Main memory");
+		l4x_register_region(l4x_ds_mainmem[p_i], a, 0, mem_chunk_sz[p_i],
+		                    0, 1, "Main memory");
 		a = (char *)a + mem_chunk_sz[p_i];
 		mem_chunk_phys[p_i] = ~0ul;
 	}
@@ -1468,7 +1536,7 @@ void __init l4x_setup_memory(char *cmdl,
 	if ((unsigned long)&_end < 0x100000)
 		LOG_printf("_end == %p, unreasonable small\n", &_end);
 
-	l4x_register_pointer_section((void *)((unsigned long)&_text), 0, "text");
+	l4x_register_pointer_section((void *)((unsigned long)&_text), NULL, 0, 0, "text");
 
 	l4x_init_dma_phys_low_limit();
 }
@@ -1849,10 +1917,11 @@ void l4x_cpu_spawn(int cpu, struct task_struct *idle)
 	/* Now wait until the CPU really disappeared,
 	 * avoiding the create/delete race */
 	while (1) {
-		l4_msgtag_t t;
-		t = L4XV_FN(l4_msgtag_t,
-		            l4_thread_switch(l4x_cpu_thread_caps[cpu]));
-		if (l4_ipc_error(t, l4_utcb()) == L4_IPC_ENOT_EXISTENT)
+		l4_umword_t r;
+		r = L4XV_FN(l4_umword_t,
+		            l4_ipc_error(l4_thread_switch(l4x_cpu_thread_caps[cpu]),
+		                         l4_utcb()));
+		if (r == L4_IPC_ENOT_EXISTENT)
 			break;
 		msleep(1);
 	}
@@ -1920,7 +1989,7 @@ __visible void smp_irq_work_interrupt(struct pt_regs *regs);
 
 void l4x_smp_process_IPI(int vector, struct pt_regs *regs)
 {
-	switch (vector) {
+	switch (vector | L4X_SMP_IPI_VECTOR_BASE) {
 		case RESCHEDULE_VECTOR:
 			smp_reschedule_interrupt(regs);
 			break;
@@ -2205,6 +2274,7 @@ static L4_CV void __init cpu0_startup(void *data)
 	/* set our custom power off function */
 	pm_power_off = l4x_power_off;
 
+	l4x_init_finished = true;
 #ifdef CONFIG_X86_32
 	i386_start_kernel();
 #elif defined(CONFIG_X86_64)
@@ -2528,6 +2598,53 @@ static struct l4x_svr_ops _l4x_svr_ops = {
 };
 #endif
 
+static int l4x_setup_dma(void)
+{
+	int r;
+	l4_utcb_t *utcb = l4_utcb();
+	l4_cap_idx_t vbus = l4re_env_get_cap("vbus");
+	l4x_dma_space = L4_INVALID_CAP;
+
+	if (!l4_is_valid_cap(vbus))
+		return 0; /* no vBUS, no DMA */
+
+	l4x_dma_space = l4re_util_cap_alloc();
+	if (l4_is_invalid_cap(l4x_dma_space)) {
+		/* this should never happen */
+		LOG_printf("%s: fatal: Out of caps\n", __func__);
+		l4x_exit_l4linux();
+	}
+
+	r = l4_error(l4_factory_create_u(l4re_env()->mem_alloc,
+	                                 L4RE_PROTO_DMA_SPACE, l4x_dma_space,
+	                                 utcb));
+	if (r < 0) {
+		LOG_printf("error: could not create DMA address space: %d\n"
+		           "       DMA will not work!\n", r);
+		goto err_release_cap;
+	}
+
+	r = l4vbus_assign_dma_domain(vbus, ~0U,
+	                             L4VBUS_DMAD_BIND
+	                             | L4VBUS_DMAD_L4RE_DMA_SPACE,
+	                             l4x_dma_space);
+	if (r < 0) {
+		LOG_printf("error: could not assign DMA space to vBUS: %d\n"
+		           "       DMA will not work!\n", r);
+		goto err_release_dma_domain;
+	}
+
+	return 0;
+
+err_release_dma_domain:
+	l4_task_release_cap(L4RE_THIS_TASK_CAP, l4x_dma_space);
+
+err_release_cap:
+	l4re_util_cap_free(l4x_dma_space);
+	l4x_dma_space = L4_INVALID_CAP;
+	return r;
+}
+
 static void pagein_sect(const char *name, void *s, void *e, bool rw)
 {
 	unsigned long sz = (unsigned long)e - (unsigned long)s;
@@ -2661,6 +2778,7 @@ int __init_refok L4_CV main(int argc, char **argv)
 #ifdef CONFIG_ARM
 	l4x_setup_upage();
 #endif
+	l4x_setup_dma();
 
 #if defined(CONFIG_X86_64) || defined(CONFIG_ARM)
 	setup_module_area();
@@ -2696,8 +2814,8 @@ int __init_refok L4_CV main(int argc, char **argv)
 	LOG_printf("main thread will be " PRINTF_L4TASK_FORM "\n",
 	           PRINTF_L4TASK_ARG(l4lx_thread_get_cap(main_id)));
 
-	l4x_register_pointer_section(&__init_begin, 0, "section-with-init(-data)");
-	l4x_register_pointer_section(&_sinittext,   0, "section-with-init-text");
+	l4x_register_pointer_section(&__init_begin, 0, 0, 1, "section-with-init(-data)");
+	l4x_register_pointer_section(&_sinittext,   0, 0, 1, "section-with-init-text");
 
 #ifdef CONFIG_X86
 	/* Needed for smp alternatives -- nobody will ever use this for a
@@ -3015,11 +3133,12 @@ static int l4x_handle_msr(l4_exc_regs_t *exc)
 
 	/* wrmsr */
 	if (*(unsigned short *)pc == 0x300f) {
-		unsigned long list[] = {
+		static unsigned long list[] = {
 			MSR_IA32_SYSENTER_CS,
 			MSR_IA32_SYSENTER_ESP,
 			MSR_IA32_SYSENTER_EIP,
 			MSR_AMD64_MCx_MASK(4),
+			MSR_IA32_UCODE_REV,
 		};
 		int i = 0;
 
@@ -3047,12 +3166,24 @@ static int l4x_handle_msr(l4_exc_regs_t *exc)
 			case MSR_IA32_MISC_ENABLE:
 			case MSR_K8_TSEG_ADDR:
 			case MSR_AMD64_MCx_MASK(4):
-			case MSR_AMD64_PATCH_LEVEL:
+			case MSR_AMD64_PATCH_LEVEL: /* == MSR_IA32_UCODE_REV */
 			case MSR_ARCH_PERFMON_FIXED_CTR_CTRL:
 			case MSR_K7_PERFCTR0:
 			case MSR_P6_PERFCTR0:
 			case MSR_P4_BPU_PERFCTR0:
 			case MSR_F15H_PERF_CTR:
+			case MSR_CORE_C3_RESIDENCY:
+			case MSR_CORE_C6_RESIDENCY:
+			case MSR_CORE_C7_RESIDENCY:
+			case MSR_PKG_C2_RESIDENCY:
+			case MSR_PKG_C6_RESIDENCY:
+			case MSR_PKG_C7_RESIDENCY:
+			case MSR_IA32_APERF:
+			case MSR_IA32_MPERF:
+			case MSR_SMI_COUNT:
+			case MSR_PPERF:
+			case MSR_IA32_VMX_PROCBASED_CTLS:
+			case MSR_RAPL_POWER_UNIT:
 				exc->RN(ax) = exc->RN(dx) = 0;
 				break;
 			case MSR_K7_CLK_CTL:
@@ -3108,39 +3239,37 @@ static inline void l4x_print_exception(l4_cap_idx_t t, l4_exc_regs_t *exc)
 #ifdef CONFIG_L4_VCPU
 static inline l4_exc_regs_t *cast_to_utcb_exc(l4_vcpu_regs_t *vcpu_regs)
 {
-#ifdef CONFIG_X86_32
-	enum { OFF = offsetof(l4_vcpu_regs_t, gs), };
-#else
-	enum { OFF = offsetof(l4_vcpu_regs_t, r15), };
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, ds)      != offsetof(l4_exc_regs_t, ds));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, es)      != offsetof(l4_exc_regs_t, es));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, gs)      != offsetof(l4_exc_regs_t, gs));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, fs)      != offsetof(l4_exc_regs_t, fs));
+#ifdef CONFIG_X86_64
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, fs_base) != offsetof(l4_exc_regs_t, fs_base));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, gs_base) != offsetof(l4_exc_regs_t, gs_base));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r15)     != offsetof(l4_exc_regs_t, r15));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r14)     != offsetof(l4_exc_regs_t, r14));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r13)     != offsetof(l4_exc_regs_t, r13));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r12)     != offsetof(l4_exc_regs_t, r12));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r11)     != offsetof(l4_exc_regs_t, r11));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r10)     != offsetof(l4_exc_regs_t, r10));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r9)      != offsetof(l4_exc_regs_t, r9));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r8)      != offsetof(l4_exc_regs_t, r8));
 #endif
-#ifdef CONFIG_X86_32
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, gs)     - OFF != offsetof(l4_exc_regs_t, gs));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, fs)     - OFF != offsetof(l4_exc_regs_t, fs));
-#else
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r15)    - OFF != offsetof(l4_exc_regs_t, r15));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r14)    - OFF != offsetof(l4_exc_regs_t, r14));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r13)    - OFF != offsetof(l4_exc_regs_t, r13));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r12)    - OFF != offsetof(l4_exc_regs_t, r12));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r11)    - OFF != offsetof(l4_exc_regs_t, r11));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r10)    - OFF != offsetof(l4_exc_regs_t, r10));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r9)     - OFF != offsetof(l4_exc_regs_t, r9));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, r8)     - OFF != offsetof(l4_exc_regs_t, r8));
-#endif
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, di)     - OFF != offsetof(l4_exc_regs_t, RN(di)));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, si)     - OFF != offsetof(l4_exc_regs_t, RN(si)));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, bp)     - OFF != offsetof(l4_exc_regs_t, RN(bp)));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, pfa)    - OFF != offsetof(l4_exc_regs_t, pfa));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, bx)     - OFF != offsetof(l4_exc_regs_t, RN(bx)));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, dx)     - OFF != offsetof(l4_exc_regs_t, RN(dx)));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, cx)     - OFF != offsetof(l4_exc_regs_t, RN(cx)));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, ax)     - OFF != offsetof(l4_exc_regs_t, RN(ax)));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, trapno) - OFF != offsetof(l4_exc_regs_t, trapno));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, err)    - OFF != offsetof(l4_exc_regs_t, err));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, ip)     - OFF != offsetof(l4_exc_regs_t, ip));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, flags)  - OFF != offsetof(l4_exc_regs_t, flags));
-	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, sp)     - OFF != offsetof(l4_exc_regs_t, sp));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, di)      != offsetof(l4_exc_regs_t, RN(di)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, si)      != offsetof(l4_exc_regs_t, RN(si)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, bp)      != offsetof(l4_exc_regs_t, RN(bp)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, pfa)     != offsetof(l4_exc_regs_t, pfa));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, bx)      != offsetof(l4_exc_regs_t, RN(bx)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, dx)      != offsetof(l4_exc_regs_t, RN(dx)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, cx)      != offsetof(l4_exc_regs_t, RN(cx)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, ax)      != offsetof(l4_exc_regs_t, RN(ax)));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, trapno)  != offsetof(l4_exc_regs_t, trapno));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, err)     != offsetof(l4_exc_regs_t, err));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, ip)      != offsetof(l4_exc_regs_t, ip));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, flags)   != offsetof(l4_exc_regs_t, flags));
+	BUILD_BUG_ON(offsetof(l4_vcpu_regs_t, sp)      != offsetof(l4_exc_regs_t, sp));
 
-	return (l4_exc_regs_t *)((char *)vcpu_regs + OFF);
+	return (l4_exc_regs_t *)vcpu_regs;
 }
 #endif
 
@@ -3569,23 +3698,20 @@ void l4x_platform_shutdown(unsigned reboot)
 	/* Look for platform control capability 'pfc' */
 	e = l4x_re_resolve_name("pfc", &pfc_cap);
 	if (e || !l4_is_valid_cap(pfc_cap)) {
-		pr_warn("Cannot shutdown/restart platform."
-		        " No platform control cap 'pfc' found.\n");
-		goto exit;
+		pr_info("No platform control cap 'pfc' found, "
+		        "will not shutdown/restart platform.\n");
+		l4x_exit_l4linux();
 	}
 
 	e = L4XV_FN_e(l4_platform_ctl_system_shutdown(pfc_cap, reboot));
 	if (e) {
 		pr_err("Error during shutdown/restart of the platform. "
 		       "Exiting L4Linux.\n");
-		goto exit;
+		l4x_exit_l4linux();
 	}
 
 	/* wait till the platform is powered down / restarted */
 	l4_sleep_forever();
-
-exit:
-	l4x_exit_l4linux();
 }
 
 void __noreturn l4x_exit_l4linux(void)

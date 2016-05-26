@@ -3,6 +3,7 @@
 #include <linux/slab.h>
 #include <linux/ratelimit.h>
 
+#include <asm/generic/mmu_context.h>
 #include <asm/generic/task.h>
 #include <asm/generic/hybrid.h>
 #include <asm/generic/user.h>
@@ -18,11 +19,14 @@
 #include <l4/sys/ipc.h>
 #include <l4/sys/task.h>
 
-void destroy_context(struct mm_struct *mm)
+void l4x_init_new_context(struct task_struct *tsk, struct mm_struct *mm)
+{
+	mm->context.task = L4_INVALID_CAP;
+}
+
+void l4x_destroy_context(struct mm_struct *mm)
 {
 	l4_cap_idx_t task_id;
-
-	destroy_context_origarch(mm);
 
 	if (!mm || !mm->context.task ||
 	    l4_is_invalid_cap(task_id = mm->context.task))
@@ -34,12 +38,6 @@ void destroy_context(struct mm_struct *mm)
 	mm->context.task = L4_INVALID_CAP;
 
 	l4lx_task_number_free(task_id);
-}
-
-int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
-{
-	mm->context.task = L4_INVALID_CAP;
-	return init_new_context_origarch(tsk, mm);
 }
 
 #ifndef CONFIG_L4_VCPU

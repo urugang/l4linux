@@ -27,13 +27,13 @@ enum { PRIO_TIMER = CONFIG_L4_PRIO_IRQ_BASE + 1 };
 
 enum Protos
 {
-	L4_PROTO_TIMER = 19L,
+	L4X_PROTO_TIMER = 19L,
 };
 
-enum L4_timer_ops
+enum L4x_timer_ops
 {
-	L4_TIMER_OP_START = 0UL,
-	L4_TIMER_OP_STOP  = 1UL,
+	L4X_TIMER_OP_START = 0UL,
+	L4X_TIMER_OP_STOP  = 1UL,
 };
 
 typedef unsigned long long l4timer_time_t;
@@ -43,6 +43,11 @@ static struct clock_event_device __percpu *timer_evt;
 static l4_cap_idx_t __percpu *timer_irq_caps;
 static DEFINE_PER_CPU(l4_cap_idx_t, timer_srv);
 static DEFINE_PER_CPU(l4lx_thread_t, timer_threads);
+
+static inline l4_timeout_t next_timeout(l4_cpu_time_t next_to, l4_utcb_t *u)
+{
+	return l4_timeout(L4_IPC_TIMEOUT_0, l4_timeout_abs_u(next_to, 1, u));
+}
 
 static void L4_CV timer_thread(void *data)
 {
@@ -56,11 +61,10 @@ static void L4_CV timer_thread(void *data)
 	l4_cpu_time_t next_to = 0;
 	enum {
 		idx_base_mr   = 2,
+		mr_i          = sizeof(v->mr64[0]) / sizeof(v->mr[0]),
 	};
-	const unsigned idx_at
-		= l4_utcb_mr64_idx(idx_base_mr);
-	const unsigned idx_increment
-		= l4_utcb_mr64_idx(idx_base_mr + sizeof(v->mr64[0]) / sizeof(v->mr[0]));
+	const unsigned idx_at = l4_utcb_mr64_idx(idx_base_mr);
+	const unsigned idx_increment = l4_utcb_mr64_idx(idx_base_mr + mr_i);
 
 	to = L4_IPC_NEVER;
 	t = l4_ipc_wait(u, &l, to);
@@ -74,21 +78,19 @@ static void L4_CV timer_thread(void *data)
 
 			if (increment) {
 				next_to += increment;
-				to = l4_timeout(L4_IPC_TIMEOUT_0,
-				                l4_timeout_abs_u(next_to, 1, u));
+				to = next_timeout(next_to, u);
 			} else
 				to = L4_IPC_NEVER;
 			reply = 0;
-		} else if (l4_error(t) == L4_PROTO_TIMER) {
+		} else if (l4_error(t) == L4X_PROTO_TIMER) {
 			switch (v->mr[0]) {
-				case L4_TIMER_OP_START:
+				case L4X_TIMER_OP_START:
 					next_to = v->mr64[idx_at];
-					to = l4_timeout(L4_IPC_TIMEOUT_0,
-					                l4_timeout_abs_u(next_to, 1, u));
+					to = next_timeout(next_to, u);
 					increment = v->mr64[idx_increment];
 					r = 0;
 					break;
-				case L4_TIMER_OP_STOP:
+				case L4X_TIMER_OP_STOP:
 					to = L4_IPC_NEVER;
 					increment = 0;
 					r = 0;
@@ -107,8 +109,6 @@ static void L4_CV timer_thread(void *data)
 		else
 			t = l4_ipc_wait(u, &l, to);
 	}
-
-
 }
 
 static l4_msgtag_t l4timer_start_u(l4_cap_idx_t timer, unsigned flags,
@@ -117,22 +117,22 @@ static l4_msgtag_t l4timer_start_u(l4_cap_idx_t timer, unsigned flags,
 {
 	int idx = 2;
 	l4_msg_regs_t *v = l4_utcb_mr_u(utcb);
-	v->mr[0] = L4_TIMER_OP_START;
+	v->mr[0] = L4X_TIMER_OP_START;
 	v->mr[1] = flags;
 	v->mr64[l4_utcb_mr64_idx(idx)] = at;
 	idx += sizeof(v->mr64[0]) / sizeof(v->mr[0]);
 	v->mr64[l4_utcb_mr64_idx(idx)] = increment;
 	idx += sizeof(v->mr64[0]) / sizeof(v->mr[0]);
 	return l4_ipc_call(timer, utcb,
-	                   l4_msgtag(L4_PROTO_TIMER, idx, 0, 0),
+	                   l4_msgtag(L4X_PROTO_TIMER, idx, 0, 0),
 	                   L4_IPC_NEVER);
 }
 
 static l4_msgtag_t l4timer_stop_u(l4_cap_idx_t timer, l4_utcb_t *utcb)
 {
 	l4_msg_regs_t *v = l4_utcb_mr_u(utcb);
-	v->mr[0] = L4_TIMER_OP_STOP;
-	return l4_ipc_call(timer, utcb, l4_msgtag(L4_PROTO_TIMER, 1, 0, 0),
+	v->mr[0] = L4X_TIMER_OP_STOP;
+	return l4_ipc_call(timer, utcb, l4_msgtag(L4X_PROTO_TIMER, 1, 0, 0),
                            L4_IPC_NEVER);
 }
 
@@ -169,9 +169,9 @@ static int timer_set_periodic(struct clock_event_device *clk)
 {
 	const l4timer_time_t increment = 1000000 / HZ;
 	int r;
-	r = L4XV_FN_i(l4_error(l4timer_start(this_cpu_read(timer_srv), 0,
-	                                     l4_kip_clock(l4lx_kinfo),
-	                                     increment)));
+	r = L4XV_FN_e(l4timer_start(this_cpu_read(timer_srv), 0,
+	                            l4_kip_clock(l4lx_kinfo),
+	                            increment));
 	if (r)
 		pr_warn("l4timer: start failed (%d)\n", r);
 	return r;
@@ -181,9 +181,9 @@ static int timer_set_next_event(unsigned long evt,
                                 struct clock_event_device *unused)
 {
 	int r;
-	r = L4XV_FN_i(l4_error(l4timer_start(this_cpu_read(timer_srv), 0,
-	                                     l4_kip_clock(l4lx_kinfo) + evt,
-	                                     0)));
+	r = L4XV_FN_e(l4timer_start(this_cpu_read(timer_srv), 0,
+	                            l4_kip_clock(l4lx_kinfo) + evt,
+	                            0));
 	if (r)
 		pr_warn("l4timer: start failed (%d)\n", r);
 	return 0;
@@ -356,7 +356,7 @@ static cycle_t l4x_clk_read(struct clocksource *cs)
 
 static struct clocksource kipclk_cs = {
 	.name           = "l4kipclk",
-	.rating         = 300,
+	.rating         = 200,
 	.read           = l4x_clk_read,
 	.mask           = CLOCKSOURCE_MASK(64),
 	.mult           = 1000,

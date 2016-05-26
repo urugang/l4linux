@@ -16,6 +16,7 @@
 
 #include <linux/scatterlist.h>
 #include <linux/mmc/core.h>
+#include <linux/dmaengine.h>
 
 #define MAX_MCI_SLOTS	2
 
@@ -39,6 +40,17 @@ enum {
 };
 
 struct mmc_data;
+
+enum {
+	TRANS_MODE_PIO = 0,
+	TRANS_MODE_IDMAC,
+	TRANS_MODE_EDMAC
+};
+
+struct dw_mci_dma_slave {
+	struct dma_chan *ch;
+	enum dma_transfer_direction direction;
+};
 
 /**
  * struct dw_mci - MMC controller state shared between all slots
@@ -154,7 +166,14 @@ struct dw_mci {
 	dma_addr_t		sg_dma;
 	void			*sg_cpu;
 	const struct dw_mci_dma_ops	*dma_ops;
+	/* For idmac */
 	unsigned int		ring_size;
+
+	/* For edmac */
+	struct dw_mci_dma_slave *dms;
+	/* Registers's physical base address */
+	resource_size_t		phy_regs;
+
 	u32			cmd_status;
 	u32			data_status;
 	u32			stop_cmdr;
@@ -208,34 +227,18 @@ struct dw_mci {
 struct dw_mci_dma_ops {
 	/* DMA Ops */
 	int (*init)(struct dw_mci *host);
-	void (*start)(struct dw_mci *host, unsigned int sg_len);
-	void (*complete)(struct dw_mci *host);
+	int (*start)(struct dw_mci *host, unsigned int sg_len);
+	void (*complete)(void *host);
 	void (*stop)(struct dw_mci *host);
 	void (*cleanup)(struct dw_mci *host);
 	void (*exit)(struct dw_mci *host);
 };
 
 /* IP Quirks/flags. */
-/* DTO fix for command transmission with IDMAC configured */
-#define DW_MCI_QUIRK_IDMAC_DTO			BIT(0)
-/* delay needed between retries on some 2.11a implementations */
-#define DW_MCI_QUIRK_RETRY_DELAY		BIT(1)
-/* High Speed Capable - Supports HS cards (up to 50MHz) */
-#define DW_MCI_QUIRK_HIGHSPEED			BIT(2)
-/* Unreliable card detection */
-#define DW_MCI_QUIRK_BROKEN_CARD_DETECTION	BIT(3)
 /* Timer for broken data transfer over scheme */
-#define DW_MCI_QUIRK_BROKEN_DTO			BIT(4)
+#define DW_MCI_QUIRK_BROKEN_DTO			BIT(0)
 
 struct dma_pdata;
-
-struct block_settings {
-	unsigned short	max_segs;	/* see blk_queue_max_segments */
-	unsigned int	max_blk_size;	/* maximum size of one mmc block */
-	unsigned int	max_blk_count;	/* maximum number of blocks in one req*/
-	unsigned int	max_req_size;	/* maximum number of bytes in one req*/
-	unsigned int	max_seg_size;	/* see blk_queue_max_segment_size */
-};
 
 /* Board platform data */
 struct dw_mci_board {

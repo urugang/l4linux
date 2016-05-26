@@ -18,3 +18,9 @@ mkstub execve, compat_sys_execve
 mkstub execveat, compat_sys_execveat
 mkstub rt_sigreturn, sys32_rt_sigreturn
 mkstub sigreturn, sys32_sigreturn
+
+/* For traps.c */
+ENTRY(entry_SYSENTER_compat)
+	nop
+GLOBAL(__end_entry_SYSENTER_compat)
+ENDPROC(entry_SYSENTER_compat)

@@ -5,6 +5,7 @@
 #include <linux/slab.h>
 #include <linux/suspend.h>
 #include <linux/workqueue.h>
+#include <linux/notifier.h>
 
 #include <l4/vbus/vbus.h>
 #include <l4/vbus/vbus_inhibitor.h>
@@ -380,6 +381,23 @@ static void l4lx_initiate_shutdown(struct work_struct *work)
 	kernel_power_off();
 }
 
+/**
+ * This function is called during a kernel panic. It ensures all inhibitor locks
+ * at IO are freed, and the system can still suspend.
+ */
+static int
+vbus_panic(struct notifier_block *self, unsigned long v, void *p)
+{
+	(void)self;
+	(void)v;
+	(void)p;
+	vbus_root_shutdown(vbus_root);
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block vbus_panic_notifier = {
+	.notifier_call = vbus_panic
+};
 
 static int __init vbus_init(void)
 {
@@ -403,6 +421,10 @@ static int __init vbus_init(void)
 
 	err = driver_register(&vbus_root_driver.driver);
 	create_vbus_device(NULL, 0, "l4vbus-root", &vbus_root);
+
+	atomic_notifier_chain_register(&panic_notifier_list,
+	                               &vbus_panic_notifier);
+
 	return err;
 }
 

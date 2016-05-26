@@ -60,13 +60,13 @@ static inline bool __chk_range_not_ok(unsigned long addr, unsigned long size, un
 	 * limit, not add it to the address).
 	 */
 	if (__builtin_constant_p(size))
-		return addr > limit - size;
+		return unlikely(addr > limit - size);
 
 	/* Arbitrary sizes? Be careful about overflow */
 	addr += size;
-	if (addr < size)
+	if (unlikely(addr < size))
 		return true;
-	return addr > limit;
+	return unlikely(addr > limit);
 }
 
 #define __range_not_ok(addr, size, limit)				\
@@ -99,12 +99,11 @@ static inline bool __chk_range_not_ok(unsigned long addr, unsigned long size, un
 	likely(!__range_not_ok(addr, size, user_addr_max()))
 
 /*
- * The exception table consists of pairs of addresses relative to the
- * exception table enty itself: the first is the address of an
- * instruction that is allowed to fault, and the second is the address
- * at which the program should continue.  No registers are modified,
- * so it is entirely up to the continuation code to figure out what to
- * do.
+ * The exception table consists of triples of addresses relative to the
+ * exception table entry itself. The first address is of an instruction
+ * that is allowed to fault, the second is the target at which the program
+ * should continue. The third is a handler function to deal with the fault
+ * caused by the instruction in the first field.
  *
  * All the routines below use bits of fixup code that are out of line
  * with the main instruction path.  This means when everything is well,
@@ -113,13 +112,21 @@ static inline bool __chk_range_not_ok(unsigned long addr, unsigned long size, un
  */
 
 struct exception_table_entry {
-	int insn, fixup;
+	int insn, fixup, handler;
 };
-/* This is not the generic standard exception_table_entry format */
-#define ARCH_HAS_SORT_EXTABLE
-#define ARCH_HAS_SEARCH_EXTABLE
 
-extern int fixup_exception(struct pt_regs *regs);
+#define ARCH_HAS_RELATIVE_EXTABLE
+
+#define swap_ex_entry_fixup(a, b, tmp, delta)			\
+	do {							\
+		(a)->fixup = (b)->fixup + (delta);		\
+		(b)->fixup = (tmp).fixup - (delta);		\
+		(a)->handler = (b)->handler + (delta);		\
+		(b)->handler = (tmp).handler - (delta);		\
+	} while (0)
+
+extern int fixup_exception(struct pt_regs *regs, int trapnr);
+extern bool ex_has_fault_handler(unsigned long ip);
 extern int early_fixup_exception(unsigned long *ip);
 
 /*
@@ -142,6 +149,9 @@ extern long __get_user_2(u16 *val, const void *address);
 extern long __get_user_4(u32 *val, const void *address);
 extern long __get_user_8(u64 *val, const void *address);
 extern long __get_user_bad(void);
+
+#define __uaccess_begin() stac()
+#define __uaccess_end()   clac()
 
 /*
  * This is a type: either unsigned long, if the argument fits into
@@ -194,7 +204,7 @@ __typeof__(__builtin_choose_expr(sizeof(x) > sizeof(0UL), 0ULL, 0UL))
 	default: __ret_gu = __get_user_bad(); break;		\
 	}								\
 	(x) = (__force __typeof__(*(ptr)))__val_gu;				\
-	__ret_gu;							\
+	__builtin_expect(__ret_gu, 0);					\
 })
 
 #define __get_user_size_ex(x, ptr, size)				\
@@ -291,11 +301,11 @@ struct __large_struct { unsigned long buf[100]; };
  */
 #define uaccess_try	do {						\
 	current_thread_info()->uaccess_err = 0;				\
-	stac();								\
+	__uaccess_begin();						\
 	barrier();
 
 #define uaccess_catch(err)						\
-	clac();								\
+	__uaccess_end();						\
 	(err) |= (current_thread_info()->uaccess_err ? -EFAULT : 0);	\
 } while (0)
 
@@ -399,12 +409,13 @@ extern void __cmpxchg_wrong_size(void)
 	__typeof__(ptr) __uval = (uval);				\
 	__typeof__(*(ptr)) __old = (old);				\
 	__typeof__(*(ptr)) __new = (new);				\
+	__uaccess_begin();						\
 	switch (size) {							\
 	case 1:								\
 	{								\
-		asm volatile("\t" ASM_STAC "\n"				\
+		asm volatile("\n"					\
 			"1:\t" LOCK_PREFIX "cmpxchgb %4, %2\n"		\
-			"2:\t" ASM_CLAC "\n"				\
+			"2:\n"						\
 			"\t.section .fixup, \"ax\"\n"			\
 			"3:\tmov     %3, %0\n"				\
 			"\tjmp     2b\n"				\
@@ -418,9 +429,9 @@ extern void __cmpxchg_wrong_size(void)
 	}								\
 	case 2:								\
 	{								\
-		asm volatile("\t" ASM_STAC "\n"				\
+		asm volatile("\n"					\
 			"1:\t" LOCK_PREFIX "cmpxchgw %4, %2\n"		\
-			"2:\t" ASM_CLAC "\n"				\
+			"2:\n"						\
 			"\t.section .fixup, \"ax\"\n"			\
 			"3:\tmov     %3, %0\n"				\
 			"\tjmp     2b\n"				\
@@ -434,9 +445,9 @@ extern void __cmpxchg_wrong_size(void)
 	}								\
 	case 4:								\
 	{								\
-		asm volatile("\t" ASM_STAC "\n"				\
+		asm volatile("\n"					\
 			"1:\t" LOCK_PREFIX "cmpxchgl %4, %2\n"		\
-			"2:\t" ASM_CLAC "\n"				\
+			"2:\n"						\
 			"\t.section .fixup, \"ax\"\n"			\
 			"3:\tmov     %3, %0\n"				\
 			"\tjmp     2b\n"				\
@@ -453,9 +464,9 @@ extern void __cmpxchg_wrong_size(void)
 		if (!IS_ENABLED(CONFIG_X86_64))				\
 			__cmpxchg_wrong_size();				\
 									\
-		asm volatile("\t" ASM_STAC "\n"				\
+		asm volatile("\n"					\
 			"1:\t" LOCK_PREFIX "cmpxchgq %4, %2\n"		\
-			"2:\t" ASM_CLAC "\n"				\
+			"2:\n"						\
 			"\t.section .fixup, \"ax\"\n"			\
 			"3:\tmov     %3, %0\n"				\
 			"\tjmp     2b\n"				\
@@ -470,6 +481,7 @@ extern void __cmpxchg_wrong_size(void)
 	default:							\
 		__cmpxchg_wrong_size();					\
 	}								\
+	__uaccess_end();						\
 	*__uval = __old;						\
 	__ret;								\
 })
@@ -610,6 +622,40 @@ copy_in_user(void __user *to, const void __user *from, unsigned len);
 #endif /* X86_64 */
 
 #endif /* L4 */
+
+/*
+ * We rely on the nested NMI work to allow atomic faults from the NMI path; the
+ * nested NMI paths are careful to preserve CR2.
+ *
+ * Caller must use pagefault_enable/disable, or run in interrupt context,
+ * and also do a uaccess_ok() check
+ */
+#define __copy_from_user_nmi __copy_from_user_inatomic
+
+/*
+ * The "unsafe" user accesses aren't really "unsafe", but the naming
+ * is a big fat warning: you have to not only do the access_ok()
+ * checking before using them, but you have to surround them with the
+ * user_access_begin/end() pair.
+ */
+#define user_access_begin()	__uaccess_begin()
+#define user_access_end()	__uaccess_end()
+
+#define unsafe_put_user(x, ptr)						\
+({										\
+	int __pu_err;								\
+	__put_user_size((x), (ptr), sizeof(*(ptr)), __pu_err, -EFAULT);		\
+	__builtin_expect(__pu_err, 0);						\
+})
+
+#define unsafe_get_user(x, ptr)						\
+({										\
+	int __gu_err;								\
+	unsigned long __gu_val;							\
+	__get_user_size(__gu_val, (ptr), sizeof(*(ptr)), __gu_err, -EFAULT);	\
+	(x) = (__force __typeof__(*(ptr)))__gu_val;				\
+	__builtin_expect(__gu_err, 0);						\
+})
 
 #endif
 

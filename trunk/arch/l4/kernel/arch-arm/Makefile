@@ -4,7 +4,7 @@
 
 obj-y		:= process.o sys_arm.o time.o traps.o stacktrace.o \
                    switch_to.o setup.o l4.o signal.o irq.o \
-                   ptrace.o entry.o dispatch.o mach_setup.o io.o elf.o \
+                   ptrace.o entry.o dispatch.o io.o elf.o \
                    return_address.o head.o opcodes.o sigreturn_codes.o \
                    reboot.o
 
@@ -34,6 +34,7 @@ CFLAGS_swp_emulate.o		:= -Wa,-march=armv7-a
 obj-$(CONFIG_DEBUG_LL)		+= debug.o
 obj-$(CONFIG_ARM_CPU_TOPOLOGY)  += topology.o
 obj-$(CONFIG_VDSO)		+= vdso.o
+obj-$(CONFIG_EFI)		+= efi.o
 
 obj-$(CONFIG_ARM_VIRT_EXT)                      += hyp-stub.o
 
@@ -43,9 +44,10 @@ include arch/l4/Makefile.lib
 
 $(call L4X_FILEREF, ../../../arm/kernel,                  \
        atags_parse atags_proc compat cpuidle crash_dump   \
-       dma elf hyp-stub io irq kgdb module opcodes patch  \
-       return_address sigreturn_codes stacktrace          \
-       swp_emulate sys_oabi-compat time topology unwind)
+       devtree dma elf hyp-stub io irq kgdb module        \
+       opcodes patch return_address sigreturn_codes       \
+       stacktrace swp_emulate sys_oabi-compat time        \
+       topology unwind)
 
 KBUILD_CPPFLAGS	+= -I$(srctree)/arch/arm/kernel
 

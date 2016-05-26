@@ -12,8 +12,17 @@ void l4x_setup_memory(char *cmdl,
                       unsigned long *main_mem_start,
                       unsigned long *main_mem_size);
 
-void l4x_v2p_add_item(l4_addr_t phys, void *virt, l4_size_t size);
+void l4x_v2p_add_item_ds(l4_addr_t phys, void *virt, l4_size_t size,
+                         l4_cap_idx_t ds, l4_addr_t ds_offset);
+static inline void
+l4x_v2p_add_item(l4_addr_t phys, void *virt, l4_size_t size)
+{
+	l4x_v2p_add_item_ds(phys, virt, size, L4_INVALID_CAP, 0);
+}
 unsigned long l4x_v2p_del_item(void *virt);
+void l4x_v2p_for_each(void (*cb)(l4_addr_t phys, void *virt,
+                                 l4_size_t size, l4_cap_idx_t ds,
+                                 l4_addr_t ds_offset, void *data), void *data);
 
 void l4x_free_initrd_mem(void);
 void __init l4x_load_initrd(const char *command_line);

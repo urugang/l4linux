@@ -13,7 +13,7 @@ void l4x_send_IPI_mask(const struct cpumask *cpumask, int vector)
 
 	local_irq_save(flags);
 	WARN_ON(mask & ~cpumask_bits(cpu_online_mask)[0]);
-	l4x_send_IPI_mask_bitmask(mask, vector);
+	l4x_send_IPI_mask_bitmask(mask, vector & L4X_SMP_IPI_VECTOR_MASK);
 	local_irq_restore(flags);
 }
 
@@ -72,6 +72,7 @@ static struct apic l4x_apic =  {
 	.safe_wait_icr_idle		= noop_safe_apic_wait_icr_idle,
 
 #ifdef CONFIG_SMP
+	.send_IPI			= default_send_IPI_single,
 	.send_IPI_mask			= l4x_send_IPI_mask,
 	.send_IPI_mask_allbutself	= default_send_IPI_mask_allbutself_phys,
 	.send_IPI_allbutself		= l4x_send_IPI_allbutself,
