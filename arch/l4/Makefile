@@ -399,6 +399,10 @@ LDFLAGS_vmlinux  =  \
   --defsym __l4sys_invoke_direct=$(L4_BID_KIP_ADDR)+$(L4_BID_KIP_OFFS_SYS_INVOKE) \
   --defsym __l4sys_debugger_direct=$(L4_BID_KIP_ADDR)+$(L4_BID_KIP_OFFS_SYS_DEBUGGER)
 
+ifeq ($(CONFIG_HAVE_FUNCTION_TRACER),y)
+KBUILD_CPPFLAGS += -Iarch/$(LINSRCARCH)/include/asm/trace
+endif
+
 KBUILD_CPPFLAGS	+= -Iarch/l4/include/asm/l4-arch \
 		   -Iarch/$(LINSRCARCH)/include/generated \
 		   -Iarch/$(LINSRCARCH)/include/generated/uapi \

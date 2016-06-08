@@ -243,8 +243,6 @@ do_l4lx_irq_set_affinity(struct irq_data *data,
 		return IRQ_SET_MASK_OK_NOCOPY;
 
 	spin_lock_irqsave(&migrate_lock, flags);
-	if (p->enabled)
-		detach_from_interrupt(data);
 
 	if (fn) {
 		int ret = fn(data, target_cpu);
