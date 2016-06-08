@@ -44,7 +44,7 @@ obj-$(CONFIG_IRQ_WORK)  += irq_work.o
 obj-y			+= probe_roms.o
 #obj-$(CONFIG_X86_32)	+= i386_ksyms_32.o
 obj-$(CONFIG_X86_64)	+= sys_x86_64.o x8664_ksyms_64.o
-#obj-$(CONFIG_X86_64)	+= mcount_64.o
+obj-$(CONFIG_X86_64)	+= mcount_64.o
 #obj-$(CONFIG_X86_ESPFIX64)	+= espfix_64.o
 obj-$(CONFIG_SYSFS)	+= ksysfs.o
 #obj-y			+= bootflag.o e820.o
@@ -80,7 +80,7 @@ obj-$(CONFIG_SMP)		+= setup_percpu.o
 obj-$(CONFIG_X86_MPPARSE)	+= mpparse.o
 obj-y				+= apic/
 #obj-$(CONFIG_X86_REBOOTFIXUPS)	+= reboot_fixups_32.o
-#obj-$(CONFIG_DYNAMIC_FTRACE)	+= ftrace.o
+obj-$(CONFIG_DYNAMIC_FTRACE)	+= ftrace.o
 #obj-$(CONFIG_LIVEPATCH)		+= livepatch.o
 #obj-$(CONFIG_FUNCTION_GRAPH_TRACER) += ftrace.o
 #obj-$(CONFIG_FTRACE_SYSCALLS)	+= ftrace.o
@@ -153,7 +153,8 @@ $(call L4X_FILEREF, ../../../x86/kernel,                         \
        syscall_32                                                \
        syscall_64 sysfb test_rodata time tls topology            \
        trace_clock tsc_msr                                       \
-       vread_tsc_64 vsmp_64 vsyscall_emu_64 vsyscall_gtod)
+       vread_tsc_64 vsmp_64 vsyscall_emu_64 vsyscall_gtod        \
+       ftrace mcount_64 tracepoint)
 
 # syscall_table_32.S
 KBUILD_AFLAGS	+= -Iarch/x86/kernel

@@ -1087,7 +1087,6 @@ void __init mem_init(void)
 	mem_init_print_info(NULL);
 }
 
-#ifdef CONFIG_DEBUG_RODATA
 const int rodata_test_data = 0xC3;
 EXPORT_SYMBOL_GPL(rodata_test_data);
 
@@ -1132,12 +1131,14 @@ void set_kernel_text_ro(void)
 void mark_rodata_ro(void)
 {
 	unsigned long start = PFN_ALIGN(_text);
+#ifndef CONFIG_L4
 	unsigned long rodata_start = PFN_ALIGN(__start_rodata);
+#endif /* L4 */
 	unsigned long end = (unsigned long) &__end_rodata_hpage_align;
 	unsigned long text_end = PFN_ALIGN(&__stop___ex_table);
 #ifndef CONFIG_L4
 	unsigned long rodata_end = PFN_ALIGN(&__end_rodata);
-#endif
+#endif /* L4 */
 	unsigned long all_end;
 
 	printk(KERN_INFO "Write protecting the kernel read-only data: %luk\n",
@@ -1171,20 +1172,18 @@ void mark_rodata_ro(void)
 	set_memory_ro(start, (end-start) >> PAGE_SHIFT);
 #endif
 
-	free_init_pages("unused kernel",
-			(unsigned long) __va(__pa_symbol(text_end)),
-			(unsigned long) __va(__pa_symbol(rodata_start)));
 #ifndef CONFIG_L4
 	/* L4x: We have a hole there, or should we fill it up? */
 	free_init_pages("unused kernel",
+			(unsigned long) __va(__pa_symbol(text_end)),
+			(unsigned long) __va(__pa_symbol(rodata_start)));
+	free_init_pages("unused kernel",
 			(unsigned long) __va(__pa_symbol(rodata_end)),
 			(unsigned long) __va(__pa_symbol(_sdata)));
-#endif
+#endif /* L4 */
 
 	debug_checkwx();
 }
-
-#endif
 
 int kern_addr_valid(unsigned long addr)
 {

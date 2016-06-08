@@ -2582,9 +2582,11 @@ static void l4x_scan_hw_resources(void)
 			           t, res.start, res.end);
 
 #ifdef CONFIG_X86
-			l4x_x86_register_ports(&res);
-			l4io_request_ioport(res.start,
-			                    res.end - res.start + 1);
+			if (res.type == L4VBUS_RESOURCE_PORT) {
+				l4x_x86_register_ports(&res);
+				l4io_request_ioport(res.start,
+				                    res.end - res.start + 1);
+			}
 #endif
 		}
 	}

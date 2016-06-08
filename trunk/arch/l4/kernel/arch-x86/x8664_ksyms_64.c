@@ -11,6 +11,7 @@
 #include <asm/pgtable.h>
 #include <asm/uaccess.h>
 #include <asm/desc.h>
+#endif /* L4 */
 #include <asm/ftrace.h>
 
 #ifdef CONFIG_FUNCTION_TRACER
@@ -22,6 +23,7 @@ EXPORT_SYMBOL(mcount);
 #endif
 #endif
 
+#ifndef CONFIG_L4
 EXPORT_SYMBOL(__get_user_1);
 EXPORT_SYMBOL(__get_user_2);
 EXPORT_SYMBOL(__get_user_4);

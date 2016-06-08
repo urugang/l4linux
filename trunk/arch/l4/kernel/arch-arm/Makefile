@@ -22,6 +22,9 @@ ifdef CONFIG_MMU
 obj-$(CONFIG_SMP)		+= smp_tlb.o
 endif
 obj-$(CONFIG_HOTPLUG_CPU)	+= hotplug.o
+obj-$(CONFIG_FUNCTION_TRACER)	+= entry-ftrace.o
+obj-$(CONFIG_DYNAMIC_FTRACE)	+= ftrace.o insn.o
+obj-$(CONFIG_FUNCTION_GRAPH_TRACER)	+= ftrace.o insn.o
 obj-$(CONFIG_ARM_UNWIND)	+= unwind.o
 obj-$(CONFIG_OABI_COMPAT)       += sys_oabi-compat.o
 obj-$(CONFIG_CRASH_DUMP)	+= crash_dump.o
@@ -47,7 +50,7 @@ $(call L4X_FILEREF, ../../../arm/kernel,                  \
        devtree dma elf hyp-stub io irq kgdb module        \
        opcodes patch return_address sigreturn_codes       \
        stacktrace swp_emulate sys_oabi-compat time        \
-       topology unwind)
+       topology unwind entry-ftrace ftrace insn)
 
 KBUILD_CPPFLAGS	+= -I$(srctree)/arch/arm/kernel
 
