@@ -108,7 +108,7 @@ l4ser_rx_chars(struct uart_port *port)
 	return;
 }
 
-static void l4ser_tx_chars(struct uart_port *port)
+static void l4ser_start_tx(struct uart_port *port)
 {
 	struct l4ser_uart_port *l4port = (struct l4ser_uart_port *)port;
 	struct circ_buf *xmit = &port->state->xmit;
@@ -129,11 +129,6 @@ static void l4ser_tx_chars(struct uart_port *port)
 		xmit->tail = (xmit->tail + c) & (UART_XMIT_SIZE - 1);
 		port->icount.tx += c;
 	}
-}
-
-static void l4ser_start_tx(struct uart_port *port)
-{
-	l4ser_tx_chars(port);
 }
 
 static irqreturn_t l4ser_int(int irq, void *dev_id)
@@ -233,8 +228,8 @@ static void l4ser_poll_put_char(struct uart_port *port, unsigned char ch)
 {
 	struct l4ser_uart_port *l4port = (struct l4ser_uart_port *)port;
 
-       if (l4_is_invalid_cap(l4port->vcon_cap))
-	       return;
+	if (l4_is_invalid_cap(l4port->vcon_cap))
+		return;
 
 	L4XV_FN_v(l4_vcon_write(l4port->vcon_cap, &ch, 1));
 }
@@ -354,6 +349,7 @@ l4ser_console_write(struct console *co, const char *s, unsigned int count)
 		if (c > L4_VCON_WRITE_SIZE)
 			c = L4_VCON_WRITE_SIZE;
 		L4XV_FN_v(l4_vcon_write(l4ser_port[co->index].vcon_cap, s, c));
+		s += c;
 		count -= c;
 	} while (count);
 }

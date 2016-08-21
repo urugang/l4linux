@@ -266,7 +266,7 @@ static inline void native_load_tls(struct thread_struct *t, unsigned int cpu)
 	L4XV_FN_v(fiasco_gdt_set(L4_INVALID_CAP, t->tls_array,
 	                         2 * LDT_ENTRY_SIZE, 0, l4_utcb()));
 #else
-	fiasco_gdt_set(t->user_thread_id, t->tls_array,
+	fiasco_gdt_set(t->l4x.user_thread_id, t->tls_array,
 	               3 * LDT_ENTRY_SIZE, 0, l4_utcb());
 #endif
 #endif

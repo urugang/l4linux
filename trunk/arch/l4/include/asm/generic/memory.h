@@ -125,10 +125,15 @@ retry:
 #endif
 
 	while (ptep == NULL || !l4x_pte_present_user(*ptep)) {
+		struct pt_regs kregs;
+
 		if (in_atomic())
 			goto return_efault;
 
-		if (l4x_do_page_fault(address, task_pt_regs(current),
+		l4x_init_kernel_regs(&kregs);
+		l4x_set_regs_ip(&kregs, L4X_FAKE_EX_TABLE_ENTRY());
+
+		if (l4x_do_page_fault(address, &kregs,
 		                      PF_EKERNEL | PF_EREAD | PF_ENOTPRESENT) == -1)
 			goto return_efault;
 		local_irq_disable();
@@ -178,6 +183,8 @@ retry:
 
 	// XXX: also check for user-bit as with read!?
 	while (ptep == NULL || !l4x_pte_present_user(*ptep) || !pte_write(*ptep)) {
+		struct pt_regs kregs;
+
 		if (in_atomic())
 			goto return_efault;
 
@@ -185,12 +192,15 @@ retry:
 		printk("ppw: pdir: %p, address: %lx, ptep: %p\n",
 		       (pgd_t *)current->mm->pgd, address, ptep);
 #endif
+		l4x_init_kernel_regs(&kregs);
+		l4x_set_regs_ip(&kregs, L4X_FAKE_EX_TABLE_ENTRY());
+
 		if ((ptep == NULL) || !pte_present(*ptep)) {
-			if (l4x_do_page_fault(address, task_pt_regs(current),
+			if (l4x_do_page_fault(address, &kregs,
 			                      PF_EKERNEL | PF_EWRITE | PF_ENOTPRESENT) == -1)
 				goto return_efault;
 		} else if (!pte_write(*ptep)) {
-			if (l4x_do_page_fault(address, task_pt_regs(current),
+			if (l4x_do_page_fault(address, &kregs,
 			                      PF_EKERNEL | PF_EWRITE | PF_EPROTECTION) == -1)
 				goto return_efault;
 		}

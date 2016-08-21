@@ -45,9 +45,9 @@ void l4x_init_thread_struct(struct task_struct *p)
 {
 	int i;
 	for (i = 0; i < NR_CPUS; i++)
-		p->thread.user_thread_ids[i] = L4_INVALID_CAP;
-	p->thread.user_thread_id = L4_INVALID_CAP;
-	p->thread.threads_up = 0;
+		p->thread.l4x.user_thread_ids[i] = L4_INVALID_CAP;
+	p->thread.l4x.user_thread_id = L4_INVALID_CAP;
+	p->thread.l4x.threads_up = 0;
 }
 #endif
 
@@ -56,7 +56,7 @@ void l4x_exit_thread(void)
 #ifndef CONFIG_L4_VCPU
 	int i;
 
-	if (unlikely(current->thread.is_hybrid)) {
+	if (unlikely(current->thread.l4x.is_hybrid)) {
 		l4_cap_idx_t hybgate;
 		l4_msgtag_t tag;
 		l4_umword_t o = 0;
@@ -78,7 +78,7 @@ void l4x_exit_thread(void)
 	}
 
 	for (i = 0; i < NR_CPUS; i++) {
-		l4_cap_idx_t thread_id = current->thread.user_thread_ids[i];
+		l4_cap_idx_t thread_id = current->thread.l4x.user_thread_ids[i];
 
 		/* check if we were a non-user thread (i.e., have no
 		   user-space partner) */
@@ -95,9 +95,9 @@ void l4x_exit_thread(void)
 
 		if (likely(!l4lx_task_delete_thread(thread_id))) {
 			l4x_hybrid_remove(current);
-			current->thread.user_thread_ids[i] = L4_INVALID_CAP;
+			current->thread.l4x.user_thread_ids[i] = L4_INVALID_CAP;
 			l4lx_task_number_free(thread_id);
-			current->thread.started = 0;
+			current->thread.l4x.started = 0;
 		} else
 			printk("%s: failed to delete task " PRINTF_L4TASK_FORM "\n",
 			       __func__, PRINTF_L4TASK_ARG(thread_id));

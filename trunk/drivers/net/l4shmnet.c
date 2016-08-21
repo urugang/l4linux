@@ -247,7 +247,7 @@ static int l4x_l4shmc_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 		L4XV_FN_v(l4shmc_trigger(&priv->tx_sig));
 	}
 
-	netdev->trans_start = jiffies;
+	netif_trans_update(netdev);
 	priv->net_stats.tx_packets++;
 	priv->net_stats.tx_bytes += skb->len;
 

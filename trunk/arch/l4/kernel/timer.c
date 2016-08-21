@@ -196,7 +196,6 @@ static int timer_clock_event_init(struct clock_event_device *clk)
 	unsigned cpu = smp_processor_id();
 	l4lx_thread_t thread;
 	char s[12];
-	L4XV_V(f);
 
 	irq_cap = l4x_cap_alloc();
 	if (l4_is_invalid_cap(irq_cap))
@@ -212,21 +211,10 @@ static int timer_clock_event_init(struct clock_event_device *clk)
 	snprintf(s, sizeof(s), "timer%d", cpu);
 	s[sizeof(s) - 1] = 0;
 
-	L4XV_L(f);
-	thread = l4lx_thread_create
-                  (timer_thread,                /* thread function */
-                   cpu,                         /* cpu */
-                   NULL,                        /* stack */
-                   &irq_cap, sizeof(irq_cap),   /* data */
-                   l4x_cap_alloc(),             /* cap */
-                   PRIO_TIMER,                  /* prio */
-		   0,                           /* utcbp */
-                   0,                           /* vcpup */
-                   s,                           /* name */
-		   NULL);
-	L4XV_U(f);
-
-	if (!l4lx_thread_is_valid(thread)) {
+	if (L4XV_FN_i(l4lx_thread_create(&thread, timer_thread,
+                                         cpu, NULL, &irq_cap, sizeof(irq_cap),
+                                         l4x_cap_alloc(), PRIO_TIMER,
+                                         0, 0, s, NULL))) {
 		r = -ENOMEM;
 		goto out2;
 	}

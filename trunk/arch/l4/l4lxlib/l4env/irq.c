@@ -297,14 +297,12 @@ static void create_irq_thread(unsigned irq, struct l4x_irq_desc_private *p)
 	set_irq_cpu(irq, smp_processor_id());
 
 	sprintf(thread_name, "IRQ%d", irq);
-	p->irq_thread = l4lx_thread_create(irq_thread,
-	                                   smp_processor_id(),
-	                                   NULL, &data, sizeof(data),
-	                                   l4x_cap_alloc(),
-	                                   l4lx_irq_prio_get(irq),
-	                                   0, 0, thread_name, NULL);
-
-	if (!l4lx_thread_is_valid(p->irq_thread))
+	if (l4lx_thread_create(&p->irq_thread, irq_thread,
+	                       smp_processor_id(),
+	                       NULL, &data, sizeof(data),
+	                       l4x_cap_alloc(),
+	                       l4lx_irq_prio_get(irq),
+	                       0, 0, thread_name, NULL))
 		enter_kdebug("Error creating IRQ-thread!");
 
 

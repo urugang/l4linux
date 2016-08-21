@@ -6,12 +6,15 @@
 #include <linux/module.h>
 
 #include <asm/api/macros.h>
+#include <l4/sys/kdebug.h>
 
-//#define DEBUG_MEMCPY_TOFS
-//#define DEBUG_MEMCPY_FROMFS
-//#define DEBUG_MEMCPY_KERNEL
-//#define DEBUG_KDEBUG_EFAULT
-////#define DEBUG_LOG_EFAULT
+enum {
+	Debug_log_efault = 0,
+	Debug_kdebug_efault = 0,
+	Debug_memcpy_kernel = 0,
+	Debug_memcpy_fromfs = 0,
+	Debug_memcpy_tofs = 0,
+};
 
 // from user_copy_32.c
 #ifdef CONFIG_X86_INTEL_USERCOPY
@@ -21,43 +24,53 @@
 struct movsl_mask movsl_mask __read_mostly;
 #endif
 
-#ifdef DEBUG_LOG_EFAULT
-static void log_efault(const char *str, const void *user_addr,
-		       const void *kernel_addr, unsigned long size)
+static void do_log_efault(const char *str, const void *user_addr,
+                          const void *kernel_addr, unsigned long size)
 {
-	pte_t *ptep = lookup_pte((pgd_t *)current->mm->pgd,
-				 (unsigned long)user_addr);
+	unsigned int page_shift;
+	pte_t *ptep = lookup_pte(current->mm,
+				 (unsigned long)user_addr, &page_shift);
 
 	printk("%s returning efault, \n"
 	       "  user_addr: %p, kernel_addr: %p, size: %08lx\n"
+#ifndef CONFIG_L4_VCPU
 	       "  task: %s (%p) " PRINTF_L4TASK_FORM
-	       ", pdir: %p, ptep: %p, pte: %lx\n",
+#else
+	       "  task: %s (%p) "
+#endif
+	       ", pdir: %p, ptep: %p, pte: %llx\n",
 	       str, user_addr, kernel_addr, size,
 	       current->comm, current,
-	       PRINTF_L4TASK_ARG(current->thread.user_thread_id),
-	       current->mm->pgd, ptep, ptep ? pte_val(*ptep) : 0);
-#ifdef DEBUG_KDEBUG_EFAULT
-	enter_kdebug("log_efault");
+#ifndef CONFIG_L4_VCPU
+	       PRINTF_L4TASK_ARG(current->thread.l4x.user_thread_id),
 #endif
+	       current->mm->pgd, ptep,
+	       ptep ? (unsigned long long)pte_val(*ptep) : 0ULL);
+	if (Debug_kdebug_efault)
+		enter_kdebug("log_efault");
 }
-#else
-#define log_efault(str, to, from, size)
-#endif
+
+static inline void log_efault(const char *str, const void *user_addr,
+                              const void *kernel_addr, unsigned long size)
+{
+	if (Debug_log_efault)
+		do_log_efault(str, user_addr, kernel_addr, size);
+}
 
 static inline int __copy_to_user_page(void *to, const void *from,
 				      unsigned long n)
 {
 	unsigned long page, offset, flags;
 
-#ifdef DEBUG_MEMCPY_TOFS
-	printk("__copy_to_user_page to: %p, from: %p, len: %08lx\n",
-	       to, from, n);
-#endif
+	if (Debug_memcpy_tofs)
+		printk("__copy_to_user_page to: %p, from: %p, len: %08lx\n",
+		       to, from, n);
+
 	if ((page = parse_ptabs_write((unsigned long)to, &offset, &flags)) != -EFAULT) {
-#ifdef DEBUG_MEMCPY_TOFS
-		printk("    __copy_to_user_page writing to: %08lx\n",
-		       (page + offset));
-#endif
+		if (Debug_memcpy_tofs)
+			printk("    __copy_to_user_page writing to: %08lx\n",
+			       (page + offset));
+
 		memcpy((void *)(page + offset), from, n);
 		local_irq_restore(flags);
 		return 0;
@@ -71,11 +84,10 @@ l4x_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	unsigned long copy_size = (unsigned long)to & ~PAGE_MASK;
 
-#ifdef DEBUG_MEMCPY_TOFS
-	printk("l4x_copy_to_user called from: %08lx to: %p, "
-	       "from: %p, len: %08lx\n",
-	       *((unsigned long *)&to - 1), to, from, n);
-#endif
+	if (Debug_memcpy_tofs)
+		printk("l4x_copy_to_user called from: %08lx to: %p, "
+		       "from: %p, len: %08lx\n",
+		       *((unsigned long *)&to - 1), to, from, n);
 
 	/* kernel access */
 	if (segment_eq(get_fs(), KERNEL_DS)) {
@@ -109,15 +121,15 @@ static inline int __copy_from_user_page(void *to, const void *from,
 {
 	unsigned long page, offset, flags;
 
-#ifdef DEBUG_MEMCPY_FROMFS
-	printk("%s to: %p, from: %p, len: %08lx\n", __func__, to, from, n);
-#endif
+	if (Debug_memcpy_fromfs)
+		printk("%s to: %p, from: %p, len: %08lx\n", __func__,
+		       to, from, n);
 
 	if ((page = parse_ptabs_read((unsigned long)from, &offset, &flags)) != -EFAULT) {
-#ifdef DEBUG_MEMCPY_FROMFS
-		printk("  %s reading from: %08lx\n",
-		       __func__, (page + offset));
-#endif
+		if (Debug_memcpy_fromfs)
+			printk("  %s reading from: %08lx\n",
+			       __func__, (page + offset));
+
 		memcpy(to, (void *)(page + offset), n);
 		local_irq_restore(flags);
 		return 0;
@@ -138,11 +150,11 @@ l4x_copy_from_user(void *to, const void __user *from, unsigned long n)
 		return 0;
 	}
 
-#ifdef DEBUG_MEMCPY_FROMFS
-	printk("l4x_copy_from_user called from: %08lx "
-	       "to: %p, from: %p, len: %08lx\n",
-	       *((unsigned long *)&to - 1), to, from, n);
-#endif
+	if (Debug_memcpy_fromfs)
+		printk("l4x_copy_from_user called from: %08lx "
+		       "to: %p, from: %p, len: %08lx\n",
+		       *((unsigned long *)&to - 1), to, from, n);
+
 	if (copy_size) {
 		copy_size = min(PAGE_SIZE - copy_size, n);
 		if (__copy_from_user_page(to, from, copy_size) == -EFAULT) {
@@ -178,14 +190,14 @@ static inline int __clear_user_page(void * address, unsigned long n)
 {
 	unsigned long page, offset, flags;
 
-#ifdef DEBUG_MEMCPY_TOFS
-	printk("%s: %p, len: %08lx\n", __func__, address, n);
-#endif
+	if (Debug_memcpy_tofs)
+		printk("%s: %p, len: %08lx\n", __func__, address, n);
+
 	page = parse_ptabs_write((unsigned long)address, &offset, &flags);
 	if (page != -EFAULT) {
-#ifdef DEBUG_MEMCPY_TOFS
-		printk("    writing to: %08lx\n", (page + offset));
-#endif
+		if (Debug_memcpy_tofs)
+			printk("    writing to: %08lx\n", (page + offset));
+
 		memset((void *)(page + offset), 0, n);
 		local_irq_restore(flags);
 		return 0;
@@ -198,10 +210,9 @@ unsigned long l4x_clear_user(void *address, unsigned long n)
 {
 	unsigned long clear_size = (unsigned long)address & ~PAGE_MASK;
 
-#ifdef DEBUG_MEMCPY_TOFS
-	printk("%s called from: %08lx to: %p, len: %08lx\n",
-	       __func__, *((unsigned long *)&address - 1), address, n);
-#endif
+	if (Debug_memcpy_tofs)
+		printk("%s called from: %08lx to: %p, len: %08lx\n",
+		       __func__, *((unsigned long *)&address - 1), address, n);
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
 		if (L4X_CHECK_IN_KERNEL_ACCESS && l4x_check_kern_region(address, n, 1))
@@ -279,16 +290,16 @@ static inline int __strncpy_from_user_page(char * to, const char * from,
 {
 	unsigned long page, offset, flags;
 
-#ifdef DEBUG_MEMCPY_FROMFS
-	printk("%s: to: %p, from: %p, len: %08lx\n",
-	       __func__, to, from, n);
-#endif
+	if (Debug_memcpy_fromfs)
+		printk("%s: to: %p, from: %p, len: %08lx\n",
+		       __func__, to, from, n);
+
 	page = parse_ptabs_read((unsigned long)from, &offset, &flags);
 	if (page != -EFAULT) {
-#ifdef DEBUG_MEMCPY_FROMFS
-		printk("    %s reading from: %08lx len: 0x%lx\n",
-		       __func__, (page + offset), n);
-#endif
+		if (Debug_memcpy_fromfs)
+			printk("    %s reading from: %08lx len: 0x%lx\n",
+			       __func__, (page + offset), n);
+
 		/* after finishing the copy operation count is either
 		 * - zero: max number of bytes copied or
 		 * - non zero: end of string reached, n containing the
@@ -314,11 +325,11 @@ long l4x_strncpy_from_user(char *dst, const char *src, long count)
 	long res;
 	unsigned long n = count;
 
-#ifdef DEBUG_MEMCPY_FROMFS
-	printk("l4x_strncpy_from_user called from: %08lx "
-	       "to: %p, from: %p, len: 0x%lx (copy_size: 0x%lx)\n",
-	       *((unsigned long *)&dst - 1), dst, src, n, copy_size);
-#endif
+	if (Debug_memcpy_fromfs)
+		printk("l4x_strncpy_from_user called from: %08lx "
+		       "to: %p, from: %p, len: 0x%lx (copy_size: 0x%lx)\n",
+		       *((unsigned long *)&dst - 1), dst, src, n, copy_size);
+
 	if (segment_eq(get_fs(), KERNEL_DS)) {
 		/* strncpy the data but deliver back the bytes copied */
 		long c = 0;
@@ -360,16 +371,16 @@ static inline int __strnlen_from_user_page(const char *from,
 {
 	unsigned long page, offset, flags;
 
-#ifdef DEBUG_MEMCPY_FROMFS
-	printk("%s from: %p, len: %08lx\n", __func__, from, n);
-#endif
+	if (Debug_memcpy_fromfs)
+		printk("%s from: %p, len: %08lx\n", __func__, from, n);
+
 	page = parse_ptabs_read((unsigned long)from, &offset, &flags);
 	if (page != -EFAULT) {
 		int end;
-#ifdef DEBUG_MEMCPY_FROMFS
-		printk("    %s reading from: %08lx\n",
-		       __func__, (page + offset));
-#endif
+		if (Debug_memcpy_fromfs)
+			printk("    %s reading from: %08lx\n",
+			       __func__, (page + offset));
+
 #ifdef CONFIG_X86
 		{
 			int res;
@@ -420,18 +431,17 @@ long l4x_strnlen_user(const char *src, long n)
 	int res;
 	unsigned long len = 0;
 
-#ifdef DEBUG_MEMCPY_FROMFS
-	printk("l4x_strnlen_user called from: %08lx, from: %p, %ld\n",
-	       *((unsigned long *)&src - 1), src, n);
-#endif
+	if (Debug_memcpy_fromfs)
+		printk("l4x_strnlen_user called from: %08lx, from: %p, %ld\n",
+		       *((unsigned long *)&src - 1), src, n);
 
 	if (segment_eq(get_fs(), KERNEL_DS)) {
 		if (L4X_CHECK_IN_KERNEL_ACCESS && l4x_check_kern_region((void *)src, n, 0))
 			return -EFAULT;
 		len = strnlen(src, n);
-#ifdef DEBUG_MEMCPY_KERNEL
-		printk("kernel l4x_strnlen_user %p, %ld = %ld\n", src, n, len);
-#endif
+		if (Debug_memcpy_kernel)
+			printk("kernel l4x_strnlen_user %p, %ld = %ld\n",
+			       src, n, len);
 		return len + 1;
 	}
 
@@ -463,6 +473,19 @@ long l4x_strlen_user(const char *src)
 EXPORT_SYMBOL(l4x_strlen_user);
 
 #ifdef CONFIG_X86_64
+long __copy_user_nocache(void *dst, const void __user *src,
+                         unsigned size, int zerorest)
+{
+	/* As of 4.7, this is a x86-64 only function and only used in the
+	 * verbs code. I do not really know what zerorest should mean, may
+	 * be clear up the rest of the page, but there's no description in
+	 * the asm function besides the asm itself. And as the only user of
+	 * __copy_user_nocache uses it with zerorest == 0, we put the WARN
+	 * for now: */
+	WARN_ON(zerorest);
+	return l4x_copy_from_user(dst, src, size);
+}
+
 #ifdef CONFIG_IA32_EMULATION
 int __copy_in_user(void __user *dst, const void __user *src, unsigned size)
 {

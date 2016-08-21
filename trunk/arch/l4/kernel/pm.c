@@ -324,15 +324,15 @@ static int l4x_pm_suspend(void)
 #ifndef CONFIG_L4_VCPU
 	struct task_struct *p;
 	for_each_process(p) {
-		if (l4_is_invalid_cap(p->thread.user_thread_id))
+		if (l4_is_invalid_cap(p->thread.l4x.user_thread_id))
 			continue;
 
 		// FIXME: destroy better, threads and task
-		if (l4lx_task_delete_task(p->thread.user_thread_id))
+		if (l4lx_task_delete_task(p->thread.l4x.user_thread_id))
 			l4x_printf("Error deleting %s(%d)\n", p->comm, p->pid);
-		if (l4lx_task_number_free(p->thread.user_thread_id))
+		if (l4lx_task_number_free(p->thread.l4x.user_thread_id))
 			l4x_printf("Error freeing %s(%d)\n", p->comm, p->pid);
-		p->thread.user_thread_id = L4_INVALID_CAP;
+		p->thread.l4x.user_thread_id = L4_INVALID_CAP;
 		l4x_printf("kicked %s(%d)\n", p->comm, p->pid);
 	}
 #endif
@@ -357,13 +357,13 @@ static void l4x_pm_resume(void)
 		l4_msgtag_t tag;
 		l4_umword_t src_id;
 
-		if (l4_is_invalid_cap(p->thread.user_thread_id))
+		if (l4_is_invalid_cap(p->thread.l4x.user_thread_id))
 			continue;
 
 		if (l4lx_task_get_new_task(L4_INVALID_CAP,
-		                           &p->thread.user_thread_id))
+		                           &p->thread.l4x.user_thread_id))
 			l4x_printf("l4lx_task_get_new_task failed\n");
-		if (l4lx_task_create(p->thread.user_thread_id))
+		if (l4lx_task_create(p->thread.l4x.user_thread_id))
 			l4x_printf("l4lx_task_create for %s(%d) failed\n",
 			           p->comm, p->pid);
 
@@ -371,7 +371,7 @@ static void l4x_pm_resume(void)
 			tag = l4_ipc_wait(l4_utcb(), &src_id, L4_IPC_SEND_TIMEOUT_0);
 			if (l4_ipc_error(tag, l4_utcb()))
 				l4x_printf("ipc error %lx\n", l4_ipc_error(tag, l4_utcb()));
-		} while ( 1 ); //FIXME //!l4_thread_equal(src_id, p->thread.user_thread_id));
+		} while ( 1 ); //FIXME //!l4_thread_equal(src_id, p->thread.l4x.user_thread_id));
 
 		l4x_printf("contacted %s(%d)\n", p->comm, p->pid);
 	}

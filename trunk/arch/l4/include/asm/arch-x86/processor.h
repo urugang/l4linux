@@ -30,13 +30,13 @@ struct vm86;
 #include <linux/err.h>
 #include <linux/irqflags.h>
 
-#include <l4/sys/types.h>
+#ifdef CONFIG_L4
+#include <asm/generic/thread.h>
 #include <asm/api/config.h>
 
-#ifdef CONFIG_L4
 extern phys_addr_t l4x_dma_phys_low_limit;
 #define ARCH_LOW_ADDRESS_LIMIT (l4x_dma_phys_low_limit - 1)
-#endif
+#endif /* L4 */
 
 /*
  * We handle most unaligned accesses in hardware.  On the other hand
@@ -396,22 +396,21 @@ struct thread_struct {
 	unsigned long		ip;
 #endif
 #ifdef CONFIG_X86_64
-	unsigned long		fs;
+	unsigned long		fsbase;
+	unsigned long		gsbase;
+#else
+	/*
+	 * XXX: this could presumably be unsigned short.  Alternatively,
+	 * 32-bit kernels could be taught to use fsindex instead.
+	 */
+	unsigned long fs;
+	unsigned long gs;
 #endif
-	unsigned long		gs;
 
-#ifndef CONFIG_L4_VCPU
-	l4_cap_idx_t		user_thread_id;		/* L4 Thread ID of the process */
-	l4_cap_idx_t		user_thread_ids[NR_CPUS];
-	unsigned long		threads_up;
-	unsigned int		initial_state_set : 1;	/* 1 if initial state was set */
-	unsigned int		started : 1;		/* set if created successfully */
-#endif
-	unsigned int		is_hybrid : 1;		/* set if hybrid task */
-	unsigned int		hybrid_sc_in_prog : 1;	/* l4 syscall in progress  */
-#ifdef CONFIG_L4_VCPU
-	l4_cap_idx_t		hyb_user_thread_id;
-#endif
+#ifdef CONFIG_L4
+	struct l4x_thread	l4x;
+#endif /* L4 */
+
 	/* Save middle states of ptrace breakpoints */
 	struct perf_event	*ptrace_bps[HBP_NUM];
 	/* Debug status used for traps, single steps, etc... */
@@ -495,8 +494,6 @@ static inline unsigned long current_top_of_stack(void)
 #include <asm/paravirt.h>
 #else
 #define __cpuid			native_cpuid
-#define paravirt_enabled()	0
-#define paravirt_has(x) 	0
 
 static inline void load_sp0(struct tss_struct *tss,
 			    struct thread_struct *thread)

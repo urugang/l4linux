@@ -2,7 +2,11 @@
 # Makefile for the linux kernel.
 #
 
-#extra-y                := head_$(BITS).o head$(BITS).o head.o vmlinux.lds
+#extra-y	:= head_$(BITS).o
+#extra-y	+= head$(BITS).o
+#extra-y	+= ebda.o
+#extra-y	+= platform-quirks.o
+#extra-y	+= vmlinux.lds
 
 #CPPFLAGS_vmlinux.lds += -U$(UTS_MACHINE)
 
@@ -81,7 +85,6 @@ obj-$(CONFIG_X86_MPPARSE)	+= mpparse.o
 obj-y				+= apic/
 #obj-$(CONFIG_X86_REBOOTFIXUPS)	+= reboot_fixups_32.o
 obj-$(CONFIG_DYNAMIC_FTRACE)	+= ftrace.o
-#obj-$(CONFIG_LIVEPATCH)		+= livepatch.o
 #obj-$(CONFIG_FUNCTION_GRAPH_TRACER) += ftrace.o
 #obj-$(CONFIG_FTRACE_SYSCALLS)	+= ftrace.o
 obj-$(CONFIG_X86_TSC)		+= trace_clock.o
@@ -136,11 +139,13 @@ ifeq ($(CONFIG_X86_64),y)
 	obj-y				+= vsmp_64.o
 endif
 
-obj-y				+= head$(BITS).o
-obj-$(CONFIG_X86_64)		+= head_$(BITS).o
-obj-$(CONFIG_L4)		+= dispatch.o irq_l4.o memory.o unimpl.o
-
 # -------------------------------------------
+
+obj-y				+= head$(BITS).o
+obj-y				+= head_$(BITS).o
+obj-$(CONFIG_L4)		+= dispatch.o irq_l4.o memory.o unimpl.o
+obj-y				+= platform-quirks.o
+
 include arch/l4/Makefile.lib
 
 $(call L4X_FILEREF, ../../../x86/kernel,                         \
@@ -148,7 +153,8 @@ $(call L4X_FILEREF, ../../../x86/kernel,                         \
        dumpstack_$(BITS) early-quirks hpet hw_breakpoint i8259   \
        io_delay irq_64 irq_work jump_label kdebugfs ksysfs ldt   \
        module nmi pci-dma pci-iommu_table pci-nommu pci-swiotlb  \
-       perf_regs preempt probe_roms quirks resource rtc          \
+       perf_regs platform-quirks preempt probe_roms quirks       \
+       resource rtc                                              \
        setup_percpu signal_compat stacktrace step sys_x86_64     \
        syscall_32                                                \
        syscall_64 sysfb test_rodata time tls topology            \

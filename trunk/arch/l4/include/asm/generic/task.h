@@ -33,7 +33,7 @@ l4x_delete_process_thread(struct task_struct *tsk)
 	int i;
 
 	for (i = 0; i < NR_CPUS; i++) {
-		l4_cap_idx_t thread_id = tsk->thread.user_thread_ids[i];
+		l4_cap_idx_t thread_id = tsk->thread.l4x.user_thread_ids[i];
 
 		if (l4_is_invalid_cap(thread_id))
 			continue;
@@ -42,12 +42,12 @@ l4x_delete_process_thread(struct task_struct *tsk)
 			do_exit(9);
 
 		l4lx_task_number_free(thread_id);
-		tsk->thread.user_thread_ids[i] = L4_INVALID_CAP;
+		tsk->thread.l4x.user_thread_ids[i] = L4_INVALID_CAP;
 	}
 
-	tsk->thread.started = 0;
-	tsk->thread.threads_up = 0;
-	tsk->thread.user_thread_id = L4_INVALID_CAP;
+	tsk->thread.l4x.started = 0;
+	tsk->thread.l4x.threads_up = 0;
+	tsk->thread.l4x.user_thread_id = L4_INVALID_CAP;
 }
 #endif /* VCPU */
 

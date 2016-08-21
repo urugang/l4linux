@@ -38,6 +38,7 @@ void l4lx_thread_init(void);
  * \brief Create a thread.
  * \ingroup thread
  *
+ * \param thread        Returned thread handle
  * \param thread_func	Thread function.
  * \param cpu_nr        CPU to start thread on.
  * \param stack_pointer	The stack, if set to NULL a stack will be allocated.
@@ -64,7 +65,7 @@ void l4lx_thread_init(void);
  *                      with l4lx_thread_start then. If NULL, the thread
  *                      will be started by l4lx_thread_create.
  *
- * \return Thread ID of the new thread, 0 if an error occured.
+ * \return 0 for success, error code otherwise
  *
  * The stack layout for non L4Env threads:
  *
@@ -78,20 +79,21 @@ void l4lx_thread_init(void);
  *         Stack growth        | | |   |     |--- thread ID (not always)
  *                             | | |   |--------- data for new thread
  *                             | | |------------- pointer of data section
- *                             | |		  given to the new thread
+ *                             | |                given to the new thread
  *                             | |--------------- fake return address
  *                             |----------------- ESP for new thread
  * </pre>
  */
-l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
-                                 unsigned cpu_nr,
-                                 void *stack_pointer,
-                                 void *stack_data, unsigned stack_data_size,
-                                 l4_cap_idx_t l4cap, int prio,
-                                 l4_utcb_t *utcb,
-                                 l4_vcpu_state_t **vcpu_state,
-                                 const char *name,
-                                 struct l4lx_thread_start_info_t *deferstart);
+int l4lx_thread_create(l4lx_thread_t *thread,
+                       L4_CV void (*thread_func)(void *data),
+                       unsigned cpu_nr,
+                       void *stack_pointer,
+                       void *stack_data, unsigned stack_data_size,
+                       l4_cap_idx_t l4cap, int prio,
+                       l4_utcb_t *utcb,
+                       l4_vcpu_state_t **vcpu_state,
+                       const char *name,
+                       struct l4lx_thread_start_info_t *deferstart);
 
 /**
  * \brief Start thread.
@@ -101,7 +103,6 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
  *
  * \return 0 for success, error code otherwise.
  */
-
 int l4lx_thread_start(struct l4lx_thread_start_info_t *startinfo);
 
 /**

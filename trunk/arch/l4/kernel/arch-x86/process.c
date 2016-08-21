@@ -101,10 +101,9 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 /*
  * Free current thread data structures etc..
  */
-void exit_thread(void)
+void exit_thread(struct task_struct *tsk)
 {
-	struct task_struct *me = current;
-	struct thread_struct *t = &me->thread;
+	struct thread_struct *t = &tsk->thread;
 	unsigned long *bp = t->io_bitmap_ptr;
 	struct fpu *fpu = &t->fpu;
 
@@ -149,7 +148,7 @@ static void l4x_x86_flush_thread(void)
 #ifndef CONFIG_L4_VCPU
 	/* When processes are started from kernel threads there's no
 	 * process to flush */
-	if (!tsk->thread.started)
+	if (!tsk->thread.l4x.started)
 		return;
 #endif
 

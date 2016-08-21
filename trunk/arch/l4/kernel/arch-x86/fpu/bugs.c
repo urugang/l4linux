@@ -23,11 +23,15 @@ static double __initdata y = 3145727.0;
  * We should really only care about bugs here
  * anyway. Not features.
  */
-static void __init check_fpu(void)
+void __init fpu__init_check_bugs(void)
 {
 #ifndef CONFIG_L4
 	u32 cr0_saved;
 	s32 fdiv_bug;
+
+	/* kernel_fpu_begin/end() relies on patched alternative instructions. */
+	if (!boot_cpu_has(X86_FEATURE_FPU))
+		return;
 
 	/* We might have CR0::TS set already, clear it: */
 	cr0_saved = read_cr0();
@@ -62,14 +66,4 @@ static void __init check_fpu(void)
 		pr_warn("Hmm, FPU with FDIV bug\n");
 	}
 #endif /* L4 */
-}
-
-void __init fpu__init_check_bugs(void)
-{
-	/*
-	 * kernel_fpu_begin/end() in check_fpu() relies on the patched
-	 * alternative instructions.
-	 */
-	if (cpu_has_fpu)
-		check_fpu();
 }

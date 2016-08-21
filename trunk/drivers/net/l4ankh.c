@@ -73,7 +73,7 @@ static int l4x_net_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 
 	dev_kfree_skb(skb);
 
-	netdev->trans_start = jiffies;
+	netif_trans_update(netdev);
 	priv->net_stats.tx_packets++;
 	priv->net_stats.tx_bytes += skb->len;
 
@@ -171,13 +171,12 @@ static int l4x_net_open(struct net_device *netdev)
 		goto err_out_kfree;
 	}
 
-	priv->rcv_thread = l4lx_thread_create(l4x_ankh_rcv_thread,
-	                                      0, NULL, &netdev, sizeof(netdev),
-	                                      l4x_cap_alloc(),
-	                                      CONFIG_L4_PRIO_L4ANKH,
-	                                      0, 0, "L4AnkhRcv", NULL);
-
-	if (!l4lx_thread_is_valid(priv->rcv_thread))
+	if (l4lx_thread_create(&priv->rcv_thread,
+	                       l4x_ankh_rcv_thread,
+	                       0, NULL, &netdev, sizeof(netdev),
+	                       l4x_cap_alloc(),
+	                       CONFIG_L4_PRIO_L4ANKH,
+	                       0, 0, "L4AnkhRcv", NULL))
 		goto err_out_free_irq;
 
 	netif_carrier_on(netdev);

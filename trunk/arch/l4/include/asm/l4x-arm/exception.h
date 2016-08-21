@@ -30,6 +30,16 @@ static inline unsigned long l4x_get_cpu_mode(struct pt_regs *r)
 	return processor_mode(r);
 }
 
+static inline void l4x_init_kernel_regs(struct pt_regs *r)
+{
+	r->ARM_cpsr = SVC_MODE;
+}
+
+static inline void l4x_set_regs_ip(struct pt_regs *r, unsigned long ip)
+{
+	instruction_pointer_set(r, ip);
+}
+
 #ifdef CONFIG_L4_VCPU
 static inline void vcpu_to_ptregs_common(l4_vcpu_state_t *v,
                                          struct pt_regs *regs)
@@ -143,5 +153,12 @@ static inline void ptregs_to_utcb_exc(struct pt_regs *ptregs, l4_exc_regs_t *exc
 	exc->pc    = ptregs->ARM_pc;
 	exc->cpsr  = ptregs->ARM_cpsr;
 }
+
+#define L4X_FAKE_EX_TABLE_ENTRY() ({ unsigned long pc;          \
+	asm volatile ("1: adr	%0, 1b                    \n\t" \
+	              ".pushsection \"__ex_table\",\"a\"  \n\t" \
+	              ".align	3                         \n\t" \
+	              ".long 1b; .long 1b;                \n\t" \
+	              ".popsection" : "=r"(pc)); pc; })
 
 #endif /* ! __ASM_L4__L4X_ARM__EXCEPTION_H__ */

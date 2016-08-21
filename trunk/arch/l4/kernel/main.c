@@ -46,6 +46,9 @@
 #include <l4/util/atomic.h>
 #include <l4/io/io.h>
 #include <l4/vbus/vbus.h>
+#ifdef CONFIG_L4_USE_L4SHMC
+#include <l4/shmc/shmc.h>
+#endif
 
 #include <asm/api/config.h>
 #include <asm/api/macros.h>
@@ -99,41 +102,43 @@
 L4_CV void l4x_external_exit(int);
 
 unsigned long __l4_external_resolver;
+EXPORT_SYMBOL(__l4_external_resolver);
 
 L4_EXTERNAL_FUNC_VARGS(LOG_printf);
-L4_EXTERNAL_FUNC(LOG_vprintf);
-L4_EXTERNAL_FUNC(LOG_flush);
+EXPORT_SYMBOL(LOG_printf);
+L4_EXTERNAL_FUNC_AND_EXPORT(LOG_vprintf);
+L4_EXTERNAL_FUNC_AND_EXPORT(LOG_flush);
 L4_EXTERNAL_FUNC(l4_sleep);
 
-L4_EXTERNAL_FUNC(l4util_kip_kernel_has_feature);
-L4_EXTERNAL_FUNC(l4util_kip_kernel_abi_version);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4util_kip_kernel_has_feature);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4util_kip_kernel_abi_version);
 L4_EXTERNAL_FUNC_VARGS(l4_kprintf);
 L4_EXTERNAL_FUNC(l4x_external_exit);
 
-L4_EXTERNAL_FUNC(l4sys_errtostr);
-L4_EXTERNAL_FUNC(l4re_util_cap_alloc);
-L4_EXTERNAL_FUNC(l4re_util_cap_free);
-L4_EXTERNAL_FUNC(l4re_debug_obj_debug);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4sys_errtostr);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_util_cap_alloc);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_util_cap_free);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_debug_obj_debug);
 
-L4_EXTERNAL_FUNC(l4re_dma_space_map);
-L4_EXTERNAL_FUNC(l4re_dma_space_unmap);
-L4_EXTERNAL_FUNC(l4re_ds_size);
-L4_EXTERNAL_FUNC(l4re_ds_phys);
-L4_EXTERNAL_FUNC(l4re_ds_info);
-L4_EXTERNAL_FUNC(l4re_ds_copy_in);
-L4_EXTERNAL_FUNC(l4re_ds_map_region);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_dma_space_map);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_dma_space_unmap);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_ds_size);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_ds_phys);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_ds_info);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_ds_copy_in);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_ds_map_region);
 
-L4_EXTERNAL_FUNC(l4re_ns_query_to_srv);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_ns_query_to_srv);
 
-L4_EXTERNAL_FUNC(l4re_rm_find_srv);
-L4_EXTERNAL_FUNC(l4re_rm_show_lists_srv);
-L4_EXTERNAL_FUNC(l4re_rm_attach_srv);
-L4_EXTERNAL_FUNC(l4re_rm_detach_srv);
-L4_EXTERNAL_FUNC(l4re_rm_reserve_area_srv);
-L4_EXTERNAL_FUNC(l4re_rm_free_area_srv);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_rm_find_srv);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_rm_show_lists_srv);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_rm_attach_srv);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_rm_detach_srv);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_rm_reserve_area_srv);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_rm_free_area_srv);
 
-L4_EXTERNAL_FUNC(l4re_ma_alloc_align_srv);
-L4_EXTERNAL_FUNC(l4re_ma_free_srv);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_ma_alloc_align_srv);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4re_ma_free_srv);
 
 L4_EXTERNAL_FUNC(l4io_request_iomem);
 L4_EXTERNAL_FUNC(l4io_request_iomem_region);
@@ -148,18 +153,18 @@ L4_EXTERNAL_FUNC(l4io_has_resource);
 L4_EXTERNAL_FUNC(l4vbus_assign_dma_domain);
 
 #ifdef CONFIG_L4_USE_L4SHMC
-L4_EXTERNAL_FUNC(l4shmc_create);
-L4_EXTERNAL_FUNC(l4shmc_attach_to);
-L4_EXTERNAL_FUNC(l4shmc_get_chunk_to);
-L4_EXTERNAL_FUNC(l4shmc_attach_signal_to);
-L4_EXTERNAL_FUNC(l4shmc_connect_chunk_signal);
-L4_EXTERNAL_FUNC(l4shmc_wait_chunk_to);
-L4_EXTERNAL_FUNC(l4shmc_add_chunk);
-L4_EXTERNAL_FUNC(l4shmc_add_signal);
-L4_EXTERNAL_FUNC(l4shmc_get_signal_to);
-L4_EXTERNAL_FUNC(l4shmc_iterate_chunk);
-L4_EXTERNAL_FUNC(l4shmc_area_overhead);
-L4_EXTERNAL_FUNC(l4shmc_chunk_overhead);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_create);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_attach_to);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_get_chunk_to);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_attach_signal_to);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_connect_chunk_signal);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_wait_chunk_to);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_add_chunk);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_add_signal);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_get_signal_to);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_iterate_chunk);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_area_overhead);
+L4_EXTERNAL_FUNC_AND_EXPORT(l4shmc_chunk_overhead);
 #endif
 
 #ifdef CONFIG_L4_SERVER
@@ -219,6 +224,7 @@ l4_cap_idx_t l4x_user_gate[NR_CPUS];
 l4re_env_t *l4re_global_env;
 
 DEFINE_SPINLOCK(l4x_cap_lock);
+EXPORT_SYMBOL(l4x_cap_lock);
 
 int l4x_debug_show_exceptions;
 int l4x_debug_show_ghost_regions;
@@ -1101,7 +1107,8 @@ static __init_refok void l4x_setup_upage(void)
 
 	upage_addr = UPAGE_USER_ADDRESS;
 	if (l4re_rm_attach((void **)&upage_addr, L4_PAGESIZE,
-	                   0, ds | L4_CAP_FPAGE_RW, 0, L4_PAGESHIFT)) {
+	                   L4RE_RM_EAGER_MAP, ds | L4_CAP_FPAGE_RW,
+	                   0, L4_PAGESHIFT)) {
 		LOG_printf("Cannot attach upage properly\n");
 		l4x_linux_main_exit();
 	}
@@ -1121,7 +1128,7 @@ static void l4x_register_region(const l4re_ds_t ds, void *start,
 	/* add initial offset to the size we have to encounter */
 	size = min(size, l4_round_page(l4re_ds_size(ds) - ds_offset));
 
-	LOG_printf("%15s: Virt: %p to %p [%lu KiB]\n",
+	LOG_printf("L4x: %15s: Virt: %p to %p [%lu KiB]\n",
 	           tag, start, start + size - 1, size >> 10);
 
 	if (l4_is_invalid_cap(l4x_dma_space)) {
@@ -1782,14 +1789,12 @@ void l4x_cpu_ipi_setup(unsigned cpu)
 	l4x_cpu_ipi_irqs[cpu] = L4_INVALID_CAP;
 
 #ifndef CONFIG_L4_VCPU
-	l4x_cpu_ipi_threads[cpu]
-		= l4lx_thread_create(l4x_cpu_ipi_thread,
-	                             cpu,
-	                             NULL, &cpu, sizeof(cpu),
-	                             l4x_cap_alloc(),
-	                             l4lx_irq_prio_get(0), 0, 0, s, NULL);
-
-	if (!l4lx_thread_is_valid(l4x_cpu_ipi_threads[cpu]))
+	if (l4lx_thread_create(&l4x_cpu_ipi_threads[cpu],
+	                       l4x_cpu_ipi_thread,
+	                       cpu,
+	                       NULL, &cpu, sizeof(cpu),
+	                       l4x_cap_alloc(),
+	                       l4lx_irq_prio_get(0), 0, 0, s, NULL))
 		l4x_exit_l4linux_msg("Failed to create thread %s\n", s);
 #endif
 
@@ -1927,18 +1932,15 @@ void l4x_cpu_spawn(int cpu, struct task_struct *idle)
 	}
 
 	while (1) {
-		l4x_cpu_threads[cpu]
-		   = L4XV_FN(l4lx_thread_t,
-		             l4lx_thread_create(__cpu_starter, cpu,
-		                                &l4x_cpu_bootup_stacks[cpu].stack[ARRAY_SIZE(l4x_cpu_bootup_stacks[cpu].stack)],
-		                                &cpu, sizeof(cpu),
-		                                l4x_cpu_thread_caps[cpu],
-		                                CONFIG_L4_PRIO_SERVER_PROC,
-		                                l4x_cpu_threads[cpu],
-		                                &l4x_vcpu_ptr[cpu],
-		                                name, &l4x_cpu_bootup_state[cpu]));
-
-		if (l4x_cpu_threads[cpu])
+		if (!L4XV_FN_i(l4lx_thread_create(&l4x_cpu_threads[cpu],
+		                                  __cpu_starter, cpu,
+		                                  &l4x_cpu_bootup_stacks[cpu].stack[ARRAY_SIZE(l4x_cpu_bootup_stacks[cpu].stack)],
+		                                  &cpu, sizeof(cpu),
+		                                  l4x_cpu_thread_caps[cpu],
+		                                  CONFIG_L4_PRIO_SERVER_PROC,
+		                                  l4x_cpu_threads[cpu],
+		                                  &l4x_vcpu_ptr[cpu],
+		                                  name, &l4x_cpu_bootup_state[cpu])))
 			break;
 
 		l4x_evict_tasks(NULL);
@@ -2069,12 +2071,13 @@ void l4x_rep_nop(void)
 
 static void l4x_repnop_init(void)
 {
-	l4x_repnop_id = l4lx_thread_create(l4x_repnop_thread, 0,
-	                                   l4x_repnop_stack
-	                                     + sizeof(l4x_repnop_stack),
-	                                   NULL, 0, l4x_cap_alloc_noctx(),
-	                                   CONFIG_L4_PRIO_SERVER_PROC - 1,
-	                                   0, 0, "nop", NULL);
+	l4lx_thread_create(&l4x_repnop_id,
+	                   l4x_repnop_thread, 0,
+	                   l4x_repnop_stack
+	                     + sizeof(l4x_repnop_stack),
+	                   NULL, 0, l4x_cap_alloc_noctx(),
+	                   CONFIG_L4_PRIO_SERVER_PROC - 1,
+	                   0, 0, "nop", NULL);
 }
 // repnop end
 // ---------------
@@ -2666,6 +2669,7 @@ int __init_refok L4_CV main(int argc, char **argv)
 	l4lx_thread_t main_id;
 	struct l4lx_thread_start_info_t si;
 	extern char boot_command_line[];
+	extern initcall_t __initcall_start[];
 	unsigned i;
 	char *p;
 
@@ -2798,14 +2802,12 @@ int __init_refok L4_CV main(int argc, char **argv)
 #ifdef CONFIG_X86_64
 	p = (char *)((struct pt_regs *)p - 1);
 #endif
-	main_id = l4lx_thread_create(cpu0_startup, 0, p,
-	                             NULL, 0,
-	                             l4re_util_cap_alloc(),
-	                             CONFIG_L4_PRIO_SERVER_PROC,
-	                             0, &l4x_vcpu_ptr[0],
-	                             "cpu0", &si);
-
-	if (!l4lx_thread_is_valid(main_id)) {
+	if (l4lx_thread_create(&main_id, cpu0_startup, 0, p,
+	                       NULL, 0,
+	                       l4re_util_cap_alloc(),
+	                       CONFIG_L4_PRIO_SERVER_PROC,
+	                       0, &l4x_vcpu_ptr[0],
+	                       "cpu0", &si)) {
 		LOG_printf("Failed to create vCPU0. Aborting.\n");
 		return 1;
 	}
@@ -2816,8 +2818,10 @@ int __init_refok L4_CV main(int argc, char **argv)
 	LOG_printf("main thread will be " PRINTF_L4TASK_FORM "\n",
 	           PRINTF_L4TASK_ARG(l4lx_thread_get_cap(main_id)));
 
-	l4x_register_pointer_section(&__init_begin, 0, 0, 1, "section-with-init(-data)");
-	l4x_register_pointer_section(&_sinittext,   0, 0, 1, "section-with-init-text");
+	l4x_register_pointer_section(&__initcall_start, 0, 0, 1,
+	                             "section-with-init(-data)");
+	l4x_register_pointer_section(&_sinittext, 0, 0, 1,
+	                             "section-with-init-text");
 
 #ifdef CONFIG_X86
 	/* Needed for smp alternatives -- nobody will ever use this for a
@@ -2830,7 +2834,7 @@ int __init_refok L4_CV main(int argc, char **argv)
 	/* Start main thread. */
 	l4lx_thread_start(&si);
 
-	LOG_printf("Main thread running, waiting...\n");
+	LOG_printf("L4x: Main thread running, waiting...\n");
 
 	l4x_server_loop();
 
@@ -3630,7 +3634,7 @@ static int l4x_default(l4_cap_idx_t *src_id, l4_msgtag_t *tag)
 			LOG_printf("Page fault: addr = " l4_addr_fmt
 			           " pc = " l4_addr_fmt " (%s%s)\n",
 			           pfa, pc,
-			           pfa & 2 ? "rw" : "ro",
+			           pfa & 2 ? "write" : "read",
 			           pfa & 1 ? ", T" : "");
 
 		if (l4x_handle_pagefault(pfa, pc, !!(pfa & 2))) {
@@ -3848,13 +3852,13 @@ void l4x_show_process(struct task_struct *t)
 #ifdef CONFIG_X86
 	printk("%2d: %s tsk st: %lx thrd flgs: %x " PRINTF_L4TASK_FORM " esp: %08lx\n",
 	       t->pid, t->comm, t->state, task_thread_info(t)->flags,
-	       PRINTF_L4TASK_ARG(t->thread.user_thread_id),
+	       PRINTF_L4TASK_ARG(t->thread.l4x.user_thread_id),
 	       t->thread.sp);
 #endif
 #ifdef CONFIG_ARM
 	printk("%2d: %s tsk st: %lx thrd flgs: %lx " PRINTF_L4TASK_FORM " esp: %08x\n",
 	       t->pid, t->comm, t->state, task_thread_info(t)->flags,
-	       PRINTF_L4TASK_ARG(t->thread.user_thread_id),
+	       PRINTF_L4TASK_ARG(t->thread.l4x.user_thread_id),
 	       task_thread_info(t)->cpu_context.sp);
 #endif
 #endif
@@ -4023,13 +4027,7 @@ EXPORT_SYMBOL(cmpxchg8b_emu);
 #endif
 #endif /* X86 */
 
-/* Some exports from L4 libraries etc. */
-EXPORT_SYMBOL(LOG_printf);
-
 EXPORT_SYMBOL(l4x_vmalloc_memory_start);
-
-/* Exports for L4 specific modules */
-EXPORT_SYMBOL(l4_sleep);
 
 char l4x_ipc_errstrings[0];
 EXPORT_SYMBOL(l4x_ipc_errstrings);

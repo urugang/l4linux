@@ -486,11 +486,13 @@ void l4x_tamed_start(unsigned vcpu)
 	tamed_per_nr(wq_len,     nr)             = 0;
 	tamed_per_nr(next_entry, nr)             = 0;
 
-	tamed_per_nr(cli_sem_thread_th, nr) =
-	  l4lx_thread_create(cli_sem_thread, vcpu,
-	                     tamed_per_nr(stack_mem, nr) + sizeof(tamed_per_nr(stack_mem, 0)),
-	                     &nr, sizeof(nr), l4x_cap_alloc_noctx(),
-	                     CONFIG_L4_PRIO_TAMER, 0, 0, s, NULL);
+	if (l4lx_thread_create(&tamed_per_nr(cli_sem_thread_th, nr),
+	                       cli_sem_thread, vcpu,
+	                       tamed_per_nr(stack_mem, nr) + sizeof(tamed_per_nr(stack_mem, 0)),
+	                       &nr, sizeof(nr), l4x_cap_alloc_noctx(),
+	                       CONFIG_L4_PRIO_TAMER, 0, 0, s, NULL))
+		LOG_printf("Failed to create tamer thread\n");
+
 	tamed_per_nr(cli_sem_thread_id, nr) =
 		l4lx_thread_get_cap(tamed_per_nr(cli_sem_thread_th, nr));
 
