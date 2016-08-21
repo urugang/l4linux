@@ -206,12 +206,12 @@ void l4lx_irq_init(void)
 
 	snprintf(thread_name, sizeof(thread_name), "IRQ CPU%d", cpu);
 	thread_name[sizeof(thread_name) - 1] = 0;
-	irq_ths[cpu] = l4lx_thread_create(irq_thread, cpu, NULL,
-	                                  &cpu, sizeof(cpu),
-	                                  l4x_cap_alloc(),
-	                                  l4lx_irq_prio_get(1),
-	                                  0, 0, thread_name, NULL);
-	if (!l4lx_thread_is_valid(irq_ths[cpu]))
+	if (l4lx_thread_create(&irq_ths[cpu],
+	                       irq_thread, cpu, NULL,
+	                       &cpu, sizeof(cpu),
+	                       l4x_cap_alloc(),
+	                       l4lx_irq_prio_get(1),
+	                       0, 0, thread_name, NULL))
 		enter_kdebug("Error creating IRQ-thread!");
 }
 

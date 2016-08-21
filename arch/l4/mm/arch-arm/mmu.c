@@ -968,11 +968,13 @@ static void __init __create_mapping(struct mm_struct *mm, struct map_desc *md,
  */
 static void __init create_mapping(struct map_desc *md)
 {
+#ifndef CONFIG_L4
 	if (md->virtual != vectors_base() && md->virtual < TASK_SIZE) {
 		pr_warn("BUG: not creating mapping for 0x%08llx at 0x%08lx in user region\n",
 			(long long)__pfn_to_phys((u64)md->pfn), md->virtual);
 		return;
 	}
+#endif
 
 	if ((md->type == MT_DEVICE || md->type == MT_ROM) &&
 	    md->virtual >= PAGE_OFFSET && md->virtual < FIXADDR_START &&

@@ -114,7 +114,6 @@ void machine_halt(void)
 #ifdef CONFIG_L4
 	l4x_exit_l4linux();
 #else
-	local_irq_disable();
 	while (1);
 #endif
 }
@@ -165,7 +164,6 @@ void machine_restart(char *cmd)
 
 	/* Whoops - the platform was unable to reboot. Tell the user! */
 	printk("Reboot failed -- System halted\n");
-	local_irq_disable();
 	while (1);
 #else
 	l4x_exit_l4linux();

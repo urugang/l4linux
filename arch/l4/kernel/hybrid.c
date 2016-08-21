@@ -94,12 +94,12 @@ int l4x_hybrid_seq_show(struct seq_file *m, void *v)
 static void l4x_hybrid_wakeup_task(struct task_struct *p)
 {
 #ifdef CONFIG_L4_VCPU
-	l4_thread_ex_regs(p->thread.hyb_user_thread_id,
+	l4_thread_ex_regs(p->thread.l4x.hyb_user_thread_id,
 	                  ~0UL, ~0UL,
 	                  L4_THREAD_EX_REGS_TRIGGER_EXCEPTION
 	                  | L4_THREAD_EX_REGS_CANCEL);
 #else
-	l4_thread_ex_regs(p->thread.user_thread_id,
+	l4_thread_ex_regs(p->thread.l4x.user_thread_id,
 	                  ~0UL, ~0UL,
 	                  L4_THREAD_EX_REGS_TRIGGER_EXCEPTION
 	                  | L4_THREAD_EX_REGS_CANCEL);
@@ -114,7 +114,7 @@ static const unsigned long sigs_for_interrupt
 
 static inline void l4x_hybrid_check_task(struct task_struct *p)
 {
-	if (p && signal_pending(p) && p->thread.hybrid_sc_in_prog
+	if (p && signal_pending(p) && p->thread.l4x.hybrid_sc_in_prog
 	    && (sigtestsetmask(&p->pending.signal, sigs_for_interrupt)
 		|| sigtestsetmask(&p->signal->shared_pending.signal,
 		                  sigs_for_interrupt)))

@@ -143,11 +143,12 @@ void irq_ctx_init(int cpu)
 
 void do_softirq_own_stack(void)
 {
-	struct thread_info *curstk;
+#if defined(CONFIG_L4) && !defined(CONFIG_L4_VCPU)
+	struct thread_info *curstk = current_stack();;
+#endif
 	struct irq_stack *irqstk;
 	u32 *isp, *prev_esp;
 
-	curstk = current_stack();
 	irqstk = __this_cpu_read(softirq_stack);
 
 	/* build the stack frame on the softirq stack */
@@ -157,12 +158,12 @@ void do_softirq_own_stack(void)
 	prev_esp = (u32 *)irqstk;
 	*prev_esp = current_stack_pointer();
 
-#ifndef CONFIG_L4_VCPU
+#if defined(CONFIG_L4) && !defined(CONFIG_L4_VCPU)
 	l4x_stack_set((struct thread_info *)irqstk, l4_utcb());
 	per_cpu(l4x_current_ti, smp_processor_id()) = (struct thread_info *)irqstk;
 #endif
 	call_on_stack(__do_softirq, isp);
-#ifndef CONFIG_L4_VCPU
+#if defined(CONFIG_L4) && !defined(CONFIG_L4_VCPU)
 	per_cpu(l4x_current_ti, smp_processor_id()) = (struct thread_info *)curstk;
 	l4x_stack_set((struct thread_info *)curstk, l4_utcb());
 #endif

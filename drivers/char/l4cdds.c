@@ -52,45 +52,12 @@ static int ds_open(struct inode * inode, struct file * filp)
 
 static loff_t ds_seek(struct file * file, loff_t offset, int orig)
 {
-	loff_t ret;
 	unsigned idx = iminor(file->f_path.dentry->d_inode);
-	unsigned long devsize;
 
 	if (!valid_idx(idx))
 		return -ENODEV;
 
-	devsize = device[idx].size;
-
-	ret = -EINVAL;
-	mutex_lock(&file->f_path.dentry->d_inode->i_mutex);
-	switch (orig) {
-		case 0: // set
-			if (offset < devsize) {
-				file->f_pos = offset;
-				ret = file->f_pos;
-				force_successful_syscall_return();
-			}
-			break;
-		case 1: // pos
-			if (file->f_pos + offset < devsize) {
-				file->f_pos += offset;
-				ret = file->f_pos;
-				force_successful_syscall_return();
-			}
-			break;
-		case 2: // end
-			if (offset < devsize) {
-				file->f_pos = devsize - offset;
-				ret = file->f_pos;
-				force_successful_syscall_return();
-			}
-			break;
-		default:
-			ret = -EINVAL;
-
-	}
-	mutex_unlock(&file->f_path.dentry->d_inode->i_mutex);
-	return ret;
+	return fixed_size_llseek(file, offset, orig, device[idx].size);
 }
 
 static ssize_t ds_read(struct file * file, char __user * buf,

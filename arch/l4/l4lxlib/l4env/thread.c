@@ -196,17 +196,18 @@ asm(
 );
 #endif
 
-l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
-                                 unsigned vcpu,
-                                 void *stack_pointer,
-                                 void *stack_data, unsigned stack_data_size,
-                                 l4_cap_idx_t l4cap, int prio,
-                                 l4_utcb_t *utcbp,
-                                 l4_vcpu_state_t **vcpu_state,
-                                 const char *name,
-                                 struct l4lx_thread_start_info_t *deferstart)
+int l4lx_thread_create(l4lx_thread_t *thread,
+                       L4_CV void (*thread_func)(void *data),
+                       unsigned vcpu,
+                       void *stack_pointer,
+                       void *stack_data, unsigned stack_data_size,
+                       l4_cap_idx_t l4cap, int prio,
+                       l4_utcb_t *utcbp,
+                       l4_vcpu_state_t **vcpu_state,
+                       const char *name,
+                       struct l4lx_thread_start_info_t *deferstart)
 {
-	l4_msgtag_t res;
+	int err;
 	struct l4lx_thread_start_info_t si_buf, *si;
 	l4_utcb_t *utcb;
 	l4_umword_t *sp, *sp_data;
@@ -215,16 +216,17 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 #endif
 
 	if (l4_is_invalid_cap(l4cap))
-		return 0;
+		return -EINVAL;
 
-	res = l4_factory_create_thread(l4re_env()->factory, l4cap);
-	if (l4_error(res))
+	err = l4_error(l4_factory_create_thread(l4re_env()->factory, l4cap));
+	if (err)
 		goto out_free_cap;
 
 	if (!stack_pointer) {
 		stack_pointer = l4lx_thread_stack_alloc(l4cap);
 		if (!stack_pointer) {
 			LOG_printf("l4x: Out of thread stacks\n");
+			err = -ENOMEM;
 			goto out_rel_cap;
 		}
 	}
@@ -252,6 +254,7 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 #endif
 
 	l4x_dbg_set_object_name(l4cap, "%s", name);
+	err = -ENOMEM;
 	if (!utcbp) {
 		utcb = l4lx_thread_ku_alloc_alloc_u();
 		if (!utcb)
@@ -268,6 +271,9 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 	}
 #endif
 
+	*thread = utcb;
+	mb();
+
 	l4_utcb_tcr_u(utcb)->user[L4X_UTCB_TCR_ID]   = l4cap;
 	l4_utcb_tcr_u(utcb)->user[L4X_UTCB_TCR_PRIO] = prio;
 
@@ -275,25 +281,26 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 	l4_thread_control_pager(l4re_env()->rm);
 	l4_thread_control_exc_handler(l4re_env()->rm);
 	l4_thread_control_bind(utcb, L4_BASE_TASK_CAP);
-	res = l4_thread_control_commit(l4cap);
-	if (l4_error(res))
+	err = l4_error(l4_thread_control_commit(l4cap));
+	if (err)
 		goto out_free_vcpu;
 
 #if defined(CONFIG_L4_VCPU) || defined(CONFIG_KVM)
 	if (vcpu_state) {
-		int r = 1, vcpu_ext_not_avail = 0;
+		int vcpu_ext_not_avail = 0;
 		l4_vcpu_state_t *v = *vcpu_state;
 
 		v->state = 0;
+		err = 1;
 
 #ifdef CONFIG_KVM
-		r = l4_error(l4_thread_vcpu_control_ext(l4cap, (l4_addr_t)v));
-		vcpu_ext_not_avail = r == -L4_ENOSYS;
+		err = l4_error(l4_thread_vcpu_control_ext(l4cap, (l4_addr_t)v));
+		vcpu_ext_not_avail = err == -L4_ENOSYS;
 #endif
-		if (r)
-			r = l4_error(l4_thread_vcpu_control(l4cap,
-			                                    (l4_addr_t)v));
-		if (r)
+		if (err)
+			err = l4_error(l4_thread_vcpu_control(l4cap,
+			                                      (l4_addr_t)v));
+		if (err)
 			goto out_free_vcpu;
 
 		if (vcpu_ext_not_avail)
@@ -329,10 +336,10 @@ l4lx_thread_t l4lx_thread_create(L4_CV void (*thread_func)(void *data),
 #endif
 
 	if (!deferstart)
-		if (l4lx_thread_start(si))
+		if ((err = l4lx_thread_start(si)))
 			goto out_free_vcpu;
 
-	return utcb;
+	return 0;
 
 out_free_vcpu:
 #if defined(CONFIG_L4_VCPU) || defined(CONFIG_KVM)
@@ -348,7 +355,7 @@ out_rel_cap:
 out_free_cap:
 	l4x_cap_free(l4cap);
 
-	return 0;
+	return err;
 }
 EXPORT_SYMBOL(l4lx_thread_create);
 

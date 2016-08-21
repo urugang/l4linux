@@ -292,10 +292,8 @@ do_page_fault(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 	 * we can bug out early if this is from code which shouldn't.
 	 */
 	if (!down_read_trylock(&mm->mmap_sem)) {
-#ifndef CONFIG_L4
 		if (!user_mode(regs) && !search_exception_tables(regs->ARM_pc))
 			goto no_context;
-#endif
 retry:
 		down_read(&mm->mmap_sem);
 	} else {
@@ -305,12 +303,10 @@ retry:
 		 * down_read()
 		 */
 		might_sleep();
-#ifndef CONFIG_L4
 #ifdef CONFIG_DEBUG_VM
 		if (!user_mode(regs) &&
 		    !search_exception_tables(regs->ARM_pc))
 			goto no_context;
-#endif
 #endif
 	}
 

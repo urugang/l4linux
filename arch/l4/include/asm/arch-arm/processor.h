@@ -24,7 +24,9 @@
 #include <asm/types.h>
 #include <asm/unified.h>
 
-#include <l4/sys/types.h>
+#ifdef CONFIG_L4
+#include <asm/generic/thread.h>
+#endif /* L4 */
 
 #ifdef __KERNEL__
 #define STACK_TOP	((current->personality & ADDR_LIMIT_32BIT) ? \
@@ -44,18 +46,9 @@ struct thread_struct {
 	unsigned long		trap_no;
 	unsigned long		error_code;
 
-#ifndef CONFIG_L4_VCPU
-	l4_cap_idx_t user_thread_id;
-	l4_cap_idx_t user_thread_ids[8]; //[NR_CPUS];
-	unsigned long threads_up;
-	unsigned int initial_state_set : 1;
-	unsigned int started : 1;
-#endif
-	unsigned int is_hybrid : 1;
-	unsigned int hybrid_sc_in_prog : 1;
-#ifdef CONFIG_L4_VCPU
-	l4_cap_idx_t		hyb_user_thread_id;
-#endif
+#ifdef CONFIG_L4
+	struct l4x_thread	l4x;
+#endif /* L4 */
 							/* debugging	  */
 	struct debug_info	debug;
 };

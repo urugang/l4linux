@@ -4,14 +4,12 @@
 #include <linux/module.h>
 #include <linux/smp.h>
 
-#ifndef CONFIG_L4
 #include <net/checksum.h>
 
 #include <asm/processor.h>
 #include <asm/pgtable.h>
 #include <asm/uaccess.h>
 #include <asm/desc.h>
-#endif /* L4 */
 #include <asm/ftrace.h>
 
 #ifdef CONFIG_FUNCTION_TRACER
@@ -36,7 +34,9 @@ EXPORT_SYMBOL(__put_user_8);
 EXPORT_SYMBOL(copy_user_generic_string);
 EXPORT_SYMBOL(copy_user_generic_unrolled);
 EXPORT_SYMBOL(copy_user_enhanced_fast_string);
+#endif /* L4 */
 EXPORT_SYMBOL(__copy_user_nocache);
+#ifndef CONFIG_L4
 EXPORT_SYMBOL(_copy_from_user);
 EXPORT_SYMBOL(_copy_to_user);
 

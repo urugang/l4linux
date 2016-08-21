@@ -717,13 +717,13 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 #ifndef CONFIG_L4_VCPU
 	} else if (trapno == 0xff) {
 		/* we come here for suspend events */
-		TBUF_LOG_SUSPEND(fiasco_tbuf_log_3val("dsp susp", TBUF_TID(t->user_thread_id), regs->ip, 0));
+		TBUF_LOG_SUSPEND(fiasco_tbuf_log_3val("dsp susp", TBUF_TID(t->l4x.user_thread_id), regs->ip, 0));
 		l4x_dispatch_suspend(p, t);
 
 		return 0;
 #endif
 	} else if (likely(l4x_is_linux_syscall(err, trapno, regs))) {
-		TBUF_LOG_INT80(fiasco_tbuf_log_3val("int80  ", TBUF_TID(t->user_thread_id), regs->ip, regs->ax));
+		TBUF_LOG_INT80(fiasco_tbuf_log_3val("int80  ", TBUF_TID(t->l4x.user_thread_id), regs->ip, regs->ax));
 
 		/* set after int 0x80 / syscall, before doing the system
 		 * call so the forked childs get the increase too */
@@ -787,7 +787,7 @@ unknown_fault:
 		return 0;
 	}
 
-	TBUF_LOG_EXCP(fiasco_tbuf_log_3val("except ", TBUF_TID(t->user_thread_id), t->trap_nr, t->error_code));
+	TBUF_LOG_EXCP(fiasco_tbuf_log_3val("except ", TBUF_TID(t->l4x.user_thread_id), t->trap_nr, t->error_code));
 
 	if (l4x_deliver_signal(trapno))
 		return 0; /* handled signal, reply */

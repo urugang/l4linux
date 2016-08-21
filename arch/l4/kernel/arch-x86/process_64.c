@@ -153,25 +153,6 @@ void release_thread(struct task_struct *dead_task)
 	}
 }
 
-static inline void set_32bit_tls(struct task_struct *t, int tls, u32 addr)
-{
-	struct user_desc ud = {
-		.base_addr = addr,
-		.limit = 0xfffff,
-		.seg_32bit = 1,
-		.limit_in_pages = 1,
-		.useable = 1,
-	};
-	struct desc_struct *desc = t->thread.tls_array;
-	desc += tls;
-	fill_ldt(desc, &ud);
-}
-
-static inline u32 read_32bit_tls(struct task_struct *t, int tls)
-{
-	return get_desc_base(&t->thread.tls_array[tls]);
-}
-
 int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 		unsigned long arg, struct task_struct *p, unsigned long tls)
 {
@@ -194,13 +175,13 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 #else
 	savesegment(gs, p->thread.gsindex);
 #endif
-	p->thread.gs = p->thread.gsindex ? 0 : me->thread.gs;
+	p->thread.gsbase = p->thread.gsindex ? 0 : me->thread.gsbase;
 #ifdef CONFIG_L4
 	p->thread.fsindex = vcpu->r.fs;
 #else
 	savesegment(fs, p->thread.fsindex);
 #endif
-	p->thread.fs = p->thread.fsindex ? 0 : me->thread.fs;
+	p->thread.fsbase = p->thread.fsindex ? 0 : me->thread.fsbase;
 #ifdef CONFIG_L4
 	p->thread.es = vcpu->r.es;
 	p->thread.ds = vcpu->r.ds;
@@ -245,7 +226,7 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 	 */
 	if (clone_flags & CLONE_SETTLS) {
 #ifdef CONFIG_IA32_EMULATION
-		if (is_ia32_task())
+		if (in_ia32_syscall())
 			err = do_set_thread_area(p, -1,
 				(struct user_desc __user *)tls, 0);
 		else
@@ -317,7 +298,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	struct fpu *next_fpu = &next->fpu;
 	int cpu = smp_processor_id();
 	struct tss_struct *tss = &per_cpu(cpu_tss, cpu);
-	unsigned fsindex, gsindex;
+	unsigned prev_fsindex, prev_gsindex;
 	fpu_switch_t fpu_switch;
 #ifdef CONFIG_L4_VCPU
 	l4_vcpu_state_t *vcpu = l4x_vcpu_ptr[cpu];
@@ -332,12 +313,12 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 */
 #ifdef CONFIG_L4
 #ifdef CONFIG_L4_VCPU
-	fsindex = vcpu->r.fs;
-	gsindex = vcpu->r.gs;
+	prev_fsindex = vcpu->r.fs;
+	prev_gsindex = vcpu->r.gs;
 #endif
 #else
-	savesegment(fs, fsindex);
-	savesegment(gs, gsindex);
+	savesegment(fs, prev_fsindex);
+	savesegment(gs, prev_gsindex);
 #endif
 
 	/*
@@ -347,8 +328,8 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 #ifdef CONFIG_L4
 	if (next_p->mm
 #ifndef CONFIG_L4_VCPU
-	    && !l4_is_invalid_cap(next->user_thread_id)
-	    && next->user_thread_id
+	    && !l4_is_invalid_cap(next->l4x.user_thread_id)
+	    && next->l4x.user_thread_id
 #endif
 	   )
 #endif
@@ -406,83 +387,145 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 * Switch FS and GS.
 	 *
 	 * These are even more complicated than DS and ES: they have
-	 * 64-bit bases are that controlled by arch_prctl.  Those bases
-	 * only differ from the values in the GDT or LDT if the selector
-	 * is 0.
+	 * 64-bit bases are that controlled by arch_prctl.  The bases
+	 * don't necessarily match the selectors, as user code can do
+	 * any number of things to cause them to be inconsistent.
 	 *
-	 * Loading the segment register resets the hidden base part of
-	 * the register to 0 or the value from the GDT / LDT.  If the
-	 * next base address zero, writing 0 to the segment register is
-	 * much faster than using wrmsr to explicitly zero the base.
+	 * We don't promise to preserve the bases if the selectors are
+	 * nonzero.  We also don't promise to preserve the base if the
+	 * selector is zero and the base doesn't match whatever was
+	 * most recently passed to ARCH_SET_FS/GS.  (If/when the
+	 * FSGSBASE instructions are enabled, we'll need to offer
+	 * stronger guarantees.)
 	 *
-	 * The thread_struct.fs and thread_struct.gs values are 0
-	 * if the fs and gs bases respectively are not overridden
-	 * from the values implied by fsindex and gsindex.  They
-	 * are nonzero, and store the nonzero base addresses, if
-	 * the bases are overridden.
-	 *
-	 * (fs != 0 && fsindex != 0) || (gs != 0 && gsindex != 0) should
-	 * be impossible.
-	 *
-	 * Therefore we need to reload the segment registers if either
-	 * the old or new selector is nonzero, and we need to override
-	 * the base address if next thread expects it to be overridden.
-	 *
-	 * This code is unnecessarily slow in the case where the old and
-	 * new indexes are zero and the new base is nonzero -- it will
-	 * unnecessarily write 0 to the selector before writing the new
-	 * base address.
-	 *
-	 * Note: This all depends on arch_prctl being the only way that
-	 * user code can override the segment base.  Once wrfsbase and
-	 * wrgsbase are enabled, most of this code will need to change.
+	 * As an invariant,
+	 * (fsbase != 0 && fsindex != 0) || (gsbase != 0 && gsindex != 0) is
+	 * impossible.
 	 */
-	if (unlikely(fsindex | next->fsindex | prev->fs)) {
+	if (next->fsindex) {
+		/* Loading a nonzero value into FS sets the index and base. */
 #ifdef CONFIG_L4
 		vcpu->r.fs = next->fsindex;
 #else
 		loadsegment(fs, next->fsindex);
 #endif
-
-		/*
-		 * If user code wrote a nonzero value to FS, then it also
-		 * cleared the overridden base address.
-		 *
-		 * XXX: if user code wrote 0 to FS and cleared the base
-		 * address itself, we won't notice and we'll incorrectly
-		 * restore the prior base address next time we reschdule
-		 * the process.
-		 */
-		if (fsindex)
-			prev->fs = 0;
-	}
-	if (next->fs)
+	} else {
+		if (next->fsbase) {
+			/* Next index is zero but next base is nonzero. */
+			if (prev_fsindex)
 #ifdef CONFIG_L4
-		vcpu->r.fs_base = next->fs;
+				vcpu->r.fs = 0;
 #else
-		wrmsrl(MSR_FS_BASE, next->fs);
+				loadsegment(fs, 0);
 #endif
-	prev->fsindex = fsindex;
+#ifdef CONFIG_L4
+			vcpu->r.fs_base = next->fsbase;
+#else
+			wrmsrl(MSR_FS_BASE, next->fsbase);
+#endif
+		} else {
+			/* Next base and index are both zero. */
+			if (static_cpu_has_bug(X86_BUG_NULL_SEG)) {
+				/*
+				 * We don't know the previous base and can't
+				 * find out without RDMSR.  Forcibly clear it.
+				 */
+#ifdef CONFIG_L4
+				vcpu->r.fs = 0;
+#else
+				loadsegment(fs, __USER_DS);
+				loadsegment(fs, 0);
+#endif
+			} else {
+				/*
+				 * If the previous index is zero and ARCH_SET_FS
+				 * didn't change the base, then the base is
+				 * also zero and we don't need to do anything.
+				 */
+				if (prev->fsbase || prev_fsindex)
+#ifdef CONFIG_L4
+					vcpu->r.fs = 0;
+#else
+					loadsegment(fs, 0);
+#endif
+			}
+		}
+	}
+	/*
+	 * Save the old state and preserve the invariant.
+	 * NB: if prev_fsindex == 0, then we can't reliably learn the base
+	 * without RDMSR because Intel user code can zero it without telling
+	 * us and AMD user code can program any 32-bit value without telling
+	 * us.
+	 */
+	if (prev_fsindex)
+		prev->fsbase = 0;
+	prev->fsindex = prev_fsindex;
 
-	if (unlikely(gsindex | next->gsindex | prev->gs)) {
+	if (next->gsindex) {
+		/* Loading a nonzero value into GS sets the index and base. */
 #ifdef CONFIG_L4
 		vcpu->r.gs = next->gsindex;
 #else
 		load_gs_index(next->gsindex);
 #endif
-
-		/* This works (and fails) the same way as fsindex above. */
-		if (gsindex)
-			prev->gs = 0;
-	}
-	if (next->gs)
+	} else {
+		if (next->gsbase) {
+			/* Next index is zero but next base is nonzero. */
+			if (prev_gsindex)
 #ifdef CONFIG_L4
-		vcpu->r.gs_base = next->gs;
+				vcpu->r.gs = 0;
 #else
-		wrmsrl(MSR_KERNEL_GS_BASE, next->gs);
+				load_gs_index(0);
 #endif
-	prev->gsindex = gsindex;
+#ifdef CONFIG_L4
+			vcpu->r.gs_base = next->gsbase;
+#else
+			wrmsrl(MSR_KERNEL_GS_BASE, next->gsbase);
+#endif
+		} else {
+			/* Next base and index are both zero. */
+			if (static_cpu_has_bug(X86_BUG_NULL_SEG)) {
+				/*
+				 * We don't know the previous base and can't
+				 * find out without RDMSR.  Forcibly clear it.
+				 *
+				 * This contains a pointless SWAPGS pair.
+				 * Fixing it would involve an explicit check
+				 * for Xen or a new pvop.
+				 */
+#ifdef CONFIG_L4
+				vcpu->r.gs = 0;
+#else
+				load_gs_index(__USER_DS);
+				load_gs_index(0);
+#endif
+			} else {
+				/*
+				 * If the previous index is zero and ARCH_SET_GS
+				 * didn't change the base, then the base is
+				 * also zero and we don't need to do anything.
+				 */
+				if (prev->gsbase || prev_gsindex)
+#ifdef CONFIG_L4
+					vcpu->r.gs = 0;
+#else
+					load_gs_index(0);
+#endif
+			}
+		}
+	}
+	/*
+	 * Save the old state and preserve the invariant.
+	 * NB: if prev_gsindex == 0, then we can't reliably learn the base
+	 * without RDMSR because Intel user code can zero it without telling
+	 * us and AMD user code can program any 32-bit value without telling
+	 * us.
+	 */
 #endif /* L4_VCPU */
+	if (prev_gsindex)
+		prev->gsbase = 0;
+	prev->gsindex = prev_gsindex;
 
 	switch_fpu_finish(next_fpu, fpu_switch);
 
@@ -543,7 +586,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 #endif
 
 #if defined(CONFIG_SMP) && !defined(CONFIG_L4_VCPU)
-	next->user_thread_id = next->user_thread_ids[cpu];
+	next->l4x.user_thread_id = next->l4x.user_thread_ids[cpu];
 	l4x_stack_struct_get(next_p->stack)->utcb
 		= l4x_stack_struct_get(prev_p->stack)->utcb;
 #endif
@@ -613,97 +656,63 @@ long do_arch_prctl(struct task_struct *task, int code, unsigned long addr)
 
 	switch (code) {
 	case ARCH_SET_GS:
-		if (addr >= TASK_SIZE_OF(task))
+		if (addr >= TASK_SIZE_MAX)
 			return -EPERM;
 		cpu = get_cpu();
-		/* handle small bases via the GDT because that's faster to
-		   switch. */
-		if (addr <= 0xffffffff) {
-			set_32bit_tls(task, GS_TLS, addr);
-			if (doit) {
-				load_TLS(&task->thread, cpu);
-				load_gs_index(GS_TLS_SEL);
-			}
-			task->thread.gsindex = GS_TLS_SEL;
-			task->thread.gs = 0;
-		} else {
-			task->thread.gsindex = 0;
-			task->thread.gs = addr;
-			if (doit) {
-				load_gs_index(0);
+		task->thread.gsindex = 0;
+		task->thread.gsbase = addr;
+		if (doit) {
+			load_gs_index(0);
 #ifdef CONFIG_L4
-				l4x_current_vcpu()->r.gs_base = addr;
+			l4x_current_vcpu()->r.gs_base = addr;
 #else
-				ret = wrmsrl_safe(MSR_KERNEL_GS_BASE, addr);
+			ret = wrmsrl_safe(MSR_KERNEL_GS_BASE, addr);
 #endif
-			}
 		}
 		put_cpu();
 		break;
 	case ARCH_SET_FS:
 		/* Not strictly needed for fs, but do it for symmetry
 		   with gs */
-		if (addr >= TASK_SIZE_OF(task))
+		if (addr >= TASK_SIZE_MAX)
 			return -EPERM;
 		cpu = get_cpu();
-		/* handle small bases via the GDT because that's faster to
-		   switch. */
-		if (addr <= 0xffffffff) {
-			set_32bit_tls(task, FS_TLS, addr);
-			if (doit) {
-				load_TLS(&task->thread, cpu);
-				loadsegment(fs, FS_TLS_SEL);
-			}
-			task->thread.fsindex = FS_TLS_SEL;
-			task->thread.fs = 0;
-		} else {
-			task->thread.fsindex = 0;
-			task->thread.fs = addr;
-			if (doit) {
-				/* set the selector to 0 to not confuse
-				   __switch_to */
-				loadsegment(fs, 0);
+		task->thread.fsindex = 0;
+		task->thread.fsbase = addr;
+		if (doit) {
+			/* set the selector to 0 to not confuse __switch_to */
+			loadsegment(fs, 0);
 #ifdef CONFIG_L4
-				l4x_current_vcpu()->r.fs_base = addr;
+			l4x_current_vcpu()->r.fs_base = addr;
 #else
-				ret = wrmsrl_safe(MSR_FS_BASE, addr);
+			ret = wrmsrl_safe(MSR_FS_BASE, addr);
 #endif
-			}
 		}
 		put_cpu();
 		break;
 	case ARCH_GET_FS: {
 		unsigned long base;
-		if (task->thread.fsindex == FS_TLS_SEL)
-			base = read_32bit_tls(task, FS_TLS);
-		else if (doit)
+		if (doit)
 #ifdef CONFIG_L4
 			base = l4x_vcpu_ptr[smp_processor_id()]->r.fs_base;
 #else
 			rdmsrl(MSR_FS_BASE, base);
 #endif
 		else
-			base = task->thread.fs;
+			base = task->thread.fsbase;
 		ret = put_user(base, (unsigned long __user *)addr);
 		break;
 	}
 	case ARCH_GET_GS: {
 		unsigned long base;
-		unsigned gsindex;
-		if (task->thread.gsindex == GS_TLS_SEL)
-			base = read_32bit_tls(task, GS_TLS);
-		else if (doit) {
-			savesegment(gs, gsindex);
-			if (gsindex)
+		if (doit)
 #ifdef CONFIG_L4
-				base = l4x_vcpu_ptr[smp_processor_id()]->r.gs_base;
+			base = l4x_vcpu_ptr[smp_processor_id()]->r.gs_base;
 #else
-				rdmsrl(MSR_KERNEL_GS_BASE, base);
+			rdmsrl(MSR_KERNEL_GS_BASE, base);
 #endif
-			else
-				base = task->thread.gs;
-		} else
-			base = task->thread.gs;
+		else
+			base = task->thread.gsbase;
 		ret = put_user(base, (unsigned long __user *)addr);
 		break;
 	}

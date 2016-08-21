@@ -3,6 +3,7 @@
 
 #include <linux/stringify.h>
 
+#ifndef MODULE
 #ifdef CONFIG_ARM
 
 //#define L4X_ASSUME_READONLY_TEXT
@@ -80,5 +81,10 @@
 #define L4_EXTERNAL_FUNC_VARGS(func) L4_EXTERNAL_FUNC_GEN(func, RAX_SETUP)
 
 #endif
+#endif /* MODULE */
+
+#define L4_EXTERNAL_FUNC_AND_EXPORT(func) \
+		L4_EXTERNAL_FUNC(func); \
+		EXPORT_SYMBOL(func)
 
 #endif /* __INCLUDE__ASM_L4__GENERIC__L4LIB_H__ */

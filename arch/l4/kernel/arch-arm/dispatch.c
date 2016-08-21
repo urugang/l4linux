@@ -243,8 +243,8 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #else
 	TBUF_LOG_SWITCH(
 	     fiasco_tbuf_log_3val("SWITCH",
-				  TBUF_TID(prev->thread.user_thread_id),
-				  TBUF_TID(next->thread.user_thread_id),
+				  TBUF_TID(prev->thread.l4x.user_thread_id),
+				  TBUF_TID(next->thread.l4x.user_thread_id),
 				  0));
 #endif /* VCPU */
 
@@ -268,7 +268,6 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #ifndef CONFIG_L4_VCPU
 	per_cpu(l4x_current_ti, smp_processor_id())
 	  = (struct thread_info *)((unsigned long)next->stack & ~(THREAD_SIZE - 1));
-	BUILD_BUG_ON(ARRAY_SIZE(next->thread.user_thread_ids) <= NR_CPUS);
 #endif /* VCPU */
 
 #ifdef CONFIG_L4_ARM_UPAGE_TLS
@@ -276,7 +275,7 @@ void l4x_switch_to(struct task_struct *prev, struct task_struct *next)
 #endif
 
 #if defined(CONFIG_SMP) && !defined(CONFIG_L4_VCPU)
-	next->thread.user_thread_id = next->thread.user_thread_ids[smp_processor_id()];
+	next->thread.l4x.user_thread_id = next->thread.l4x.user_thread_ids[smp_processor_id()];
 	l4x_stack_struct_get(next->stack)->utcb
 		= l4x_stack_struct_get(prev->stack)->utcb;
 #endif
@@ -702,7 +701,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 #ifndef CONFIG_L4_VCPU
 	if (l4x_is_triggered_exception_from_err(err)) {
 		/* we come here for suspend events */
-		TBUF_LOG_SUSPEND(fiasco_tbuf_log_3val("dsp susp", TBUF_TID(t->user_thread_id), regs->ARM_pc, 0));
+		TBUF_LOG_SUSPEND(fiasco_tbuf_log_3val("dsp susp", TBUF_TID(t->l4x.user_thread_id), regs->ARM_pc, 0));
 
 		l4x_kuser_cmpxchg_check_and_fixup(regs);
 		l4x_dispatch_suspend(p, t);
@@ -714,7 +713,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 	// adjust pc to point at the insn
 	regs->ARM_pc -= thumb_mode(regs) ? 2 : 4;
 
-	//fiasco_tbuf_log_3val("EXC", TBUF_TID(t->user_thread_id), regs->ARM_pc, err);
+	//fiasco_tbuf_log_3val("EXC", TBUF_TID(t->l4x.user_thread_id), regs->ARM_pc, err);
 
 	if ((err >> 26) == 0x11) {
 #if defined(CONFIG_OABI_COMPAT) || defined(CONFIG_ARM_THUMB) || !defined(CONFIG_AEABI)
@@ -781,7 +780,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 #endif
 
 
-		TBUF_LOG_SWI(fiasco_tbuf_log_3val("swi    ", TBUF_TID(t->user_thread_id), regs->ARM_pc, scno));
+		TBUF_LOG_SWI(fiasco_tbuf_log_3val("swi    ", TBUF_TID(t->l4x.user_thread_id), regs->ARM_pc, scno));
 
 		regs->ARM_pc += thumb_mode(regs) ? 2 : 4;
 
@@ -824,7 +823,7 @@ static inline int l4x_dispatch_exception(struct task_struct *p,
 #endif
 	}
 
-	TBUF_LOG_EXCP(fiasco_tbuf_log_3val("except ", TBUF_TID(t->user_thread_id), err, regs->ARM_pc));
+	TBUF_LOG_EXCP(fiasco_tbuf_log_3val("except ", TBUF_TID(t->l4x.user_thread_id), err, regs->ARM_pc));
 
 #ifdef CONFIG_VFP
 	if ((err >> 26) == 0x07

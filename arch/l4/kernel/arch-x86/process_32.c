@@ -318,8 +318,8 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 */
 	if (next_p->mm
 #ifndef CONFIG_L4_VCPU
-	    && !l4_is_invalid_cap(next->user_thread_id)
-	    && next->user_thread_id
+	    && !l4_is_invalid_cap(next->l4x.user_thread_id)
+	    && next->l4x.user_thread_id
 #endif /* L4_VCPU */
 	   )
 	load_TLS(next, cpu);
@@ -373,7 +373,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	this_cpu_write(current_task, next_p);
 
 #if defined(CONFIG_SMP) && !defined(CONFIG_L4_VCPU)
-	next->user_thread_id = next->user_thread_ids[cpu];
+	next->l4x.user_thread_id = next->l4x.user_thread_ids[cpu];
 	l4x_stack_struct_get(next_p->stack)->utcb
 		= l4x_stack_struct_get(prev_p->stack)->utcb;
 #endif /* SMP && !L4_VCPU */

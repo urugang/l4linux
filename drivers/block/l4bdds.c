@@ -115,10 +115,13 @@ static int getgeo(struct block_device *bdev, struct hd_geometry *geo)
 }
 
 static long l4bdds_direct_access(struct block_device *bdev, sector_t sector,
-                                 void __pmem **kaddr, pfn_t *pfn)
+                                 void __pmem **kaddr, pfn_t *pfn, long size)
 {
 	struct l4bdds_device *dev = bdev->bd_disk->private_data;
 	loff_t off = sector << KERNEL_SECTOR_SHIFT;
+
+	if (unlikely(off + size > dev->ds_size))
+		return -EIO;
 
 	*kaddr = dev->ds_addr + off;
 	*pfn = phys_to_pfn_t(__pa(*kaddr), PFN_DEV);
@@ -250,6 +253,9 @@ static void __exit l4bdds_exit_one(int nr)
 static void __exit l4bdds_exit(void)
 {
 	int i;
+
+	if (!devs_pos)
+		return;
 
 	for (i = 0; i < devs_pos; i++)
 		l4bdds_exit_one(i);

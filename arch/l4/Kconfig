@@ -166,7 +166,7 @@ config L4_SERVER_FDX
 	  Shared-memory-based data transfer service FDX.
 
 config L4_BLK_DS_DRV
-	bool "Block driver for dataspaces"
+	tristate "Block driver for dataspaces"
 	help
 	  This driver implements block devices which are backed by L4Re
 	  dataspaces.
@@ -295,7 +295,8 @@ config L4_DEBUG_REGISTER_NAMES
 	help
 	  The program names of Linux programs can be registered so that they
 	  show up in various debugging aids that are displaying thread
-	  information.
+	  information. Note, this requires the "jdb" capability to be passed
+	  to L4Linux.
 
 config L4_DEBUG_SEGFAULTS
 	bool "Print error information on user program segfaults"

@@ -29,7 +29,6 @@ CONFIG_PARTITION_ADVANCED=y
 CONFIG_SMP=y
 # CONFIG_DMI is not set
 # CONFIG_X86_MCE is not set
-# CONFIG_MICROCODE is not set
 # CONFIG_COMPACTION is not set
 # CONFIG_MTRR is not set
 # CONFIG_X86_SMAP is not set
